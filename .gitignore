@@ -1,3 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+out/
+harnesses/
+.venv/
 # ── Python ──
 __pycache__/
 *.pyc
