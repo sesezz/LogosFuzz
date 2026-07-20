@@ -1,0 +1,6 @@
+﻿build/
+out.json
+Bear64.exe
+*.pyc
+__pycache__/
+.venv/
