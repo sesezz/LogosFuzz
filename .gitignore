@@ -1,0 +1,55 @@
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# ── 가상환경 ──
+venv/
+.venv/
+env/
+
+# ── 환경변수/API 키 (절대 커밋하면 안 됨) ──
+.env
+.env.local
+*.key
+config/secrets.yaml
+
+# ── IDE / 에디터 ──
+.vscode/
+.idea/
+*.code-workspace
+
+# ── OS 관련 ──
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── OneDrive 동기화 충돌 파일 ──
+*.tmp
+~$*
+
+# ── 프로젝트 산출물 (LogosFuzz 특화) ──
+# 퍼징 결과/크래시 로그
+crashes/
+corpus/
+*.log
+
+# 지식베이스(Vector DB) 로컬 캐시
+vector_db/
+*.faiss
+*.index
+
+# Docker 관련
+*.pid
+
+# 컴파일 산출물 (하네스 빌드 결과)
+*.o
+*.out
+a.out
