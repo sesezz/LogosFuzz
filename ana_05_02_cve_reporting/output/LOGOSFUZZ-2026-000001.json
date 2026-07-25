@@ -1,0 +1,82 @@
+{
+  "report_id": "LOGOSFUZZ-2026-000001",
+  "crash_id": "CR-000123",
+  "title": "dlt-daemon: heap buffer overflow (/src/dlt-daemon/src/shared/dlt_common.c:842:12)",
+  "description": "LogosFuzz 퍼징 과정에서 함수 `int dlt_message_read(DltMessage *msg, uint8_t *buffer, unsigned int length, int resync, int verbose)` 호출 경로에서 AddressSanitizer가 heap buffer overflow를 탐지했다. 대상 라이브러리: dlt-daemon. LLM 기반 정탐/오탐 판별 결과: true_positive (신뢰도 0.93). 스택트레이스가 dlt_message_read 내부의 헤더 길이 필드(length)를 검증 없이 그대로 사용해 4바이트 초과 읽기가 발생함을 보여준다. 할당 크기(4바이트)와 읽기 시도 위치가 정확히 경계 바로 다음이며, 재실행 시 100% 재현되어 정탐으로 판단.",
+  "cwe": {
+    "id": "CWE-122",
+    "name": "Heap-based Buffer Overflow",
+    "related_ids": [
+      "CWE-787",
+      "CWE-125"
+    ]
+  },
+  "cvss": {
+    "version": "3.1",
+    "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "base_score": 9.8,
+    "severity": "Critical",
+    "is_estimated": true
+  },
+  "affected_component": {
+    "library_name": "dlt-daemon",
+    "version": "2.18.10",
+    "function_signature": "int dlt_message_read(DltMessage *msg, uint8_t *buffer, unsigned int length, int resync, int verbose)",
+    "repository_url": "https://github.com/COVESA/dlt-daemon"
+  },
+  "reproduction": {
+    "harness_id": "H-0099",
+    "harness_code_path": "harness/dlt_message_read_harness.c",
+    "poc_input_path": "corpus/crashes/id_000012_dlt_header",
+    "run_id": "RUN-2026-0007",
+    "reproduction_steps": [
+      "1. 대상 라이브러리를 빌드하고 하네스(harness/dlt_message_read_harness.c)를 컴파일한다.",
+      "2. 아래 PoC 입력값을 하네스의 표준 입력/인자로 전달하여 실행한다.",
+      "   실행 예: ./harness_bin corpus/crashes/id_000012_dlt_header",
+      "3. /src/dlt-daemon/src/shared/dlt_common.c:842:12 위치에서 sanitizer 크래시가 재현되는지 확인한다."
+    ]
+  },
+  "crash_details": {
+    "sanitizer": "AddressSanitizer",
+    "error_type": "heap-buffer-overflow",
+    "summary_line": "==31337==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000050 at pc 0x0000004d6a1a bp 0x7ffd6b3a1a10 sp 0x7ffd6b3a1a08",
+    "crash_location": "/src/dlt-daemon/src/shared/dlt_common.c:842:12",
+    "access_type": "READ",
+    "access_size": 4,
+    "fault_address": "0x602000000050",
+    "stack_trace": [
+      {
+        "frame": 0,
+        "function": "dlt_message_read",
+        "location": "/src/dlt-daemon/src/shared/dlt_common.c:842:12"
+      },
+      {
+        "frame": 1,
+        "function": "LLVMFuzzerTestOneInput",
+        "location": "/src/harness/dlt_message_read_harness.c:41:5"
+      },
+      {
+        "frame": 2,
+        "function": "fuzzer::Fuzzer::ExecuteCallback(unsigned",
+        "location": "char const*, unsigned long) /src/libFuzzer/FuzzerLoop.cpp:611:15"
+      }
+    ],
+    "freed_at_location": null,
+    "allocated_at_location": "/src/dlt-daemon/src/shared/dlt_common.c:820:20",
+    "raw_asan_log": "==31337==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000050 at pc 0x0000004d6a1a bp 0x7ffd6b3a1a10 sp 0x7ffd6b3a1a08\nREAD of size 4 at 0x602000000050 thread T0\n    #0 0x4d6a19 in dlt_message_read /src/dlt-daemon/src/shared/dlt_common.c:842:12\n    #1 0x4d5b02 in LLVMFuzzerTestOneInput /src/harness/dlt_message_read_harness.c:41:5\n    #2 0x51f2b3 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/libFuzzer/FuzzerLoop.cpp:611:15\n\n0x602000000050 is located 0 bytes to the right of 4-byte region [0x602000000040,0x602000000050)\nallocated by thread T0 here:\n    #0 0x4a9d2f in malloc /src/llvm/compiler-rt/lib/asan/asan_malloc_linux.cpp:69:3\n    #1 0x4d69a0 in dlt_message_read /src/dlt-daemon/src/shared/dlt_common.c:820:20\n\nSUMMARY: AddressSanitizer: heap-buffer-overflow /src/dlt-daemon/src/shared/dlt_common.c:842:12 in dlt_message_read\n"
+  },
+  "triage": {
+    "verdict": "true_positive",
+    "confidence": 0.93,
+    "rationale": "스택트레이스가 dlt_message_read 내부의 헤더 길이 필드(length)를 검증 없이 그대로 사용해 4바이트 초과 읽기가 발생함을 보여준다. 할당 크기(4바이트)와 읽기 시도 위치가 정확히 경계 바로 다음이며, 재실행 시 100% 재현되어 정탐으로 판단.",
+    "triage_model": "deepseek-r1"
+  },
+  "discovered_at": "2026-07-25T18:37:57.231809+00:00",
+  "discovery_tool": "LogosFuzz + AFL++/libFuzzer + AddressSanitizer",
+  "status": "draft",
+  "references": [
+    "harness:H-0099",
+    "run:RUN-2026-0007",
+    "api:API-0042"
+  ]
+}
