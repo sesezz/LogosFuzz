@@ -20,7 +20,7 @@ import shlex
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -31,6 +31,7 @@ from logosfuzz.execute.errors import (
     ImageBuildError,
 )
 from logosfuzz.execute.stats import LiveStats, StatsMonitor
+from logosfuzz.execute.sanitizer import SanitizerFinding, SanitizerMonitor
 
 
 # executor(argv, timeout, on_line) -> ProcResult
@@ -54,6 +55,7 @@ class GroupResult:
     stats: LiveStats
     crashes: list  # 수집된 크래시 경로(fuzz_session이 채움)
     duration_sec: float
+    sanitizer_findings: list[SanitizerFinding] = field(default_factory=list)
 
     @property
     def crashed(self) -> bool:
@@ -195,7 +197,8 @@ class DockerIsolationRunner:
                 "--", harness, "@@"]
 
     # ---- 그룹 1개 실행 ------------------------------------------------
-    def run_group(self, group: LogicGroup, monitor: Optional[StatsMonitor] = None) -> GroupResult:
+    def run_group(self, group: LogicGroup, monitor: Optional[StatsMonitor] = None,
+                  sanitizer_monitor: Optional[SanitizerMonitor] = None) -> GroupResult:
         harness_file = self.config.harness_dir / group.harness_path.name
         if not harness_file.exists():
             raise HarnessNotFoundError(
@@ -210,9 +213,16 @@ class DockerIsolationRunner:
         # 엔진이 스스로 종료하지 못할 경우를 대비한 하드 월클럭 상한(+ grace).
         hard_timeout = self.config.timeout_sec + 30
         start = time.monotonic()
-        result = self.executor(argv, hard_timeout, mon.feed)
+        sanitizer = sanitizer_monitor or SanitizerMonitor()
+
+        def on_line(line: str) -> None:
+            mon.feed(line)
+            sanitizer.feed(line)
+
+        result = self.executor(argv, hard_timeout, on_line)
         duration = time.monotonic() - start
         mon.finish()
+        findings = sanitizer.finish()
 
         return GroupResult(
             group=group.name,
@@ -221,4 +231,5 @@ class DockerIsolationRunner:
             stats=stats,
             crashes=[],
             duration_sec=duration,
+            sanitizer_findings=findings,
         )
