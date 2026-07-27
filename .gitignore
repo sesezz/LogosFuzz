@@ -7,6 +7,11 @@ dist/
 out/
 harnesses/
 .venv/
+
+# ── Bear 빌드 통합 산출물 ──
+out.json
+Bear64.exe
+
 # ── Python ──
 __pycache__/
 *.pyc
