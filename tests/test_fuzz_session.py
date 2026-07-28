@@ -51,3 +51,23 @@ def test_session_runs_all_groups_and_collects_crash(tmp_path):
     assert saved["total_groups"] == 2
     # 크래시가 crashes/grpB 아래로 보존됐는지
     assert (cfg.crashes_dir / "grpB").exists()
+
+
+def test_session_writes_sanitizer_events_for_ana(tmp_path):
+    cfg = _cfg(tmp_path)
+    group = _harness(cfg, "asan-group")
+
+    def fake_executor(argv, timeout, on_line):
+        on_line("ERROR: AddressSanitizer: heap-use-after-free")
+        on_line("    #0 0x1 in read /src/uds.c:73:4")
+        return ProcResult(exit_code=1, timed_out=False)
+
+    runner = DockerIsolationRunner(cfg, executor=fake_executor)
+    session = FuzzSession(cfg, runner=runner, stream=io.StringIO())
+    summary = session.run([group], ensure_image=False)
+
+    finding = summary.groups[0].sanitizer_findings[0]
+    assert finding.signature == "use-after-free_uds_c_73"
+    event_file = cfg.logs_dir / "sanitizer" / "asan-group.jsonl"
+    event = json.loads(event_file.read_text().strip())
+    assert event["category"] == "use-after-free"

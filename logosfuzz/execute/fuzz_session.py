@@ -20,6 +20,7 @@ from logosfuzz.config import FuzzConfig, LogicGroup
 from logosfuzz.execute.crash_collector import CrashCollector
 from logosfuzz.execute.docker_runner import DockerIsolationRunner, GroupResult
 from logosfuzz.execute.stats import LiveStats, StatsMonitor
+from logosfuzz.execute.sanitizer import SanitizerMonitor, write_findings
 
 
 @dataclass
@@ -52,6 +53,7 @@ class SessionSummary:
                     "exec_per_sec": g.stats.exec_per_sec,
                     "coverage": g.stats.coverage,
                     "crashes": [str(p) for p in g.crashes],
+                    "sanitizer_findings": [f.to_dict() for f in g.sanitizer_findings],
                 }
                 for g in self.groups
             ],
@@ -94,11 +96,24 @@ class FuzzSession:
             self._log(f"\n[{i}/{len(groups)}] 로직 그룹 '{group.name}' 격리 퍼징 시작")
             stats = LiveStats(group=group.name)
             monitor = StatsMonitor(stats, stream=self.stream, live=True)
+            sanitizer_monitor = SanitizerMonitor(
+                on_finding=lambda finding: self._log(
+                    f"  >>> [SANITIZER:{finding.sanitizer}] "
+                    f"{finding.category} ({finding.signature})"
+                )
+            )
 
             # 그룹 실행 전 크래시 baseline
             before = set(self.config.crashes_dir.rglob("*"))
-            result: GroupResult = self.runner.run_group(group, monitor=monitor)
+            result: GroupResult = self.runner.run_group(
+                group, monitor=monitor, sanitizer_monitor=sanitizer_monitor
+            )
             result.stats = stats
+            if result.sanitizer_findings:
+                write_findings(
+                    self.config.logs_dir / "sanitizer" / f"{group.name}.jsonl",
+                    result.sanitizer_findings,
+                )
 
             # 크래시 수집 및 강조
             saved = self.collector.collect(group.name, self._crash_search_dirs(group))

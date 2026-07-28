@@ -20,12 +20,15 @@ except Exception:
     HAVE_CLANG = False
 
 
-def analyze_with_clang(path):
-    index = cindex.Index.create()
+def analyze_with_clang(path, clang_args=None):
+    if clang_args is None:
+        clang_args = ['-std=c11']
+
     try:
-        tu = index.parse(path, args=['-std=c11'])
-    except Exception as e:
-        return {'file': path, 'error': f'libclang parse error: {e}'}
+        index = cindex.Index.create()
+        tu = index.parse(path, args=clang_args)
+    except Exception:
+        return analyze_simple(path)
 
     nodes = []
 
@@ -53,9 +56,9 @@ def analyze_simple(path):
     return {'file': path, 'includes': includes, 'functions': list(dict.fromkeys(funcs)), 'counts': counts}
 
 
-def analyze_file(path):
+def analyze_file(path, clang_args=None):
     if HAVE_CLANG:
-        return analyze_with_clang(path)
+        return analyze_with_clang(path, clang_args=clang_args)
     else:
         return analyze_simple(path)
 
