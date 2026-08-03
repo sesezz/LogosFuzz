@@ -20,5 +20,5 @@ logosfuzz = "logosfuzz.cli:main"
 packages = ["logosfuzz", "logosfuzz.execute"]
 
 [tool.pytest.ini_options]
-testpaths = ["ana_05_02_cve_reporting/tests"]
+testpaths = ["tests", "ana_05_02_cve_reporting/tests"]
 pythonpath = [".", "ana_05_02_cve_reporting"]
