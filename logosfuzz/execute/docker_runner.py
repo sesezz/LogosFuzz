@@ -56,6 +56,7 @@ class GroupResult:
     crashes: list  # 수집된 크래시 경로(fuzz_session이 채움)
     duration_sec: float
     sanitizer_findings: list[SanitizerFinding] = field(default_factory=list)
+    coverage: object = None  # EXE-04-04 CoverageSummary(없으면 None); fuzz_session이 채움
 
     @property
     def crashed(self) -> bool:
@@ -176,10 +177,22 @@ class DockerIsolationRunner:
         argv += [
             "-e", f"ASAN_OPTIONS={c.asan_options}",
             "-e", f"TSAN_OPTIONS={c.tsan_options}",
+        ]
+        # EXE-04-04: 커버리지 계측 활성 시 profraw 출력 경로를 환경변수로 주입.
+        for k, v in self._coverage_env_pairs(group, in_docker=True).items():
+            argv += ["-e", f"{k}={v}"]
+        argv += [
             c.image,
             "bash", "-lc", self._in_container_cmd(group),
         ]
         return argv
+
+    def _coverage_env_pairs(self, group: LogicGroup, *, in_docker: bool) -> dict:
+        """EXE-04-04 커버리지 환경변수(LLVM_PROFILE_FILE 등). NONE이면 빈 dict."""
+        # 지연 임포트로 config→execute 순환 의존을 피한다.
+        from logosfuzz.execute.coverage import profile_env
+
+        return profile_env(group, self.config, in_docker=in_docker)
 
     def _local_argv(self, group: LogicGroup) -> list:
         """--docker 미사용 시(디버그) 호스트에서 직접 실행하는 커맨드."""
@@ -191,10 +204,16 @@ class DockerIsolationRunner:
                     "-print_final_stats=1"]
             if group.corpus_dir:
                 argv.append(str(group.corpus_dir))
-            return argv
-        return ["afl-fuzz", "-i", str(group.corpus_dir or "/tmp/seed"),
-                "-o", str(self.config.output_dir / "afl"), "-V", str(t),
-                "--", harness, "@@"]
+        else:
+            argv = ["afl-fuzz", "-i", str(group.corpus_dir or "/tmp/seed"),
+                    "-o", str(self.config.output_dir / "afl"), "-V", str(t),
+                    "--", harness, "@@"]
+        # 호스트 실행에서는 env 프리픽스로 커버리지 환경변수를 주입한다
+        # (기본 executor 시그니처를 바꾸지 않기 위함).
+        pairs = self._coverage_env_pairs(group, in_docker=False)
+        if pairs:
+            argv = ["env", *[f"{k}={v}" for k, v in pairs.items()], *argv]
+        return argv
 
     # ---- 그룹 1개 실행 ------------------------------------------------
     def run_group(self, group: LogicGroup, monitor: Optional[StatsMonitor] = None,
