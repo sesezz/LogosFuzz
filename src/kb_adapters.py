@@ -119,6 +119,68 @@ def _synergy_classes():
         return ApiMetadata, Constraint
 
 
+def _api_context_class():
+    """GEN-03-01 의 ApiContext. 임포트할 수 없으면 같은 필드의 대체 클래스."""
+    try:
+        # 이 모듈은 최상단에서 openai 를 임포트하므로 openai 가 없으면 실패한다.
+        from logosfuzz.generate.gen_03_01_harness_generator import ApiContext
+
+        return ApiContext
+    except Exception:
+        from dataclasses import dataclass
+
+        @dataclass
+        class ApiContext:  # type: ignore[no-redef]
+            api_id: int
+            func_signature: str
+            call_order: list
+            constraints: list
+            source_type: str
+
+        return ApiContext
+
+
+def to_api_contexts(kb: KnowledgeBase, api_ids: Optional[Sequence[int]] = None,
+                    min_confidence: float = 0.0,
+                    max_constraints: int = 8) -> Dict[int, object]:
+    """GEN-03-01 의 `VECTOR_DB_MOCK` 을 대체하는 {api_id: ApiContext} 를 만든다.
+
+    목업 dict 자리에 그대로 넣으면 된다.
+
+        VECTOR_DB_MOCK.update(to_api_contexts(kb))
+    """
+    context_cls = _api_context_class()
+    wanted = set(api_ids) if api_ids is not None else None
+
+    contexts: Dict[int, object] = {}
+    for document in kb.documents:
+        api_id = document["api_id"]
+        if wanted is not None and api_id not in wanted:
+            continue
+
+        constraints = [
+            c["description"] for c in document["constraints"]
+            if c.get("confidence", 0.0) >= min_confidence
+        ][:max_constraints]
+
+        # 호출 순서: 이 API 가 등장하는 시퀀스를 함수 이름으로 되돌린다.
+        by_id = {str(d["api_id"]): d["function"] for d in kb.documents}
+        call_order = [by_id[i] for i in document.get("call_seq_ids", []) if i in by_id]
+        if not call_order:
+            call_order = [document["function"]] + list(document.get("calls_internal", []))
+
+        contexts[api_id] = context_cls(
+            api_id=api_id,
+            func_signature=document["signature"],
+            call_order=call_order,
+            constraints=constraints or ["no constraint extracted from source"],
+            source_type=default_source_type(
+                document["constraints"][0] if document["constraints"] else {}, document
+            ),
+        )
+    return contexts
+
+
 def call_sequences_by_file(kb: KnowledgeBase) -> Dict[str, List[str]]:
     """파일별로 관찰된 내부 API 호출 순서.
 
@@ -155,8 +217,16 @@ def harness_context(kb: KnowledgeBase, target: str, max_constraints: int = 12) -
         f"signature: {document['signature']}",
     ]
     if document.get("header"):
-        lines.append(f'include: #include "{as_include_path(document["header"])}"')
-    if document.get("compile_flags"):
+        # 헤더 이름만 쓰고 디렉터리는 -I 로 넘긴다. 전체 경로를 #include 에 넣으면
+        # 하네스 위치에 따라 컴파일이 깨진다(suggest_fixes 와 같은 규칙).
+        include_name, include_dir = _include_parts(document["header"])
+        lines.append(f'include: #include "{include_name}"')
+        flags = list(document.get("compile_flags") or [])
+        if include_dir and f"-I{include_dir}" not in flags:
+            flags.insert(0, f"-I{include_dir}")
+        if flags:
+            lines.append(f"compile flags: {' '.join(flags)}")
+    elif document.get("compile_flags"):
         lines.append(f"compile flags: {' '.join(document['compile_flags'])}")
     if document.get("doc"):
         lines.append(f"doc: {document['doc']}")
