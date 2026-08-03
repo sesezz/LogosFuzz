@@ -80,8 +80,44 @@ print(results)
 
 - `examples/build_sample.sh`: 단순 빌드 샘플 생성
 - `examples/run_bear_example.py`: `bear`를 사용하여 `compile_commands.json` 생성
+- `examples/parser_sample.c`: 제약조건 추출 예시 소스
 
 > `bear` 실행 파일이 PATH에 없으면 `FileNotFoundError`가 발생합니다.
+
+## EXT-01-02 RAG 제약조건 추출
+
+C/C++ 소스에서 함수별 API 제약조건(NULL 검사, 버퍼·길이 쌍, 범위 검사, 자원 해제 책임 등)을
+추출하여 RAG 지식베이스로 색인합니다. 하네스 생성기(GEN-03-01)가 이 지식베이스에 질의해
+프롬프트 컨텍스트를 얻습니다. 자세한 내용은 [docs/EXT-01-02.md](docs/EXT-01-02.md) 참고.
+
+```bash
+# 지식베이스 구축 (경로 또는 compile_commands.json 기반)
+python -m src.rag_constraints build --paths examples --output build/kb.json
+python -m src.rag_constraints build --compile-db build/compile_commands.json --output build/kb.json
+
+# 검색 (한국어 질의 지원)
+python -m src.rag_constraints query --kb build/kb.json "버퍼 길이 제약" --top-k 3
+
+# 하네스 생성용 컨텍스트 블록
+python -m src.rag_constraints context --kb build/kb.json --function parse_header
+
+# 커버리지 통계 (6주차 API 추출 정확도 평가용)
+python -m src.rag_constraints stats --kb build/kb.json
+```
+
+파이썬에서 직접 사용하려면:
+
+```python
+from src.rag_constraints import ConstraintKB
+
+kb = ConstraintKB.load("build/kb.json")
+print(kb.context_for("parse_header"))      # LLM 프롬프트에 넣을 텍스트 블록
+print(kb.constraints_of("parse_header"))   # 구조화된 제약조건 목록
+print(kb.search("메모리 해제 책임", top_k=5))
+```
+
+> 외부 의존성 없이 BM25 검색기로 동작합니다. `sentence-transformers`가 설치되어 있으면
+> `--dense` 옵션으로 밀집 검색을 함께 사용할 수 있습니다.
 
 ## 커밋 메시지 규칙
 
