@@ -153,6 +153,9 @@ class FunctionFacts:
     params: List[Param] = field(default_factory=list)
     doc: str = ""
     calls: List[str] = field(default_factory=list)
+    # 본문에 나타난 순서 그대로의 호출 목록(중복 포함). SCH-02-02 의 call_seq
+    # ("소비자 코드에서 뽑은 실제 호출 순서")를 만들려면 순서가 필요하다.
+    call_sequence: List[str] = field(default_factory=list)
     constraints: List[Constraint] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -165,6 +168,7 @@ class FunctionFacts:
             "params": [p.to_dict() for p in self.params],
             "doc": self.doc,
             "calls": self.calls,
+            "call_sequence": self.call_sequence,
             "constraints": [c.to_dict() for c in self.constraints],
         }
 
@@ -797,6 +801,15 @@ def _doc_constraints(doc: str, line: int) -> List[Constraint]:
 # ---------------------------------------------------------------------------
 
 
+def doc_constraints(doc: str, line: int) -> List[Constraint]:
+    """주석 텍스트만으로 제약조건을 뽑는다.
+
+    EXT-01-04 가 헤더 선언부의 문서를 구현 함수에 결합할 때 쓴다. C 프로젝트는
+    보통 `.h` 의 선언에 문서를 달고 `.c` 의 정의에는 달지 않는다.
+    """
+    return _doc_constraints(doc, line)
+
+
 def extract_from_text(text: str, path: str = "<memory>") -> List[FunctionFacts]:
     masked = mask_source(text)
     index = LineIndex(text)
@@ -854,6 +867,7 @@ def extract_from_text(text: str, path: str = "<memory>") -> List[FunctionFacts]:
                 params=params,
                 doc=doc,
                 calls=sorted(set(calls)),
+                call_sequence=calls,
                 constraints=dedupe_constraints(constraints),
             )
         )
