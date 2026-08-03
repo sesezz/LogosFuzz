@@ -16,15 +16,12 @@ dev = ["pytest>=7.0"]
 [project.scripts]
 logosfuzz = "logosfuzz.cli:main"
 
-[tool.setuptools]
-packages = [
-    "logosfuzz",
-    "logosfuzz.common",
-    "logosfuzz.control",
-    "logosfuzz.control.hitl",
-    "logosfuzz.execute",
-    "logosfuzz.generate",
-]
+# 패키지 목록도 고정하지 않는다. 목록을 두면 새 파트가 서브패키지를 만들 때마다
+# 등록해야 하고, 빠뜨리면 설치본에서 조용히 누락된다(common/control/generate 가
+# 실제로 빠져 있었다). 테스트 패키지는 배포본에서 제외한다.
+[tool.setuptools.packages.find]
+include = ["logosfuzz*"]
+exclude = ["*.tests", "*.tests.*"]
 
 [tool.pytest.ini_options]
 # testpaths 를 고정하지 않는다. 목록을 두면 새 파트가 테스트 폴더를 추가할
