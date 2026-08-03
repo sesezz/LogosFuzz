@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Test / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build output
+build/
+dist/
+*.o
+*.out
+a.out
+
+# Secrets and local config
+.env
+.env.local
+*.key
+config/secrets.yaml
+
+# IDE / editor
+.vscode/
+.idea/
+*.code-workspace
+
+# Claude Code local state
+.claude/settings.local.json
+.claude/worktrees/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+~$*
+
+# ---- LogosFuzz artifacts ----
+
+# Fuzzing results
+crashes/
+corpus/
+harnesses/
+*.log
+
+# Generated reports and analysis output
+out/
+output/
+ana_05_02_cve_reporting/output/
+
+# Knowledge base / vector store caches
+vector_db/
+*.faiss
+*.index
+
+# Local toolchain binaries
+Bear64.exe
+*.pid
