@@ -77,7 +77,7 @@ def profile_env(group: LogicGroup, cfg: FuzzConfig, *, in_docker: bool) -> dict:
     if in_docker:
         base = f"/out/{cfg.coverage_subdir}/{group.name}"
     else:
-        base = str((cfg.coverage_dir / group.name))
+        base = (cfg.coverage_dir / group.name).as_posix()
     # %m: 프로세스별 온라인 병합 풀. libFuzzer(단일 프로세스)·AFL++(다중 프로세스)
     # 모두에서 profraw 충돌 없이 수집된다.
     return {"LLVM_PROFILE_FILE": f"{base}/%m.profraw"}

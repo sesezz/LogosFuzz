@@ -73,7 +73,7 @@ def test_profile_env_docker_and_host(tmp_path):
     d = profile_env(_group(), cfg, in_docker=True)["LLVM_PROFILE_FILE"]
     assert d == "/out/coverage/grpA/%m.profraw"
     h = profile_env(_group(), cfg, in_docker=False)["LLVM_PROFILE_FILE"]
-    assert h.endswith("coverage/grpA/%m.profraw") and str(tmp_path) in h
+    assert h.endswith("coverage/grpA/%m.profraw") and tmp_path.as_posix() in h
 
 
 # --- export 파서 -----------------------------------------------------------
