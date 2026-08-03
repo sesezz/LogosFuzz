@@ -119,6 +119,54 @@ print(kb.search("메모리 해제 책임", top_k=5))
 > 외부 의존성 없이 BM25 검색기로 동작합니다. `sentence-transformers`가 설치되어 있으면
 > `--dense` 옵션으로 밀집 검색을 함께 사용할 수 있습니다.
 
+## EXT-01-04 KB 통합 (B/D 지원)
+
+EXT-01-01(AST) · EXT-01-02(제약조건) · EXT-01-03(빌드 정보)을 하나의 지식베이스로 합치고,
+B/D 파트가 바로 쓸 수 있는 형태로 내보냅니다. 자세한 내용은
+[docs/EXT-01-04.md](docs/EXT-01-04.md) 참고.
+
+```bash
+python -m src.knowledge_base build --paths examples/uds --output build/kb.json
+python -m src.knowledge_base show  --kb build/kb.json --api uds_read_did
+python -m src.knowledge_base stats --kb build/kb.json
+```
+
+**B 파트 (SCH-02-02/03)** — 목업 하드코딩을 한 줄로 대체합니다. B의 파일은 수정하지 않습니다.
+
+```python
+from src.knowledge_base import KnowledgeBase
+from src.kb_adapters import to_synergy_inputs
+from sch_02_02_synergy_scheduler import compute_pairwise_synergy
+
+kb = KnowledgeBase.load("build/kb.json")
+apis, constraints = to_synergy_inputs(kb)       # ApiMetadata / Constraint 를 그대로 생성
+results = compute_pairwise_synergy(apis, constraints)
+```
+
+**B 파트 (GEN-03-01)** — 하네스 프롬프트 컨텍스트 (시그니처 + 제약조건 + include + 플래그):
+
+```python
+from src.kb_adapters import harness_context
+print(harness_context(kb, "uds_read_did"))
+```
+
+**D 파트 (GEN-03-02)** — 컴파일 에러 자가치유:
+
+```python
+from src.kb_adapters import suggest_fixes
+suggest_fixes(kb, compiler_stderr)
+# [{"error": "implicit_declaration", "action": "add_include",
+#   "detail": '#include "uds.h"', "compile_flag": "-Iexamples/uds", ...}]
+```
+
+**D 파트 (ANA-05-01/02)** — 리포트 조인 키와 판별 근거:
+
+```python
+from src.kb_adapters import api_reference, constraints_for_triage
+api_reference(kb, "uds_read_did")                                  # api_id/시그니처/헤더
+constraints_for_triage(kb, "uds_read_did", min_confidence=0.7)     # 신뢰도 높은 제약조건
+```
+
 ## 커밋 메시지 규칙
 
 - `feat`: 기능 추가
