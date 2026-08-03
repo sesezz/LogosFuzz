@@ -1,3 +1,6 @@
+import shutil
+import subprocess
+
 import pytest
 
 from src.kb_adapters import (
@@ -212,6 +215,51 @@ def test_harness_context_includes_build_information(kb):
     assert "signature:" in block
     assert '#include "' in block
     assert "constraints:" in block
+
+
+def test_harness_context_emits_header_name_not_full_path(kb):
+    """`#include "a/b/uds.h"` 는 포함하는 파일 기준으로 해석되어 컴파일이 깨진다.
+
+    하네스는 KB 와 다른 폴더에 생성되므로 헤더 이름 + -I 여야 한다.
+    """
+    block = harness_context(kb, "uds_read_did")
+
+    assert 'include: #include "uds.h"' in block
+    assert "/uds.h" not in block.split("constraints:")[0].replace("defined in:", "")
+
+
+def test_harness_context_supplies_the_include_directory(kb):
+    block = harness_context(kb, "uds_read_did")
+
+    assert "compile flags: -I" in block
+
+
+def test_harness_context_include_actually_compiles(kb, tmp_path):
+    """제안한 include + 플래그로 실제 컴파일되는지 확인한다."""
+    gcc = shutil.which("gcc") or shutil.which("clang")
+    if gcc is None:
+        pytest.skip("C 컴파일러가 없음")
+
+    block = harness_context(kb, "uds_read_did")
+    include_line = next(l for l in block.splitlines() if l.startswith("include:"))
+    flag_line = next(l for l in block.splitlines() if l.startswith("compile flags:"))
+    include_stmt = include_line.split("include: ", 1)[1]
+    flags = flag_line.split("compile flags: ", 1)[1].split()
+
+    # 하네스는 KB 소스와 다른 폴더에 생성된다
+    harness = tmp_path / "harness.c"
+    harness.write_text(
+        f"{include_stmt}\nint LLVMFuzzerTestOneInput(const char *d, long s) "
+        "{ (void)d; (void)s; return 0; }\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [gcc, "-c", str(harness), "-o", str(tmp_path / "harness.o"), *flags],
+        capture_output=True, text=True, errors="ignore",
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_harness_context_lists_call_relationships(kb):

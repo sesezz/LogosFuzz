@@ -155,8 +155,17 @@ def harness_context(kb: KnowledgeBase, target: str, max_constraints: int = 12) -
         f"signature: {document['signature']}",
     ]
     if document.get("header"):
-        lines.append(f'include: #include "{as_include_path(document["header"])}"')
-    if document.get("compile_flags"):
+        # 헤더 이름만 쓰고 디렉터리는 -I 로 넘긴다. `#include "..."` 는 그 문을
+        # 포함한 파일 기준으로 해석되므로, 저장소 기준 전체 경로를 넣으면
+        # 하네스가 다른 폴더에 있을 때 컴파일이 깨진다(suggest_fixes 와 같은 규칙).
+        include_name, include_dir = _include_parts(document["header"])
+        lines.append(f'include: #include "{include_name}"')
+        flags = list(document.get("compile_flags") or [])
+        if include_dir and f"-I{include_dir}" not in flags:
+            flags.insert(0, f"-I{include_dir}")
+        if flags:
+            lines.append(f"compile flags: {' '.join(flags)}")
+    elif document.get("compile_flags"):
         lines.append(f"compile flags: {' '.join(document['compile_flags'])}")
     if document.get("doc"):
         lines.append(f"doc: {document['doc']}")

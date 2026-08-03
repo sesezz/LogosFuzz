@@ -16,9 +16,15 @@ dev = ["pytest>=7.0"]
 [project.scripts]
 logosfuzz = "logosfuzz.cli:main"
 
-[tool.setuptools]
-packages = ["logosfuzz", "logosfuzz.execute"]
+# 패키지 목록을 고정하지 않는다. 목록을 두면 새 파트가 서브패키지를 만들 때마다
+# 등록해야 하고, 빠뜨리면 설치본에서 조용히 누락된다(common/control/generate 가
+# 실제로 빠져 있었다). 테스트 패키지는 배포본에서 제외한다.
+[tool.setuptools.packages.find]
+include = ["logosfuzz*"]
+exclude = ["*.tests", "*.tests.*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "ana_05_02_cve_reporting/tests"]
+# testpaths 도 고정하지 않는다. 목록을 두면 새 테스트 폴더를 추가할 때마다
+# 여기에 등록해야 하고, 빠뜨리면 CI 가 조용히 건너뛴다(실제로 세 번 발생했다).
+# norecursedirs 기본값이 .venv/build/dist 를 이미 제외하므로 전체를 훑어도 안전하다.
 pythonpath = [".", "ana_05_02_cve_reporting"]
