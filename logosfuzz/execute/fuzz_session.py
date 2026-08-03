@@ -16,11 +16,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from logosfuzz.config import FuzzConfig, LogicGroup
+from logosfuzz.config import CoverageMode, FuzzConfig, LogicGroup
 from logosfuzz.execute.crash_collector import CrashCollector
 from logosfuzz.execute.docker_runner import DockerIsolationRunner, GroupResult
 from logosfuzz.execute.stats import LiveStats, StatsMonitor
 from logosfuzz.execute.sanitizer import SanitizerMonitor, write_findings
+from logosfuzz.execute.coverage import CoverageCollector, write_coverage
 
 
 @dataclass
@@ -54,6 +55,8 @@ class SessionSummary:
                     "coverage": g.stats.coverage,
                     "crashes": [str(p) for p in g.crashes],
                     "sanitizer_findings": [f.to_dict() for f in g.sanitizer_findings],
+                    "coverage_report": g.coverage.to_dict()
+                    if getattr(g, "coverage", None) is not None else None,
                 }
                 for g in self.groups
             ],
@@ -62,11 +65,14 @@ class SessionSummary:
 
 class FuzzSession:
     def __init__(self, config: FuzzConfig, runner: Optional[DockerIsolationRunner] = None,
-                 stream=sys.stdout):
+                 stream=sys.stdout,
+                 coverage_collector: Optional[CoverageCollector] = None):
         self.config = config
         self.runner = runner or DockerIsolationRunner(config)
         self.stream = stream
         self.collector = CrashCollector(config.crashes_dir)
+        # EXE-04-04: 커버리지 수집기(테스트에서 주입 가능). NONE이면 사용되지 않음.
+        self.coverage_collector = coverage_collector or CoverageCollector(config)
 
     def _log(self, msg: str) -> None:
         self.stream.write(msg + "\n")
@@ -103,6 +109,11 @@ class FuzzSession:
                 )
             )
 
+            # EXE-04-04: 계측 활성 시 실행 전 그룹별 profraw 디렉토리를 준비한다
+            # (컨테이너가 /out 마운트에 profraw를 떨굴 수 있도록).
+            if self.config.coverage is not CoverageMode.NONE:
+                (self.config.coverage_dir / group.name).mkdir(parents=True, exist_ok=True)
+
             # 그룹 실행 전 크래시 baseline
             before = set(self.config.crashes_dir.rglob("*"))
             result: GroupResult = self.runner.run_group(
@@ -114,6 +125,23 @@ class FuzzSession:
                     self.config.logs_dir / "sanitizer" / f"{group.name}.jsonl",
                     result.sanitizer_findings,
                 )
+
+            # EXE-04-04: 실행 후 커버리지 후처리(profraw→profdata→llvm-cov export).
+            if self.config.coverage is not CoverageMode.NONE:
+                cov = self.coverage_collector.collect(group)
+                result.coverage = cov
+                if cov is not None:
+                    write_coverage(
+                        self.config.coverage_dir / f"{group.name}.summary.json", cov
+                    )
+                    self._log(
+                        f"  >>> [COVERAGE:{cov.mode}] lines "
+                        f"{cov.lines.covered}/{cov.lines.count} ({cov.lines.percent}%), "
+                        f"functions {cov.functions.covered}/{cov.functions.count} "
+                        f"({cov.functions.percent}%)"
+                    )
+                else:
+                    self._log("  - 커버리지 산출물 없음(계측 미빌드 또는 도구 실패), 건너뜀")
 
             # 크래시 수집 및 강조
             saved = self.collector.collect(group.name, self._crash_search_dirs(group))

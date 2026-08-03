@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-from logosfuzz.config import Engine, FuzzConfig, LogicGroup
+from logosfuzz.config import CoverageMode, Engine, FuzzConfig, LogicGroup
 from logosfuzz.execute.errors import ExecuteError
 from logosfuzz.execute.fuzz_session import FuzzSession
 
@@ -61,6 +61,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="로직 그룹 정의 JSON(미지정 시 harness-dir 자동 탐색)")
     f.add_argument("--image", default="logosfuzz-exec:latest", help="격리 이미지 태그")
     f.add_argument("--no-build", action="store_true", help="이미지 자동 빌드 생략")
+    f.add_argument("--coverage", default="none",
+                   help="커버리지 계측(EXE-04-04): none | llvm-cov | sancov (기본 none). "
+                        "하네스가 해당 계측 플래그로 빌드돼 있어야 수집된다.")
     return p
 
 
@@ -78,6 +81,7 @@ def main(argv: list | None = None) -> int:
             harness_dir=args.harness_dir,
             output_dir=args.output,
             image=args.image,
+            coverage=CoverageMode.parse(args.coverage),
         )
         groups = discover_groups(args.harness_dir, args.groups)
         if not groups:

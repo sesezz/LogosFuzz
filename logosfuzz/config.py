@@ -30,6 +30,37 @@ class Engine(str, enum.Enum):
         return alias[norm]
 
 
+class CoverageMode(str, enum.Enum):
+    """EXE-04-04 커버리지 계측 방식.
+
+    - ``NONE``          : 커버리지 후처리 비활성(기본). 기존 EXE-04-01/02 흐름과 동일.
+    - ``LLVM_COV``      : clang 소스 기반 커버리지(함수/라인/리전/브랜치, llvm-cov).
+    - ``SANITIZER_COV`` : SanitizerCoverage 엣지 계측(제어흐름 단위).
+    """
+
+    NONE = "none"
+    LLVM_COV = "llvm-cov"
+    SANITIZER_COV = "sancov"
+
+    @classmethod
+    def parse(cls, value: str) -> "CoverageMode":
+        norm = (value or "none").strip().lower()
+        alias = {
+            "none": cls.NONE, "off": cls.NONE, "": cls.NONE,
+            "llvm-cov": cls.LLVM_COV, "llvm": cls.LLVM_COV, "llvmcov": cls.LLVM_COV,
+            "source": cls.LLVM_COV, "profdata": cls.LLVM_COV,
+            "sancov": cls.SANITIZER_COV, "sanitizer": cls.SANITIZER_COV,
+            "sanitizer-coverage": cls.SANITIZER_COV, "edge": cls.SANITIZER_COV,
+        }
+        if norm not in alias:
+            from logosfuzz.execute.errors import ExecuteError
+
+            raise ExecuteError(
+                f"지원하지 않는 커버리지 모드: {value!r} (none | llvm-cov | sancov)"
+            )
+        return alias[norm]
+
+
 @dataclass(frozen=True)
 class LogicGroup:
     """SCH 단계가 만든 로직 그룹 단위의 퍼징 대상.
@@ -81,6 +112,15 @@ class FuzzConfig:
     asan_options: str = "abort_on_error=1:detect_leaks=1:symbolize=1"
     tsan_options: str = "halt_on_error=1:second_deadlock_stack=1"
 
+    # 커버리지 계측 (EXE-04-04). 기본 NONE → 기존 동작 불변, 옵트인 시에만 활성.
+    coverage: CoverageMode = CoverageMode.NONE
+    coverage_subdir: str = "coverage"          # output_dir 하위 profraw/profdata 위치
+    coverage_in_docker: bool = True            # llvm 도구를 이미지 안에서 실행할지
+    coverage_merge_sparse: bool = True         # llvm-profdata merge -sparse
+    coverage_sources: tuple = ()               # llvm-cov export 소스 필터(선택)
+    llvm_profdata: str = "llvm-profdata"       # 병합 도구 경로/이름
+    llvm_cov: str = "llvm-cov"                 # export 도구 경로/이름
+
     @property
     def crashes_dir(self) -> Path:
         return self.output_dir / "crashes"
@@ -89,6 +129,13 @@ class FuzzConfig:
     def logs_dir(self) -> Path:
         return self.output_dir / "logs"
 
+    @property
+    def coverage_dir(self) -> Path:
+        return self.output_dir / self.coverage_subdir
+
     def ensure_dirs(self) -> None:
-        for d in (self.output_dir, self.crashes_dir, self.logs_dir):
+        dirs = [self.output_dir, self.crashes_dir, self.logs_dir]
+        if self.coverage is not CoverageMode.NONE:
+            dirs.append(self.coverage_dir)
+        for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
