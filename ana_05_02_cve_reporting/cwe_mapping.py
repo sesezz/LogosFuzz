@@ -9,6 +9,8 @@ ANA-05-01(LLM 기반 정탐/오탐 판별) 단계에서 넘어오는 crash_repor
 1개를 primary로 두고 관련 CWE를 related 로 함께 기록한다.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 
