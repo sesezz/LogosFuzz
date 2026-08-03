@@ -92,7 +92,22 @@ INT_TYPE_RE = re.compile(
     r"\b(int|long|short|char|size_t|ssize_t|unsigned|signed|uint\w*|u?int\d+_t|"
     r"u?intptr_t|off_t|ptrdiff_t)\b"
 )
-EXIT_RE = re.compile(r"\b(return|goto|abort|exit|longjmp|throw|break|continue)\b")
+# 분기 본문이 "입력을 거부하는 경로"인지 "정상 계산 경로"인지 가른다.
+# `if (x != 0) { return compute(x); }` 처럼 값을 돌려주는 분기를 거부 검사로
+# 오해하면 제약조건의 부등호가 뒤집혀 완전히 틀린 결론이 나온다.
+ERROR_RETURN_RE = re.compile(r"\breturn\s*\(?\s*(?:-\s*\d+|NULL|nullptr|false)\s*\)?\s*;")
+ERROR_GOTO_RE = re.compile(
+    r"\bgoto\s+\w*(?:err|fail|cleanup|bail|invalid|abort|done|end|exit)\w*", re.I
+)
+FATAL_CALL_RE = re.compile(
+    r"\b(?:abort|_?exit|longjmp|siglongjmp|\w*fatal\w*|\w*panic\w*|\w*unreachable\w*)\s*\(",
+    re.I,
+)
+ANY_EXIT_RE = re.compile(r"\b(return|goto|break|continue|throw)\b")
+
+BRANCH_ERROR_EXIT = "error_exit"
+BRANCH_PLAIN_EXIT = "plain_exit"
+BRANCH_NO_EXIT = "none"
 TRAILING_QUALIFIER_RE = re.compile(
     r"(const|volatile|noexcept|override|final|throw\s*\([^)]*\)|__attribute__\s*\(\([^)]*\)\))"
 )
@@ -109,6 +124,7 @@ class Constraint:
     description: str
     line: int
     confidence: float = 0.5
+    occurrences: int = 1
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -417,12 +433,59 @@ def _param_map(params: Sequence[Param]) -> Dict[str, Param]:
     return {p.name: p for p in params if p.name}
 
 
+def dedupe_constraints(constraints: Sequence[Constraint]) -> List[Constraint]:
+    """같은 제약조건의 반복을 하나로 합치고 등장 횟수를 센다.
+
+    생성된 코드는 같은 assert 를 수천 번 반복하기도 한다. 그대로 두면 문서
+    하나가 색인 전체의 단어 빈도를 왜곡한다.
+    """
+    first: Dict[tuple, Constraint] = {}
+    ordered: List[Constraint] = []
+    for constraint in constraints:
+        key = (constraint.kind, constraint.target, constraint.description)
+        existing = first.get(key)
+        if existing is not None:
+            existing.occurrences += 1
+            existing.confidence = max(existing.confidence, constraint.confidence)
+            continue
+        first[key] = constraint
+        ordered.append(constraint)
+    return ordered
+
+
 def _snippet(text: str, start: int, end: int) -> str:
     return " ".join(text[start:end].split())
 
 
-def _has_early_exit(masked_body: str, from_pos: int, window: int = 160) -> bool:
-    return bool(EXIT_RE.search(masked_body[from_pos : from_pos + window]))
+def _branch_segment(masked: str, close_pos: int, window: int = 200) -> str:
+    """`if (...)` 의 닫는 괄호 뒤에 오는 분기 본문만 정확히 잘라낸다."""
+    start = _skip_ws(masked, close_pos + 1)
+    if start >= len(masked):
+        return ""
+    if masked[start] == "{":
+        end = match_delim(masked, start, "{", "}")
+        if end is not None:
+            return masked[start : end + 1]
+        return masked[start : start + window]
+    end = masked.find(";", start)
+    return masked[start : end + 1] if end != -1 else masked[start : start + window]
+
+
+def _classify_branch(masked: str, close_pos: int) -> str:
+    """분기 본문을 error_exit / plain_exit / none 으로 분류한다.
+
+    error_exit 일 때만 "호출자가 만족시켜야 하는 조건"으로 부등호를 뒤집는다.
+    """
+    segment = _branch_segment(masked, close_pos)
+    if (
+        ERROR_RETURN_RE.search(segment)
+        or ERROR_GOTO_RE.search(segment)
+        or FATAL_CALL_RE.search(segment)
+    ):
+        return BRANCH_ERROR_EXIT
+    if ANY_EXIT_RE.search(segment):
+        return BRANCH_PLAIN_EXIT
+    return BRANCH_NO_EXIT
 
 
 def _conditions(masked: str, body_span) -> List[tuple]:
@@ -439,7 +502,7 @@ def _conditions(masked: str, body_span) -> List[tuple]:
 
 
 def _null_constraints(cond_masked: str, cond_original: str, params: Dict[str, Param],
-                      line: int, early_exit: bool) -> List[Constraint]:
+                      line: int, branch: str) -> List[Constraint]:
     constraints: List[Constraint] = []
     seen: set = set()
 
@@ -448,7 +511,23 @@ def _null_constraints(cond_masked: str, cond_original: str, params: Dict[str, Pa
         if param is None or not param.is_pointer or target in seen:
             return
         seen.add(target)
-        if negated:
+
+        # `if (p == NULL) { p = fallback; }` 는 NULL을 금지하는 게 아니라 허용한다.
+        if negated and branch == BRANCH_NO_EXIT:
+            constraints.append(
+                Constraint(
+                    kind="nullable",
+                    target=target,
+                    expression=cond_original,
+                    description=(
+                        f"'{target}' is NULL-checked but the branch does not bail out, "
+                        f"so NULL appears to be handled"
+                    ),
+                    line=line,
+                    confidence=0.5,
+                )
+            )
+        elif negated:
             constraints.append(
                 Constraint(
                     kind="null_check",
@@ -456,7 +535,7 @@ def _null_constraints(cond_masked: str, cond_original: str, params: Dict[str, Pa
                     expression=cond_original,
                     description=f"'{target}' must not be NULL when calling this function",
                     line=line,
-                    confidence=0.9 if early_exit else 0.6,
+                    confidence=0.9 if branch == BRANCH_ERROR_EXIT else 0.6,
                 )
             )
         else:
@@ -482,46 +561,53 @@ def _null_constraints(cond_masked: str, cond_original: str, params: Dict[str, Pa
 
 
 def _range_constraints(cond_masked: str, cond_original: str, params: Dict[str, Param],
-                       line: int, early_exit: bool) -> List[Constraint]:
+                       line: int, branch: str) -> List[Constraint]:
     constraints: List[Constraint] = []
-    flipped = {"<": ">=", "<=": ">", ">": "<=", ">=": "<"}
+    flipped = {"<": ">=", "<=": ">", ">": "<=", ">=": "<", "==": "!=", "!=": "=="}
+    rejects_input = branch == BRANCH_ERROR_EXIT
 
-    def add(target: str, required: str) -> None:
+    def add(target: str, comparison: str) -> None:
         param = params.get(target)
         if param is None or param.is_pointer:
             return
+        if rejects_input:
+            left, operator, right = comparison
+            required = f"{left} {flipped[operator]} {right}"
+            description = f"'{target}' is validated on entry; callers must satisfy {required}"
+            confidence = 0.8
+        else:
+            # 거부 경로가 아니면 부등호를 뒤집으면 안 된다. 다만 비교에 쓰인 값은
+            # 퍼징에서 시도해 볼 만한 경계값이다.
+            left, operator, right = comparison
+            description = (
+                f"'{target}' is compared as `{left} {operator} {right}` on a non-rejecting "
+                f"branch; treat {right if right != target else left} as a boundary value"
+            )
+            confidence = 0.4
         constraints.append(
             Constraint(
                 kind="range_check",
                 target=target,
                 expression=cond_original,
-                description=f"'{target}' is bounds-checked; callers should satisfy {required}",
+                description=description,
                 line=line,
-                confidence=0.8 if early_exit else 0.5,
+                confidence=confidence,
             )
         )
 
-    for match in COMPARE_RE.finditer(cond_masked):
-        left, operator, right = match.group(1), match.group(2), match.group(3)
-        # `if (n <= 0) return -1;` 은 "n > 0 이어야 한다"는 뜻이다.
-        required = f"{left} {flipped[operator] if early_exit else operator} {right}"
-        if left in params:
-            add(left, required)
-        elif right in params:
-            add(right, required)
-
-    # `if (len == 0) return -1;` 처럼 특정 값을 거부하는 검사
-    equalities = [
+    comparisons = [
+        (m.group(1), m.group(2), m.group(3)) for m in COMPARE_RE.finditer(cond_masked)
+    ] + [
         (m.group(1), m.group(2), m.group(3)) for m in NUMBER_EQ_RE.finditer(cond_masked)
     ] + [
         (m.group(3), m.group(2), m.group(1)) for m in NUMBER_EQ_REV_RE.finditer(cond_masked)
     ]
-    for target, operator, literal in equalities:
-        if early_exit:
-            required = f"{target} != {literal}" if operator == "==" else f"{target} == {literal}"
-        else:
-            required = f"{target} {operator} {literal}"
-        add(target, required)
+
+    for left, operator, right in comparisons:
+        if left in params:
+            add(left, (left, operator, right))
+        elif right in params:
+            add(right, (left, operator, right))
 
     return constraints
 
@@ -739,12 +825,12 @@ def extract_from_text(text: str, path: str = "<memory>") -> List[FunctionFacts]:
             cond_masked = masked[cond_start:cond_end]
             cond_original = _snippet(text, cond_start, cond_end)
             cond_line = index.line_of(cond_start)
-            early_exit = _has_early_exit(masked, close_pos + 1)
+            branch = _classify_branch(masked, close_pos)
             constraints.extend(
-                _null_constraints(cond_masked, cond_original, param_map, cond_line, early_exit)
+                _null_constraints(cond_masked, cond_original, param_map, cond_line, branch)
             )
             constraints.extend(
-                _range_constraints(cond_masked, cond_original, param_map, cond_line, early_exit)
+                _range_constraints(cond_masked, cond_original, param_map, cond_line, branch)
             )
 
         constraints.extend(_assert_constraints(masked, text, body_span, index))
@@ -768,7 +854,7 @@ def extract_from_text(text: str, path: str = "<memory>") -> List[FunctionFacts]:
                 params=params,
                 doc=doc,
                 calls=sorted(set(calls)),
-                constraints=constraints,
+                constraints=dedupe_constraints(constraints),
             )
         )
 

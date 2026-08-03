@@ -180,9 +180,11 @@ class ConstraintKB:
                 lines.append("constraints:")
                 for constraint in constraints:
                     target_note = f" [{constraint['target']}]" if constraint["target"] else ""
+                    repeats = constraint.get("occurrences", 1)
+                    repeat_note = f" (x{repeats})" if repeats > 1 else ""
                     lines.append(
                         f"  - ({constraint['kind']}, conf={constraint['confidence']})"
-                        f"{target_note} {constraint['description']}"
+                        f"{target_note} {constraint['description']}{repeat_note}"
                     )
                     if constraint["expression"]:
                         lines.append(f"      evidence: {constraint['expression']}")

@@ -115,6 +115,101 @@ def test_range_check_requires_bound_direction():
 
     assert checks
     assert "n > 0" in checks[0].description
+    assert checks[0].confidence == 0.8
+
+
+# -- 분기 분류 (실제 CPython 헤더에서 발견한 오탐에 대한 회귀 테스트) ----------
+# `if (x != 0) { return compute(x); }` 는 입력을 거부하는 경로가 아니므로
+# 부등호를 뒤집어 "x == 0 이어야 한다"고 결론내면 안 된다.
+
+
+def test_non_rejecting_branch_does_not_flip_the_comparison():
+    facts = extract_from_text(
+        "int bit_length(unsigned long x) {"
+        "  if (x != 0) { return 64 - clzl(x); } else { return 0; } }"
+    )
+    checks = _find(facts[0].constraints, "range_check", "x")
+
+    assert checks
+    assert "x == 0" not in checks[0].description
+    assert "boundary value" in checks[0].description
+    assert checks[0].confidence == 0.4
+
+
+def test_assignment_only_branch_is_not_a_requirement():
+    facts = extract_from_text(
+        "int f(int val) { unsigned u; if (val < 0) { u = -val; } else { u = val; } return u; }"
+    )
+    checks = _find(facts[0].constraints, "range_check", "val")
+
+    assert checks
+    assert "must satisfy" not in checks[0].description
+    assert checks[0].confidence == 0.4
+
+
+def test_error_return_marks_the_branch_as_rejecting():
+    facts = extract_from_text(
+        'int grow(int avail_out) { if (avail_out != 0) { set_error("no gaps"); return -1; }'
+        " return 0; }"
+    )
+    checks = _find(facts[0].constraints, "range_check", "avail_out")
+
+    assert checks
+    assert "avail_out == 0" in checks[0].description
+    assert checks[0].confidence == 0.8
+
+
+def test_goto_error_label_marks_the_branch_as_rejecting():
+    facts = extract_from_text(
+        "int f(int n) { if (n > 100) { goto cleanup; } return 0; cleanup: return -1; }"
+    )
+    checks = _find(facts[0].constraints, "range_check", "n")
+
+    assert checks
+    assert "n <= 100" in checks[0].description
+
+
+def test_fatal_call_counts_as_a_null_rejection():
+    facts = extract_from_text(
+        'void f(state *tstate) { if (tstate == NULL) { _Py_FatalError("null tstate"); } }'
+    )
+    checks = _find(facts[0].constraints, "null_check", "tstate")
+
+    assert checks
+    assert checks[0].confidence == 0.9
+
+
+def test_null_handled_by_fallback_is_nullable_not_required():
+    facts = extract_from_text(
+        "void set_finalizing(interp *i, state *tstate) {"
+        "  if (tstate == NULL) { store(i, 0); } else { store(i, tstate->id); } }"
+    )
+
+    assert _find(facts[0].constraints, "nullable", "tstate")
+    assert not _find(facts[0].constraints, "null_check", "tstate")
+
+
+def test_null_check_without_exit_keeps_lower_confidence():
+    facts = extract_from_text(
+        "int f(char *p) { if (p == NULL) { return 0; } return 1; }"
+    )
+    checks = _find(facts[0].constraints, "null_check", "p")
+
+    # `return 0` 은 실패인지 정상값인지 단정할 수 없어 신뢰도를 낮춘다
+    assert checks
+    assert checks[0].confidence == 0.6
+
+
+def test_branch_segment_does_not_leak_into_following_code():
+    # if 블록에는 exit 이 없고, 그 뒤 문장에 return -1 이 있다.
+    facts = extract_from_text(
+        "int f(int n) { if (n > 10) { n = 10; } if (n < 0) { return -1; } return n; }"
+    )
+    relaxed = [c for c in _find(facts[0].constraints, "range_check", "n")
+               if "n > 10" in c.expression]
+
+    assert relaxed
+    assert relaxed[0].confidence == 0.4
 
 
 def test_extract_assert_constraint():
@@ -220,6 +315,22 @@ def test_nullable_when_guarded_positively():
     nullable = _find(facts[0].constraints, "nullable", "p")
 
     assert nullable
+
+
+def test_repeated_constraints_are_deduped_with_a_count():
+    # 생성된 코드는 같은 assert 를 수천 번 반복하기도 한다.
+    body = " ".join(["assert(check(x));"] * 50)
+    facts = extract_from_text(f"void init(int x) {{ {body} }}")
+    asserts = _find(facts[0].constraints, "assert")
+
+    assert len(asserts) == 1
+    assert asserts[0].occurrences == 50
+
+
+def test_distinct_constraints_are_not_merged():
+    facts = extract_from_text("void f(int x) { assert(x > 0); assert(x < 10); }")
+
+    assert len(_find(facts[0].constraints, "assert")) == 2
 
 
 def test_extract_from_paths_walks_directories(tmp_path):
