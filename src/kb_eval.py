@@ -125,6 +125,8 @@ def nm_ground_truth(paths: Sequence[str], cc: str = "gcc",
     if not sources:
         raise GroundTruthUnavailable("컴파일할 .c/.cpp 소스가 없음")
 
+    underscore_prefixed = _toolchain_prefixes_underscore(compiler, reader)
+
     # 소스가 있는 디렉터리를 포함 경로로 넣어 준다 (헤더가 옆에 있는 흔한 배치)
     include_flags = [f"-I{d}" for d in sorted({os.path.dirname(s) or "." for s in sources})]
     args = list(cc_args or []) + include_flags
@@ -146,15 +148,7 @@ def nm_ground_truth(paths: Sequence[str], cc: str = "gcc",
             listing = subprocess.run(
                 [reader, obj], capture_output=True, text=True, errors="ignore",
             )
-            for line in listing.stdout.splitlines():
-                parts = line.split()
-                if len(parts) < 2:
-                    continue
-                symbol_type, name = parts[-2], parts[-1]
-                if symbol_type not in ("T", "t"):
-                    continue
-                if name.startswith((".", "$", "_")):
-                    continue
+            for name in _nm_defined_symbols(listing.stdout, underscore_prefixed):
                 apis.setdefault(name, {"file": source, "line": 0,
                                        "return_type": "", "params": None})
 
@@ -169,6 +163,53 @@ def nm_ground_truth(paths: Sequence[str], cc: str = "gcc",
 
 
 HEADER_ONLY = (".h", ".hh", ".hpp")
+
+_PROBE_SYMBOL = "logosfuzz_nm_probe"
+
+
+def _nm_defined_symbols(listing: str, underscore_prefixed: bool) -> List[str]:
+    """`nm` 출력에서 '정의된 함수' 심볼 이름을 뽑는다.
+
+    `_internal` 처럼 밑줄로 시작하는 함수는 C 에서 완전히 정상이므로 버리면
+    안 된다. 다만 일부 툴체인(32비트 Windows, macOS)은 모든 C 심볼 앞에
+    밑줄을 하나 덧붙이므로, 그 경우에만 하나를 떼어 낸다.
+    """
+    names: List[str] = []
+    for line in listing.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        symbol_type, name = parts[-2], parts[-1]
+        if symbol_type not in ("T", "t"):
+            continue
+        if name.startswith((".", "$")):        # 섹션 이름 등
+            continue
+        if underscore_prefixed and name.startswith("_"):
+            name = name[1:]
+        if name:
+            names.append(name)
+    return names
+
+
+def _toolchain_prefixes_underscore(compiler: str, reader: str) -> bool:
+    """이 툴체인이 C 심볼 앞에 밑줄을 붙이는지 실제로 확인한다."""
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as workdir:
+        source = os.path.join(workdir, "probe.c")
+        obj = os.path.join(workdir, "probe.o")
+        with open(source, "w", encoding="utf-8") as handle:
+            handle.write(f"int {_PROBE_SYMBOL}(void) {{ return 0; }}\n")
+        build = subprocess.run([compiler, "-c", source, "-o", obj],
+                               capture_output=True, text=True, errors="ignore")
+        if build.returncode != 0 or not os.path.exists(obj):
+            return False
+        listing = subprocess.run([reader, obj], capture_output=True, text=True,
+                                 errors="ignore").stdout
+        return f"_{_PROBE_SYMBOL}" in listing and _PROBE_SYMBOL not in listing.replace(
+            f"_{_PROBE_SYMBOL}", ""
+        )
 
 
 def label_ground_truth(path: str) -> GroundTruth:
