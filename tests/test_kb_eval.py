@@ -100,6 +100,47 @@ def test_nm_ground_truth_finds_definitions(tree):
     assert {"lib_open", "lib_read"} <= truth.names()
 
 
+def test_nm_ground_truth_keeps_underscore_prefixed_functions(tmp_path):
+    """`_internal` 은 C 에서 정상인 이름이다.
+
+    정답셋에서 빠지면 정상 추출이 오탐으로 잘못 채점된다(precision 이 실제보다
+    낮게 나온다). 일부 툴체인이 모든 C 심볼에 밑줄을 덧붙이는 것과 혼동하면 안 된다.
+    """
+    if not (shutil.which("gcc") and shutil.which("nm")):
+        pytest.skip("gcc/nm 이 없음")
+
+    (tmp_path / "u.c").write_text(
+        "int _internal_helper(int a) { return a + 1; }\n"
+        "int public_api(int a) { return _internal_helper(a); }\n"
+        "static int _static_helper(int a) { return a; }\n"
+        "int uses_static(int a) { return _static_helper(a); }\n",
+        encoding="utf-8",
+    )
+
+    names = nm_ground_truth([str(tmp_path)]).names()
+
+    assert "_internal_helper" in names
+    assert "_static_helper" in names
+    assert {"public_api", "uses_static"} <= names
+
+
+def test_underscore_functions_are_not_scored_as_false_positives(tmp_path):
+    if not (shutil.which("gcc") and shutil.which("nm")):
+        pytest.skip("gcc/nm 이 없음")
+
+    (tmp_path / "u.c").write_text(
+        "int _helper(int a) { return a; }\n"
+        "int api(int a) { return _helper(a); }\n",
+        encoding="utf-8",
+    )
+
+    result = evaluate([str(tmp_path)])
+
+    assert result["ground_truth"]["source"] == "nm"
+    assert result["extraction_accuracy"]["precision"] == 1.0
+    assert result["extraction_accuracy"]["false_positive_names"] == []
+
+
 def test_nm_ground_truth_fails_without_sources(tmp_path):
     (tmp_path / "only.h").write_text("int f(void);\n", encoding="utf-8")
 
