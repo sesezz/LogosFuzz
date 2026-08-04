@@ -55,6 +55,16 @@ TYPEDEF_BLOCK_RE = re.compile(
     r"\btypedef\s+(?:struct|union|enum)\b[^{;]*\{.*?\}\s*([A-Za-z_]\w*)\s*;", re.S
 )
 TAG_RE = re.compile(r"\b(?:struct|union|enum)\s+([A-Za-z_]\w*)\s*\{")
+# 구조체를 감싼 타입만 따로 센다. `typedef struct _object PyObject;` 처럼 본문
+# 없이 태그만 가리키는 형태도 포함한다. SCH-02-01 이 "상태 핸들"을 고를 때
+# 스칼라 별칭(Py_ssize_t 등)과 구분하는 데 쓴다.
+STRUCT_BLOCK_RE = re.compile(
+    r"\btypedef\s+(?:struct|union)\b[^{;]*\{.*?\}\s*([A-Za-z_]\w*)\s*;", re.S
+)
+STRUCT_ALIAS_RE = re.compile(
+    r"\btypedef\s+(?:struct|union)\s+[A-Za-z_]\w*\s+([A-Za-z_]\w*)\s*;"
+)
+STRUCT_TAG_RE = re.compile(r"\b(?:struct|union)\s+([A-Za-z_]\w*)\s*\{")
 
 # 함수 정의가 아니라 선언으로만 잡히면 안 되는 이름들
 _NON_SYMBOLS = {
@@ -75,6 +85,8 @@ class FileInfo:
     directory: str = ""
     declares: List[str] = field(default_factory=list)
     types: List[str] = field(default_factory=list)
+    # types 중 구조체/공용체를 감싼 것만. 상태 핸들 판정용(SCH-02-01)
+    struct_types: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -120,11 +132,17 @@ def scan_file(path: str, text: Optional[str] = None) -> FileInfo:
     types |= {n for n in TYPEDEF_ALIAS_RE.findall(masked) if n not in _NON_SYMBOLS}
     types |= set(TAG_RE.findall(masked))
 
+    struct_types = set(STRUCT_BLOCK_RE.findall(masked))
+    struct_types |= set(STRUCT_ALIAS_RE.findall(masked))
+    struct_types |= set(STRUCT_TAG_RE.findall(masked))
+    types |= struct_types
+
     return FileInfo(
         path=path,
         includes=INCLUDE_RE.findall(text),
         declares=sorted(declares),
         types=sorted(types),
+        struct_types=sorted(struct_types),
     )
 
 
@@ -313,6 +331,14 @@ class KnowledgeBase:
         bare = type_name.replace("struct ", "").replace("union ", "").strip()
         return sorted(
             path for path, info in self.files.items() if bare in info.get("types", [])
+        )
+
+    def defines_struct_type(self, type_name: str) -> List[str]:
+        """구조체/공용체를 감싼 타입만. 스칼라 별칭(Py_ssize_t 등)은 제외된다."""
+        bare = type_name.replace("struct ", "").replace("union ", "").strip()
+        return sorted(
+            path for path, info in self.files.items()
+            if bare in info.get("struct_types", [])
         )
 
     def declaring_files(self, name: str) -> List[str]:

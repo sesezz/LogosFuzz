@@ -43,6 +43,8 @@ int uds_session_start(uds_ctx_t *ctx, uint8_t level);
 /**
  * DID를 읽어 응답 버퍼에 담는다. 활성 세션이 필요하다.
  *
+ * UDS P2 서버 응답 시간은 50ms 이내여야 한다.
+ *
  * @param ctx 활성 세션이 있는 컨텍스트.
  * @param did 조회할 데이터 식별자.
  * @param out 응답을 담을 구조체.
