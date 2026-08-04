@@ -233,6 +233,51 @@ def test_group_ids_are_unique(kb):
     assert len({g.group_id for g in groups}) == len(groups)
 
 
+def test_group_ids_stay_unique_when_the_suffix_itself_collides(tmp_path):
+    """`util.c` 두 개 + `util_2.c` -> lg_util_2 가 두 번 나오면 안 된다.
+
+    group_id 는 SCH-02-02 가 딕셔너리 키로 쓰므로 중복되면 그룹이 통째로
+    사라지고, 그 API 들이 퍼징 대상에서 빠진다.
+    """
+    for folder, func in (("a", "a1"), ("b", "b1")):
+        (tmp_path / folder).mkdir()
+        (tmp_path / folder / "util.c").write_text(
+            f"int {func}(int x) {{ return x; }}\n", encoding="utf-8")
+    (tmp_path / "x").mkdir()
+    (tmp_path / "x" / "util_2.c").write_text(
+        "int x1(int x) { return x; }\n", encoding="utf-8")
+
+    groups = extract_groups(KnowledgeBase.build(paths=[str(tmp_path)]))
+    ids = [g.group_id for g in groups]
+
+    assert len(groups) == 3
+    assert len(set(ids)) == 3, f"group_id 중복: {ids}"
+
+
+def test_no_api_is_lost_in_the_group_map(tmp_path):
+    for folder, func in (("a", "a1"), ("b", "b1")):
+        (tmp_path / folder).mkdir()
+        (tmp_path / folder / "util.c").write_text(
+            f"int {func}(int x) {{ return x; }}\n", encoding="utf-8")
+    (tmp_path / "x").mkdir()
+    (tmp_path / "x" / "util_2.c").write_text(
+        "int x1(int x) { return x; }\n", encoding="utf-8")
+
+    kb = KnowledgeBase.build(paths=[str(tmp_path)])
+    groups = extract_groups(kb)
+    mapping = to_group_map(groups)
+
+    mapped = {i for ids in mapping.values() for i in ids}
+    assert mapped == {d["api_id"] for d in kb.documents}
+
+
+def test_grouping_is_deterministic(kb):
+    first = [(g.group_id, tuple(g.api_ids)) for g in extract_groups(kb)]
+    second = [(g.group_id, tuple(g.api_ids)) for g in extract_groups(kb)]
+
+    assert first == second
+
+
 def test_empty_kb_produces_no_groups():
     assert extract_groups(KnowledgeBase(documents=[], files={})) == []
 

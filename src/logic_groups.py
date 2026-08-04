@@ -336,13 +336,20 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
             )
         )
 
-    # group_id 충돌 방지 (같은 라벨이 여러 번 나올 수 있다)
-    seen: Dict[str, int] = {}
+    # group_id 충돌 방지. 단순 카운터로 접미사를 붙이면 `util.c` 두 개와
+    # `util_2.c` 가 함께 있을 때 lg_util_2 가 두 번 나온다. group_id 는
+    # SCH-02-02 가 딕셔너리 키로 쓰므로 중복되면 그룹이 통째로 사라진다.
+    # 이미 배정한 id 전체와 대조해서 빈 이름을 찾는다.
+    used: set = set()
     for group in groups:
-        count = seen.get(group.group_id, 0) + 1
-        seen[group.group_id] = count
-        if count > 1:
-            group.group_id = f"{group.group_id}_{count}"
+        base = group.group_id
+        candidate = base
+        suffix = 2
+        while candidate in used:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        used.add(candidate)
+        group.group_id = candidate
 
     groups.sort(key=lambda g: (-len(g.api_ids), g.group_id))
     return groups
