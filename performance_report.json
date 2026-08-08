@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-08-09T00:58:00.793198",
+  "baseline": {
+    "name": "libFuzzer (baseline)",
+    "coverage_rate": 32.0,
+    "seed_efficiency": 150.0,
+    "crash_rate": 0.002,
+    "harness_success_rate": 60.0
+  },
+  "proposed": {
+    "name": "LogosFuzz",
+    "coverage_rate": 61.0,
+    "seed_efficiency": 312.5,
+    "crash_rate": 0.005,
+    "harness_success_rate": 90.0
+  },
+  "improvements": {
+    "coverage": 29.0,
+    "seed_efficiency": 162.5,
+    "crash_rate": 0.003,
+    "harness_success": 30.0
+  }
+}
