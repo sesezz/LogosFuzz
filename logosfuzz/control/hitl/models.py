@@ -57,6 +57,7 @@ class Checkpoint(str, Enum):
     HARNESS_REVIEW = "harness_review"    # GEN  생성된 하네스 검토/수정
     CRASH_TRIAGE = "crash_triage"        # ANA  정탐/오탐 판정 확인
     CVE_DISCLOSURE = "cve_disclosure"    # ANA-05-02 취약점(CVE) 공개 승인
+    KB_FEEDBACK = "kb_feedback"          # ANA-05-03 지식베이스 역피드백(diff) 승인
 
     @property
     def stage(self) -> Stage:
@@ -69,6 +70,7 @@ _CHECKPOINT_STAGE: Dict["Checkpoint", Stage] = {
     Checkpoint.HARNESS_REVIEW: Stage.GENERATE,
     Checkpoint.CRASH_TRIAGE: Stage.ANALYZE,
     Checkpoint.CVE_DISCLOSURE: Stage.ANALYZE,
+    Checkpoint.KB_FEEDBACK: Stage.ANALYZE,
 }
 
 
