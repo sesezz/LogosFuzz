@@ -64,11 +64,25 @@ def _build_parser() -> argparse.ArgumentParser:
     f.add_argument("--coverage", default="none",
                    help="커버리지 계측(EXE-04-04): none | llvm-cov | sancov (기본 none). "
                         "하네스가 해당 계측 플래그로 빌드돼 있어야 수집된다.")
+
+    # ANA 단계(Step 5/6): 크래시 중복 제거(ANA-05-04) → 정/오탐 판별(ANA-05-01)
+    a = sub.add_parser("analyze",
+                       help="크래시 분석: 중복 제거(ANA-05-04)+정/오탐 판별(ANA-05-01)")
+    a.add_argument("inputs", nargs="+",
+                   help="EXE-04-02 sanitizer 산출물(JSONL/디렉터리/fuzz_summary.json)")
+    a.add_argument("--depth", type=int, default=3, help="시그니처 상위 프레임 수(기본 3)")
+    a.add_argument("--output", "-o", type=Path, default=None, help="통합 결과 JSON 저장 경로")
     return p
 
 
 def main(argv: list | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    if args.command == "analyze":
+        # ANA 파트로 위임(설계서 기능 흐름도의 analyze 명령)
+        from logosfuzz.analyze.cli import _run_analyze
+        return _run_analyze(args)
+
     if args.command != "fuzz":
         return 2
 

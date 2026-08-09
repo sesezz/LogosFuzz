@@ -1,10 +1,14 @@
 """ANA 파트 CLI.
 
-설계서 기능 흐름도의 ``analyze`` 단계(Step 5)를 담당한다.
+설계서 기능 흐름도의 ``analyze`` 단계(Step 5/6)를 담당한다.
 
-    python -m logosfuzz.analyze.cli dedup <sanitizer-jsonl|dir|summary.json>... [-o out.json]
+    python -m logosfuzz.analyze.cli dedup   <sanitizer-jsonl|dir|summary.json>... [-o out.json]
+    python -m logosfuzz.analyze.cli triage  <dedup.json | sanitizer 입력...>     [-o out.json]
+    python -m logosfuzz.analyze.cli analyze <sanitizer 입력...>                   [-o out.json]
 
-``dedup``: ANA-05-04. 크래시 결함 스트림 → 고유 클러스터 목록(JSON).
+``dedup``  : ANA-05-04. 크래시 결함 스트림 → 고유 클러스터 목록(JSON).
+``triage`` : ANA-05-01. 클러스터(또는 원시 입력) → 정/오탐 판별 결과(JSON).
+``analyze``: dedup → triage 를 한 번에 실행하는 파이프라인 편의 명령.
 """
 
 from __future__ import annotations
@@ -16,12 +20,30 @@ from pathlib import Path
 
 from logosfuzz.analyze.dedup import CrashDeduplicator
 from logosfuzz.analyze.loader import load_records
+from logosfuzz.analyze.models import CrashCluster
+from logosfuzz.analyze.triage import (
+    RuleBasedTriager,
+    summarize,
+    triage_clusters,
+)
 
 
 def _write(path: str | None, payload: dict) -> None:
     if path:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _clusters_from_inputs(inputs: list[str], depth: int) -> tuple[list[CrashCluster], dict]:
+    """입력이 dedup.json이면 클러스터를 복원하고, 원시 입력이면 dedup을 실행한다."""
+    if len(inputs) == 1 and Path(inputs[0]).suffix == ".json":
+        data = json.loads(Path(inputs[0]).read_text(encoding="utf-8"))
+        if isinstance(data, dict) and "clusters" in data:
+            clusters = [CrashCluster.from_dict(c) for c in data["clusters"]]
+            return clusters, {"source": "dedup-json", **data.get("stats", {})}
+    dedup = CrashDeduplicator(depth=depth)
+    dedup.extend(load_records(inputs))
+    return dedup.clusters(), {"source": "raw-sanitizer", **dedup.stats().to_dict()}
 
 
 def _run_dedup(args: argparse.Namespace) -> int:
@@ -43,6 +65,82 @@ def _run_dedup(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_triage(args: argparse.Namespace) -> int:
+    clusters, meta = _clusters_from_inputs(args.inputs, args.depth)
+    results = triage_clusters(clusters, RuleBasedTriager())
+    summary = summarize(results)
+
+    by_id = {c.cluster_id: c for c in clusters}
+    payload = {
+        "triage_model": RuleBasedTriager.model_name,
+        "input": meta,
+        "summary": summary,
+        "results": [
+            {
+                "cluster_id": r.cluster_id,
+                "bug_type": by_id[r.cluster_id].bug_type if r.cluster_id in by_id else "",
+                "signature": by_id[r.cluster_id].signature if r.cluster_id in by_id else "",
+                "count": by_id[r.cluster_id].count if r.cluster_id in by_id else 0,
+                "triage_result": r.to_triage_dict(),  # ← ANA-05-02 입력 계약
+                "signals": r.signals,
+            }
+            for r in results
+        ],
+    }
+    _write(args.output, payload)
+
+    print(
+        f"[ANA-05-01] 고유 크래시 {len(results)}개 판별 → "
+        f"정탐 {summary['true_positive']} · 오탐 {summary['false_positive']} · "
+        f"검토필요 {summary['needs_review']}"
+    )
+    for item in payload["results"]:
+        tr = item["triage_result"]
+        print(f"  - {item['cluster_id']}  {tr['verdict']:<14} conf={tr['confidence']:.2f}  {item['bug_type']}")
+    if args.output:
+        print(f"  → {args.output}")
+    return 0
+
+
+def _run_analyze(args: argparse.Namespace) -> int:
+    """dedup → triage 파이프라인 한 번에."""
+    dedup = CrashDeduplicator(depth=args.depth)
+    dedup.extend(load_records(args.inputs))
+    clusters = dedup.clusters()
+    results = triage_clusters(clusters, RuleBasedTriager())
+    summary = summarize(results)
+    tri_by_id = {r.cluster_id: r for r in results}
+
+    payload = {
+        "dedup": dedup.to_dict(),
+        "triage_model": RuleBasedTriager.model_name,
+        "summary": summary,
+        "findings": [
+            {
+                **c.to_dict(),
+                "triage_result": tri_by_id[c.cluster_id].to_triage_dict(),
+                "signals": tri_by_id[c.cluster_id].signals,
+            }
+            for c in clusters
+        ],
+    }
+    _write(args.output, payload)
+
+    st = dedup.stats()
+    print(
+        f"[ANA analyze] 결함 {st.total_records}건 → 고유 {st.unique_clusters}개 "
+        f"| 정탐 {summary['true_positive']} · 오탐 {summary['false_positive']} · "
+        f"검토필요 {summary['needs_review']}"
+    )
+    for item in payload["findings"]:
+        tr = item["triage_result"]
+        print(f"  - {item['cluster_id']} x{item['count']:<3} {tr['verdict']:<14} "
+              f"conf={tr['confidence']:.2f}  {item['bug_type']} @ {item['crash_location'] or 'unknown'}")
+    if args.output:
+        print(f"  → {args.output}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="logosfuzz-analyze", description="ANA 크래시 분석 단계")
     sub = p.add_subparsers(dest="command", required=True)
@@ -53,6 +151,18 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--depth", type=int, default=3, help="시그니처 상위 프레임 수(기본 3)")
     d.add_argument("--output", "-o", help="클러스터 결과 JSON 저장 경로")
     d.set_defaults(func=_run_dedup)
+
+    t = sub.add_parser("triage", help="ANA-05-01 정/오탐 판별")
+    t.add_argument("inputs", nargs="+", help="dedup.json 또는 원시 sanitizer 입력")
+    t.add_argument("--depth", type=int, default=3, help="원시 입력일 때 dedup 프레임 수(기본 3)")
+    t.add_argument("--output", "-o", help="판별 결과 JSON 저장 경로")
+    t.set_defaults(func=_run_triage)
+
+    a = sub.add_parser("analyze", help="dedup→triage 파이프라인")
+    a.add_argument("inputs", nargs="+", help="원시 sanitizer 입력(JSONL/dir/summary)")
+    a.add_argument("--depth", type=int, default=3, help="시그니처 상위 프레임 수(기본 3)")
+    a.add_argument("--output", "-o", help="통합 결과 JSON 저장 경로")
+    a.set_defaults(func=_run_analyze)
     return p
 
 

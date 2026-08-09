@@ -42,14 +42,32 @@ class ProposalStatus(str, Enum):
 
 EXE-04-02(``logosfuzz/execute/sanitizer.py``)가 남긴 ``SanitizerFinding`` JSONL을
 ANA 파트가 소비한다. 이 모듈은 그 원시 이벤트를 감싸는 정규화 레코드
-(:class:`CrashRecord`)와 중복 제거 결과(:class:`CrashCluster`)를 정의한다.
+(:class:`CrashRecord`), 중복 제거 결과(:class:`CrashCluster`), 그리고
+정/오탐 판별 결과(:class:`TriageResult`)를 정의한다.
 
 의존성 원칙: 표준 라이브러리만 사용한다(프로젝트 pyproject ``dependencies=[]``).
+ANA-05-02(``ana_05_02_cve_reporting``)와는 코드 import가 아니라 **문자열 계약**
+(verdict 값 = ``"true_positive"``/``"false_positive"``/``"needs_review"``)으로만
+연결한다. 두 패키지가 서로를 import하지 않아 순환 의존을 원천 차단한다.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
+
+
+class Verdict(str, Enum):
+    """ANA-05-01 정/오탐 판별 결과.
+
+    문자열 값은 ``ana_05_02_cve_reporting/schema.py``의 ``Verdict`` enum과
+    **정확히 동일**하게 맞춘다. ANA-05-01의 출력 dict를 ANA-05-02
+    ``build_cve_report(triage_result=...)``가 그대로 소비하기 때문이다.
+    """
+
+    TRUE_POSITIVE = "true_positive"
+    FALSE_POSITIVE = "false_positive"
+    NEEDS_REVIEW = "needs_review"
 
 
 @dataclass(frozen=True)
@@ -369,3 +387,34 @@ class CrashCluster:
             "base_signature": rep.base_signature,
             "raw_log": rep.raw_log,
         }
+
+
+@dataclass
+class TriageResult:
+    """ANA-05-01 산출물: 하나의 크래시 묶음에 대한 정/오탐 판별.
+
+    ``to_triage_dict()``는 ANA-05-02 ``build_cve_report(triage_result=...)``가
+    바로 소비하는 계약 dict를 반환한다.
+    """
+
+    verdict: Verdict
+    confidence: float  # 0.0 ~ 1.0
+    rationale: str
+    triage_model: str
+    cluster_id: str = ""
+    signals: list[str] = field(default_factory=list)  # 판단에 쓰인 근거 신호(설명가능성)
+
+    def to_triage_dict(self) -> dict:
+        """ANA-05-02 입력 계약(triage_result) 형식."""
+        return {
+            "verdict": self.verdict.value,
+            "confidence": round(float(self.confidence), 4),
+            "rationale": self.rationale,
+            "triage_model": self.triage_model,
+        }
+
+    def to_dict(self) -> dict:
+        d = self.to_triage_dict()
+        d["cluster_id"] = self.cluster_id
+        d["signals"] = self.signals
+        return d
