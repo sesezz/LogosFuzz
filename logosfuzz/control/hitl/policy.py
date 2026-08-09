@@ -85,6 +85,8 @@ class HITLPolicy:
         - 취약점 공개(CVE_DISCLOSURE): 항상 사람 승인 필수(가장 민감).
         - 크래시 트리아지(CRASH_TRIAGE): 신뢰도 낮은 건만 사람 확인.
         - 하네스 검토(HARNESS_REVIEW): 컴파일 실패본만 사람 확인.
+        - 지식베이스 역피드백(KB_FEEDBACK): 항상 사람 승인 필수 - 승인 전까지
+          KB/재생성 어느 쪽도 반영되지 않아야 하므로 CONDITIONAL로 완화하지 않는다.
         - 스케줄/호환성: 기본 자동, 필요 시 MANUAL로 전환.
         """
         return cls(
@@ -98,6 +100,7 @@ class HITLPolicy:
                     Mode.CONDITIONAL, needs_human=_low_confidence_crash
                 ),
                 Checkpoint.CVE_DISCLOSURE: CheckpointRule(Mode.MANUAL),
+                Checkpoint.KB_FEEDBACK: CheckpointRule(Mode.MANUAL),
             }
         )
 
