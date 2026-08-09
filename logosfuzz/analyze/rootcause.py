@@ -19,7 +19,7 @@ from ana_05_02_cve_reporting.asan_parser import ParsedAsanLog, parse_asan_log
 from logosfuzz.generate.llm import LLMClient
 from src.knowledge_base import KnowledgeBase
 
-from .models import CrashRecord, RootCauseAnalysis
+from .models import FalsePositiveCrash, RootCauseAnalysis
 
 SYSTEM_PROMPT = (
     "You are a root-cause analyst for a fuzzing pipeline. You are given a crash "
@@ -44,7 +44,7 @@ def _api_context_block(api_doc: Optional[dict]) -> str:
     )
 
 
-def build_prompt(crash: CrashRecord, parsed: ParsedAsanLog, api_doc: Optional[dict]) -> str:
+def build_prompt(crash: FalsePositiveCrash, parsed: ParsedAsanLog, api_doc: Optional[dict]) -> str:
     frames = (
         "\n".join(
             f"  #{f['frame']} {f['function']} ({f.get('location') or '?'})"
@@ -74,13 +74,13 @@ access: {parsed.access_type or '-'} size={parsed.access_size or '-'} addr={parse
 
 
 def analyze_false_positive(
-    crash: CrashRecord,
+    crash: FalsePositiveCrash,
     kb: KnowledgeBase,
     llm: LLMClient,
 ) -> RootCauseAnalysis:
     """오탐 크래시 로그 + 콜스택 -> 근본 원인 요약(RootCauseAnalysis).
 
-    `crash.verdict`가 FALSE_POSITIVE가 아니면 `CrashRecord.__post_init__`에서
+    `crash.verdict`가 FALSE_POSITIVE가 아니면 `FalsePositiveCrash.__post_init__`에서
     이미 예외가 발생하므로, 이 함수는 항상 오탐 확정 건만 받는다는 전제로 동작한다.
     """
     parsed = parse_asan_log(crash.asan_log)

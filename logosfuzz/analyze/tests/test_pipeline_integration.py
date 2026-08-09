@@ -6,11 +6,9 @@ from __future__ import annotations
 
 import unittest
 
-from ana_05_02_cve_reporting.schema import Verdict
-
 from logosfuzz.analyze.audit import InMemoryAuditTrailStore
 from logosfuzz.analyze.kb_feedback import InMemoryKBOverrideStore
-from logosfuzz.analyze.models import CrashRecord, ProposalStatus
+from logosfuzz.analyze.models import FalsePositiveCrash, ProposalStatus, Verdict
 from logosfuzz.analyze.pipeline import run_ana_05_03
 from logosfuzz.control.hitl.gate import HITLManager
 from logosfuzz.control.hitl.models import Decision, DecisionType
@@ -39,8 +37,8 @@ def _kb() -> KnowledgeBase:
     }])
 
 
-def _crash() -> CrashRecord:
-    return CrashRecord(
+def _crash() -> FalsePositiveCrash:
+    return FalsePositiveCrash(
         crash_id="crash-1", api_id=101, harness_id="harness-1", run_id="run-1",
         asan_log=ASAN_LOG, verdict=Verdict.FALSE_POSITIVE, confidence=0.3,
     )

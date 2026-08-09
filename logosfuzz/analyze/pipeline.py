@@ -2,7 +2,7 @@
 ANA-05-03 오케스트레이터
 =========================
 
-ANA-05-01이 오탐(FALSE_POSITIVE)으로 확정한 크래시(`CrashRecord`)를 받아:
+ANA-05-01이 오탐(FALSE_POSITIVE)으로 확정한 크래시(`FalsePositiveCrash`)를 받아:
 
   1. 근본 원인 분석 (`rootcause.analyze_false_positive`)
   2. KB 변경 제안(diff) 생성 (`kb_feedback.propose_kb_update`) - 아직 KB 미반영
@@ -36,7 +36,7 @@ from src.knowledge_base import KnowledgeBase
 from . import commit, regenerate
 from .audit import AuditTrailStore
 from .kb_feedback import KBOverrideStore, propose_kb_update, rebuild_with_overrides
-from .models import CrashRecord, KBUpdateProposal, RegenerationRecord, RootCauseAnalysis
+from .models import FalsePositiveCrash, KBUpdateProposal, RegenerationRecord, RootCauseAnalysis
 from .rootcause import analyze_false_positive
 
 
@@ -64,7 +64,7 @@ def _latest_item_id(hitl: HITLManager, project: str, target: str) -> Optional[st
 
 
 def run_ana_05_03(
-    crash: CrashRecord,
+    crash: FalsePositiveCrash,
     kb: KnowledgeBase,
     llm: LLMClient,
     hitl: HITLManager,
@@ -78,7 +78,7 @@ def run_ana_05_03(
     project: str = "",
 ) -> FeedbackOutcome:
     """ANA-05-03 5단계 오케스트레이션. `crash.verdict`는 항상 FALSE_POSITIVE다
-    (`CrashRecord.__post_init__`이 강제)."""
+    (`FalsePositiveCrash.__post_init__`이 강제)."""
     analysis = analyze_false_positive(crash, kb, llm)
 
     proposal = propose_kb_update(analysis, crash.harness_id, overrides)

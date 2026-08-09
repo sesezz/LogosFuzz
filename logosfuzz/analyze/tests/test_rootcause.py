@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-from ana_05_02_cve_reporting.schema import Verdict
-
-from logosfuzz.analyze.models import CrashRecord
+from logosfuzz.analyze.models import FalsePositiveCrash, Verdict
 from logosfuzz.analyze.rootcause import analyze_false_positive
 from logosfuzz.generate.llm import FnLLMClient, ScriptedLLMClient
 from src.knowledge_base import KnowledgeBase
@@ -33,8 +31,8 @@ def _kb_with_api(api_id: int = 101) -> KnowledgeBase:
     return KnowledgeBase(documents=[document])
 
 
-def _crash(api_id: int = 101, verdict: Verdict = Verdict.FALSE_POSITIVE) -> CrashRecord:
-    return CrashRecord(
+def _crash(api_id: int = 101, verdict: Verdict = Verdict.FALSE_POSITIVE) -> FalsePositiveCrash:
+    return FalsePositiveCrash(
         crash_id="crash-1",
         api_id=api_id,
         harness_id="harness-1",
@@ -45,7 +43,7 @@ def _crash(api_id: int = 101, verdict: Verdict = Verdict.FALSE_POSITIVE) -> Cras
     )
 
 
-class TestCrashRecord(unittest.TestCase):
+class TestFalsePositiveCrash(unittest.TestCase):
     def test_rejects_non_false_positive_verdict(self):
         with self.assertRaises(ValueError):
             _crash(verdict=Verdict.TRUE_POSITIVE)

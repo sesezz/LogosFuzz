@@ -1,15 +1,26 @@
-"""
-ANA-05-03 지식 베이스 역피드백 및 하네스 재생성 - 데이터 모델
+"""ANA 파트 공용 데이터 모델.
 
-ANA-05-01(정탐/오탐 판별)이 오탐(FALSE_POSITIVE)으로 판정한 크래시에 대해
-근본 원인을 분석하고, 그 결과를 지식베이스에 반영하기 위한 제안(diff)과
-승인 이후 재생성 시도를 추적하는 타입을 정의한다.
+파이프라인 위치:
+    EXT → SCH → GEN → EXE-04-01(격리 실행) → EXE-04-02(Sanitizer 모니터링)
+        → **ANA-05-04(Crash Deduplication)** → **ANA-05-01(정/오탐 판별)**
+        → **ANA-05-03(지식 베이스 역피드백 및 하네스 재생성)** → ANA-05-02(CVE 리포트)
 
-기존 ERD(API_METADATA / HARNESS / CRASH_REPORT)를 그대로 참조하며, 여기서
-새로 정의하는 타입은 그 레코드들을 잇는 "역피드백 절차"의 중간 산출물이다.
-crash_id / api_id / harness_id 를 모든 타입이 함께 들고 다니는 것은
-감사(audit) 추적성 요구사항 때문이다.
+EXE-04-02(``logosfuzz/execute/sanitizer.py``)가 남긴 ``SanitizerFinding`` JSONL을
+ANA 파트가 소비한다. 이 모듈은 그 원시 이벤트를 감싸는 정규화 레코드
+(:class:`CrashRecord`), 중복 제거 결과(:class:`CrashCluster`), 정/오탐 판별
+결과(:class:`TriageResult`), 그리고 ANA-05-03이 오탐 확정 건에 대해 만드는
+역피드백 산출물(:class:`RootCauseAnalysis`, :class:`KBUpdateProposal`,
+:class:`RegenerationRecord`)을 함께 정의한다.
+
+의존성 원칙: 표준 라이브러리만 사용한다(프로젝트 pyproject ``dependencies=[]``).
+ANA-05-02(``ana_05_02_cve_reporting``)와는 코드 import가 아니라 **문자열 계약**
+(verdict 값 = ``"true_positive"``/``"false_positive"``/``"needs_review"``)으로만
+연결한다 - 두 패키지가 서로를 import하지 않아 순환 의존을 원천 차단한다. 이
+모듈의 :class:`Verdict`가 그 계약을 대표하는 로컬 정의이며, ANA-05-03의
+:class:`FalsePositiveCrash`도 (과거 ``ana_05_02_cve_reporting.schema.Verdict``를
+직접 import하던 것에서) 이 로컬 enum을 쓰도록 통일했다.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -17,44 +28,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
-
-from ana_05_02_cve_reporting.schema import Verdict
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def new_id(prefix: str) -> str:
-    return f"{prefix}-{uuid.uuid4().hex[:12]}"
-
-
-class ProposalStatus(str, Enum):
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-"""ANA 파트 공용 데이터 모델.
-
-파이프라인 위치:
-    EXT → SCH → GEN → EXE-04-01(격리 실행) → EXE-04-02(Sanitizer 모니터링)
-        → **ANA-05-04(Crash Deduplication)** → **ANA-05-01(정/오탐 판별)**
-        → ANA-05-02(CVE 리포트)
-
-EXE-04-02(``logosfuzz/execute/sanitizer.py``)가 남긴 ``SanitizerFinding`` JSONL을
-ANA 파트가 소비한다. 이 모듈은 그 원시 이벤트를 감싸는 정규화 레코드
-(:class:`CrashRecord`), 중복 제거 결과(:class:`CrashCluster`), 그리고
-정/오탐 판별 결과(:class:`TriageResult`)를 정의한다.
-
-의존성 원칙: 표준 라이브러리만 사용한다(프로젝트 pyproject ``dependencies=[]``).
-ANA-05-02(``ana_05_02_cve_reporting``)와는 코드 import가 아니라 **문자열 계약**
-(verdict 값 = ``"true_positive"``/``"false_positive"``/``"needs_review"``)으로만
-연결한다. 두 패키지가 서로를 import하지 않아 순환 의존을 원천 차단한다.
-"""
-
-from __future__ import annotations
-
-from dataclasses import dataclass, field
-from enum import Enum
 
 
 class Verdict(str, Enum):
@@ -70,6 +43,9 @@ class Verdict(str, Enum):
     NEEDS_REVIEW = "needs_review"
 
 
+# =============================================================================
+# ANA-05-04 (Crash Deduplication): Frame / CrashRecord / CrashCluster
+# =============================================================================
 @dataclass(frozen=True)
 class Frame:
     """콜스택 프레임 1개(파일 경로 + 줄 번호).
@@ -89,11 +65,209 @@ class Frame:
 
 @dataclass
 class CrashRecord:
+    """EXE-04-02 ``SanitizerFinding`` 1건을 감싼 ANA 입력 레코드.
+
+    Attributes:
+        sanitizer: "ASAN" | "TSAN" 등.
+        category: EXE-04-02가 정규화한 결함 유형(예: ``use-after-free``).
+        error_reason: sanitizer 원인 문자열 원문.
+        traceback: 콜스택 프레임 목록(상단이 크래시 지점).
+        raw_log: 결함 블록 원문 로그 라인.
+        base_signature: EXE-04-02가 만든 1-프레임 기본 시그니처
+            (``category_file_line``). ANA-05-04는 이보다 정교한 다중 프레임
+            시그니처를 새로 만든다.
+        group: 산출한 로직 그룹명(로그 파일 기준).
+        crash_input: 이 결함을 유발한 크래시 입력 파일 경로(있으면).
+    """
+
+    sanitizer: str
+    category: str
+    error_reason: str = ""
+    traceback: list[Frame] = field(default_factory=list)
+    raw_log: list[str] = field(default_factory=list)
+    base_signature: str = ""
+    group: str = ""
+    crash_input: str | None = None
+
+    @classmethod
+    def from_finding(cls, data: dict, group: str = "", crash_input: str | None = None) -> "CrashRecord":
+        """EXE-04-02 ``SanitizerFinding.to_dict()`` 결과 dict에서 생성."""
+        frames = [
+            Frame(str(f.get("file", "")), int(f.get("line", 0)))
+            for f in data.get("traceback", [])
+            if f.get("file")
+        ]
+        return cls(
+            sanitizer=data.get("sanitizer", "unknown"),
+            category=data.get("category", "unknown"),
+            error_reason=data.get("error_reason", ""),
+            traceback=frames,
+            raw_log=list(data.get("raw_log", [])),
+            base_signature=data.get("signature", ""),
+            group=group or data.get("group", ""),
+            crash_input=crash_input,
+        )
+
+
+@dataclass
+class CrashCluster:
+    """ANA-05-04 산출물: 같은 결함으로 판정된 크래시 묶음 1개.
+
+    Attributes:
+        cluster_id: 시그니처 다이제스트 기반 안정적 식별자.
+        signature: 사람이 읽는 다중 프레임 시그니처 문자열.
+        bug_type: 대표 결함 유형(=대표 레코드 category).
+        count: 이 묶음에 병합된 원시 결함 개수.
+        representative: 대표 레코드(처음 관측된 결함).
+        members: 병합된 모든 레코드.
+        crash_inputs: 병합된 크래시 입력 파일 경로 목록(중복 제거).
+        first_seen_index: 전체 입력 순서상 처음 등장한 위치(재현성/정렬용).
+    """
+
+    cluster_id: str
+    signature: str
+    bug_type: str
+    representative: CrashRecord
+    members: list[CrashRecord] = field(default_factory=list)
+    first_seen_index: int = 0
+
+    @property
+    def count(self) -> int:
+        return len(self.members)
+
+    @property
+    def crash_inputs(self) -> list[str]:
+        seen: list[str] = []
+        for m in self.members:
+            if m.crash_input and m.crash_input not in seen:
+                seen.append(m.crash_input)
+        return seen
+
+    @property
+    def groups(self) -> list[str]:
+        seen: list[str] = []
+        for m in self.members:
+            if m.group and m.group not in seen:
+                seen.append(m.group)
+        return seen
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CrashCluster":
+        """``to_dict()`` 결과(예: dedup.json의 clusters 항목)에서 복원한다.
+
+        ANA-05-01 triage가 저장된 Dedup 결과 파일을 입력으로 받을 때 사용한다.
+        판별에 필요한 대표 레코드/유형/개수를 복원하며, members는 개수를 보존하기
+        위한 대표 레코드의 반복으로 채운다(정/오탐 판별은 개수·대표만 사용).
+        """
+        rep = CrashRecord(
+            sanitizer=data.get("sanitizer", "unknown"),
+            category=data.get("bug_type", "unknown"),
+            error_reason=data.get("error_reason", ""),
+            traceback=[Frame(str(f["file"]), int(f["line"])) for f in data.get("traceback", [])],
+            raw_log=list(data.get("raw_log", [])),
+            base_signature=data.get("base_signature", ""),
+            group=(data.get("groups") or [""])[0],
+        )
+        count = int(data.get("count", 1))
+        return cls(
+            cluster_id=data.get("cluster_id", ""),
+            signature=data.get("signature", ""),
+            bug_type=data.get("bug_type", rep.category),
+            representative=rep,
+            members=[rep] * max(1, count),
+            first_seen_index=int(data.get("first_seen_index", 0)),
+        )
+
+    def to_dict(self) -> dict:
+        rep = self.representative
+        return {
+            "cluster_id": self.cluster_id,
+            "signature": self.signature,
+            "bug_type": self.bug_type,
+            "count": self.count,
+            "sanitizer": rep.sanitizer,
+            "error_reason": rep.error_reason,
+            "crash_location": (
+                f"{rep.traceback[0].file}:{rep.traceback[0].line}" if rep.traceback else None
+            ),
+            "traceback": [{"file": f.file, "line": f.line} for f in rep.traceback],
+            "groups": self.groups,
+            "crash_inputs": self.crash_inputs,
+            "first_seen_index": self.first_seen_index,
+            "base_signature": rep.base_signature,
+            "raw_log": rep.raw_log,
+        }
+
+
+# =============================================================================
+# ANA-05-01 (LLM 기반 정/오탐 판별): TriageResult
+# =============================================================================
+@dataclass
+class TriageResult:
+    """ANA-05-01 산출물: 하나의 크래시 묶음에 대한 정/오탐 판별.
+
+    ``to_triage_dict()``는 ANA-05-02 ``build_cve_report(triage_result=...)``가
+    바로 소비하는 계약 dict를 반환한다.
+    """
+
+    verdict: Verdict
+    confidence: float  # 0.0 ~ 1.0
+    rationale: str
+    triage_model: str
+    cluster_id: str = ""
+    signals: list[str] = field(default_factory=list)  # 판단에 쓰인 근거 신호(설명가능성)
+
+    def to_triage_dict(self) -> dict:
+        """ANA-05-02 입력 계약(triage_result) 형식."""
+        return {
+            "verdict": self.verdict.value,
+            "confidence": round(float(self.confidence), 4),
+            "rationale": self.rationale,
+            "triage_model": self.triage_model,
+        }
+
+    def to_dict(self) -> dict:
+        d = self.to_triage_dict()
+        d["cluster_id"] = self.cluster_id
+        d["signals"] = self.signals
+        return d
+
+
+# =============================================================================
+# ANA-05-03 (지식 베이스 역피드백 및 하네스 재생성)
+# =============================================================================
+#
+# ANA-05-01이 위 TriageResult로 판별하지만, 그 출력은 (verdict/confidence/
+# rationale/cluster_id) 중심이고 ANA-05-03이 필요로 하는 api_id/harness_id/
+# run_id/asan_log 원문까지는 아직 매핑해 주지 않는다(그 매핑을 어느 단계가
+# 책임질지는 ANA-05-01/02 통합 시점에 결정될 사안). 그래서 ANA-05-03은
+# 독립적으로 검증 가능하도록 `FalsePositiveCrash`라는 최소 입력 계약을 스텁으로
+# 둔다. 위 `CrashRecord`(ANA-05-04)와 이름이 겹치지 않도록 의도적으로 다른
+# 이름을 썼다 - "역피드백 대상이 되는, 이미 오탐으로 확정된 크래시 1건"이라는
+# 좁은 의미만 담는다. `TriageResult`/`CrashCluster`가 매핑 정보까지 갖추게
+# 되면 그것으로부터 이 타입을 채우는 어댑터로 교체하는 것을 권장한다.
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def new_id(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:12]}"
+
+
+class ProposalStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+@dataclass
+class FalsePositiveCrash:
     """ANA-05-01 산출물을 대신하는 최소 입력 계약(스텁).
 
-    ANA-05-01이 실제로 구현되면 이 필드들만 채워 넘기면 된다. 이 저장소에는
-    아직 정탐/오탐 판별 로직 자체가 없으므로(ANA-05-03만 단독으로 검증 가능하도록)
-    verdict가 이미 확정된 값으로 들어온다고 전제한다.
+    ANA-05-01의 실제 출력(`TriageResult`)이 api_id/harness_id/run_id/asan_log
+    매핑까지 제공하게 되면 이 필드들만 채워 넘기면 된다.
     """
 
     crash_id: str
@@ -105,9 +279,9 @@ class CrashRecord:
     confidence: float = 0.0
 
     def __post_init__(self) -> None:
-        if self.verdict is not Verdict.FALSE_POSITIVE:
+        if self.verdict != Verdict.FALSE_POSITIVE:
             raise ValueError(
-                f"CrashRecord.verdict must be FALSE_POSITIVE for ANA-05-03 "
+                f"FalsePositiveCrash.verdict must be FALSE_POSITIVE for ANA-05-03 "
                 f"(got {self.verdict.value!r}); this stage only runs after a "
                 f"false-positive verdict"
             )
@@ -255,166 +429,4 @@ class RegenerationRecord:
             "rounds_used": self.rounds_used,
             "compiled_ok": self.compiled_ok,
             "triggered_at": self.triggered_at,
-    """EXE-04-02 ``SanitizerFinding`` 1건을 감싼 ANA 입력 레코드.
-
-    Attributes:
-        sanitizer: "ASAN" | "TSAN" 등.
-        category: EXE-04-02가 정규화한 결함 유형(예: ``use-after-free``).
-        error_reason: sanitizer 원인 문자열 원문.
-        traceback: 콜스택 프레임 목록(상단이 크래시 지점).
-        raw_log: 결함 블록 원문 로그 라인.
-        base_signature: EXE-04-02가 만든 1-프레임 기본 시그니처
-            (``category_file_line``). ANA-05-04는 이보다 정교한 다중 프레임
-            시그니처를 새로 만든다.
-        group: 산출한 로직 그룹명(로그 파일 기준).
-        crash_input: 이 결함을 유발한 크래시 입력 파일 경로(있으면).
-    """
-
-    sanitizer: str
-    category: str
-    error_reason: str = ""
-    traceback: list[Frame] = field(default_factory=list)
-    raw_log: list[str] = field(default_factory=list)
-    base_signature: str = ""
-    group: str = ""
-    crash_input: str | None = None
-
-    @classmethod
-    def from_finding(cls, data: dict, group: str = "", crash_input: str | None = None) -> "CrashRecord":
-        """EXE-04-02 ``SanitizerFinding.to_dict()`` 결과 dict에서 생성."""
-        frames = [
-            Frame(str(f.get("file", "")), int(f.get("line", 0)))
-            for f in data.get("traceback", [])
-            if f.get("file")
-        ]
-        return cls(
-            sanitizer=data.get("sanitizer", "unknown"),
-            category=data.get("category", "unknown"),
-            error_reason=data.get("error_reason", ""),
-            traceback=frames,
-            raw_log=list(data.get("raw_log", [])),
-            base_signature=data.get("signature", ""),
-            group=group or data.get("group", ""),
-            crash_input=crash_input,
-        )
-
-
-@dataclass
-class CrashCluster:
-    """ANA-05-04 산출물: 같은 결함으로 판정된 크래시 묶음 1개.
-
-    Attributes:
-        cluster_id: 시그니처 다이제스트 기반 안정적 식별자.
-        signature: 사람이 읽는 다중 프레임 시그니처 문자열.
-        bug_type: 대표 결함 유형(=대표 레코드 category).
-        count: 이 묶음에 병합된 원시 결함 개수.
-        representative: 대표 레코드(처음 관측된 결함).
-        members: 병합된 모든 레코드.
-        crash_inputs: 병합된 크래시 입력 파일 경로 목록(중복 제거).
-        first_seen_index: 전체 입력 순서상 처음 등장한 위치(재현성/정렬용).
-    """
-
-    cluster_id: str
-    signature: str
-    bug_type: str
-    representative: CrashRecord
-    members: list[CrashRecord] = field(default_factory=list)
-    first_seen_index: int = 0
-
-    @property
-    def count(self) -> int:
-        return len(self.members)
-
-    @property
-    def crash_inputs(self) -> list[str]:
-        seen: list[str] = []
-        for m in self.members:
-            if m.crash_input and m.crash_input not in seen:
-                seen.append(m.crash_input)
-        return seen
-
-    @property
-    def groups(self) -> list[str]:
-        seen: list[str] = []
-        for m in self.members:
-            if m.group and m.group not in seen:
-                seen.append(m.group)
-        return seen
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "CrashCluster":
-        """``to_dict()`` 결과(예: dedup.json의 clusters 항목)에서 복원한다.
-
-        ANA-05-01 triage가 저장된 Dedup 결과 파일을 입력으로 받을 때 사용한다.
-        판별에 필요한 대표 레코드/유형/개수를 복원하며, members는 개수를 보존하기
-        위한 대표 레코드의 반복으로 채운다(정/오탐 판별은 개수·대표만 사용).
-        """
-        rep = CrashRecord(
-            sanitizer=data.get("sanitizer", "unknown"),
-            category=data.get("bug_type", "unknown"),
-            error_reason=data.get("error_reason", ""),
-            traceback=[Frame(str(f["file"]), int(f["line"])) for f in data.get("traceback", [])],
-            raw_log=list(data.get("raw_log", [])),
-            base_signature=data.get("base_signature", ""),
-            group=(data.get("groups") or [""])[0],
-        )
-        count = int(data.get("count", 1))
-        return cls(
-            cluster_id=data.get("cluster_id", ""),
-            signature=data.get("signature", ""),
-            bug_type=data.get("bug_type", rep.category),
-            representative=rep,
-            members=[rep] * max(1, count),
-            first_seen_index=int(data.get("first_seen_index", 0)),
-        )
-
-    def to_dict(self) -> dict:
-        rep = self.representative
-        return {
-            "cluster_id": self.cluster_id,
-            "signature": self.signature,
-            "bug_type": self.bug_type,
-            "count": self.count,
-            "sanitizer": rep.sanitizer,
-            "error_reason": rep.error_reason,
-            "crash_location": (
-                f"{rep.traceback[0].file}:{rep.traceback[0].line}" if rep.traceback else None
-            ),
-            "traceback": [{"file": f.file, "line": f.line} for f in rep.traceback],
-            "groups": self.groups,
-            "crash_inputs": self.crash_inputs,
-            "first_seen_index": self.first_seen_index,
-            "base_signature": rep.base_signature,
-            "raw_log": rep.raw_log,
         }
-
-
-@dataclass
-class TriageResult:
-    """ANA-05-01 산출물: 하나의 크래시 묶음에 대한 정/오탐 판별.
-
-    ``to_triage_dict()``는 ANA-05-02 ``build_cve_report(triage_result=...)``가
-    바로 소비하는 계약 dict를 반환한다.
-    """
-
-    verdict: Verdict
-    confidence: float  # 0.0 ~ 1.0
-    rationale: str
-    triage_model: str
-    cluster_id: str = ""
-    signals: list[str] = field(default_factory=list)  # 판단에 쓰인 근거 신호(설명가능성)
-
-    def to_triage_dict(self) -> dict:
-        """ANA-05-02 입력 계약(triage_result) 형식."""
-        return {
-            "verdict": self.verdict.value,
-            "confidence": round(float(self.confidence), 4),
-            "rationale": self.rationale,
-            "triage_model": self.triage_model,
-        }
-
-    def to_dict(self) -> dict:
-        d = self.to_triage_dict()
-        d["cluster_id"] = self.cluster_id
-        d["signals"] = self.signals
-        return d
