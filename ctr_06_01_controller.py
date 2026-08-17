@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv(r"C:\Users\suhwo\Desktop\한이음\LogosFuzz\.env")
+load_dotenv()  # cwd부터 상위로 .env 자동 탐색 (팀원 환경마다 경로가 다르므로 하드코딩 금지)
 
 
 # ---------------------------------------------------------------------

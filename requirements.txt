@@ -1,3 +1,6 @@
 clang
+libclang
 tree_sitter
 pytest
+openai
+python-dotenv

@@ -11,7 +11,10 @@ import sys
 import json
 import re
 import argparse
+import logging
 from collections import Counter
+
+logger = logging.getLogger(__name__)
 
 try:
     from clang import cindex
@@ -22,13 +25,37 @@ except Exception:
 
 def analyze_with_clang(path, clang_args=None):
     if clang_args is None:
-        clang_args = ['-std=c11']
+        # 시스템 include 경로를 명시하지 않으면 libclang이 size_t 같은
+        # 표준 typedef를 resolve하지 못하고 int로 잘못 파싱한다.
+        # clang 내장 resource dir을 찾아서 자동으로 추가한다.
+        import subprocess, shutil
+        clang_args = ["-std=c11"]
+        clang_bin = shutil.which("clang") or "clang"
+        try:
+            resource_dir = subprocess.check_output(
+                [clang_bin, "-print-resource-dir"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+            if resource_dir:
+                clang_args += [f"-I{resource_dir}/include"]
+        except Exception:
+            pass
 
     try:
         index = cindex.Index.create()
         tu = index.parse(path, args=clang_args)
-    except Exception:
-        return analyze_simple(path)
+    except Exception as e:
+        logger.warning(
+            "libclang을 사용할 수 없어 정규식 폴백으로 전환합니다 (%s: %s). "
+            "이 폴백은 'nodes'/'FUNCTION_DECL' 스키마를 만들지 않으므로 "
+            "다운스트림(ext_to_api_metadata)이 API를 0개로 인식할 수 있습니다. "
+            "`pip install libclang`으로 해결 가능합니다.",
+            type(e).__name__, e,
+        )
+        result = analyze_simple(path)
+        result["clang_fallback"] = True
+        return result
 
     nodes = []
 
@@ -38,7 +65,30 @@ def analyze_with_clang(path, clang_args=None):
             loc = f"{node.location.file}:{node.location.line}" if node.location.file else None
         except Exception:
             loc = None
-        nodes.append({'kind': node.kind.name, 'spelling': node.spelling or '', 'location': loc})
+        entry = {'kind': node.kind.name, 'spelling': node.spelling or '', 'location': loc}
+
+        if node.kind == cindex.CursorKind.FUNCTION_DECL:
+            try:
+                entry['return_type'] = node.result_type.spelling
+            except Exception:
+                entry['return_type'] = None
+            try:
+                entry['params'] = [
+                    {'name': a.spelling or '', 'type': a.type.spelling}
+                    for a in node.get_arguments()
+                ]
+            except Exception:
+                entry['params'] = []
+            try:
+                entry['is_static'] = (node.storage_class == cindex.StorageClass.STATIC)
+            except Exception:
+                entry['is_static'] = False
+            try:
+                entry['is_definition'] = node.is_definition()
+            except Exception:
+                entry['is_definition'] = False
+
+        nodes.append(entry)
         for c in node.get_children():
             walk(c)
 

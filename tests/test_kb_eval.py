@@ -134,7 +134,10 @@ def test_underscore_functions_are_not_scored_as_false_positives(tmp_path):
         encoding="utf-8",
     )
 
-    result = evaluate([str(tmp_path)])
+    # 이 테스트는 nm 티어의 언더스코어 필터링 동작 자체를 검증한다.
+    # libclang이 설치된 환경에서는 clang 티어가 nm보다 먼저 성공하므로,
+    # prefer="nm"으로 강제해야 nm 티어 로직을 실제로 검증할 수 있다.
+    result = evaluate([str(tmp_path)], prefer="nm")
 
     assert result["ground_truth"]["source"] == "nm"
     assert result["extraction_accuracy"]["precision"] == 1.0

@@ -39,13 +39,23 @@ def load_jsonl_findings(path: str | Path, group: str = "") -> list[CrashRecord]:
 
 
 def load_sanitizer_dir(logs_dir: str | Path) -> list[CrashRecord]:
-    """``out/logs/sanitizer/`` 디렉터리의 모든 ``*.jsonl``을 읽는다."""
+    """디렉터리 아래의 모든 ``*.jsonl``을 재귀적으로 읽는다.
+
+    ``logosfuzz fuzz``의 출력 디렉터리(예: ``out/``)를 그대로 넘겨도,
+    한 단계 아래인 ``out/logs/sanitizer/*.jsonl``까지 찾아내도록
+    ``glob`` 대신 ``rglob``을 사용한다. 같은 디렉터리에 ``fuzz_summary.json``이
+    있으면 그것도 함께 읽는다(둘 다 있어도 CrashRecord는 이후 단계에서
+    중복 제거되므로 안전하다).
+    """
     root = Path(logs_dir)
     records: list[CrashRecord] = []
     if not root.exists():
         return records
-    for f in sorted(root.glob("*.jsonl")):
+    for f in sorted(root.rglob("*.jsonl")):
         records.extend(load_jsonl_findings(f, group=f.stem))
+    summary = root / "fuzz_summary.json"
+    if summary.exists():
+        records.extend(load_fuzz_summary(summary))
     return records
 
 

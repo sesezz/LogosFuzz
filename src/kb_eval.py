@@ -101,6 +101,11 @@ def clang_ground_truth(paths: Sequence[str],
 
     if parsed == 0:
         raise GroundTruthUnavailable("clang 이 파싱한 파일이 없음")
+    if not apis:
+        raise GroundTruthUnavailable(
+            f"clang 이 {parsed}개 파일을 파싱했지만 함수 정의를 찾지 못함 "
+            f"(선언만 있는 헤더거나 소스에 정의가 없는 경우)"
+        )
     return GroundTruth(source="clang", apis=apis,
                        note=f"libclang, {parsed} files, args={' '.join(args)}")
 

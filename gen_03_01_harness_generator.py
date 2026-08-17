@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from dataclasses import dataclass, field
 from openai import OpenAI
 
-load_dotenv(r"C:\Users\suhwo\Desktop\한이음\LogosFuzz\.env")
+load_dotenv()  # cwd부터 상위로 .env 자동 탐색 (팀원 환경마다 경로가 다르므로 하드코딩 금지)
 
 from sch_02_02_synergy_scheduler import (
     ApiMetadata, Constraint,
@@ -97,14 +97,44 @@ def collect_context(api_ids: list[int]) -> list[ApiContext]:
 # 4. Prompt Builder
 # ---------------------------------------------------------------------
 
-def build_prompt(group_name: str, contexts: list[ApiContext]) -> str:
+def build_prompt(group_name: str, contexts: list[ApiContext],
+                 header_content: str = "",
+                 header_filenames: list[str] | None = None) -> str:
     api_block = ""
+    extern_decls = ""
     for ctx in contexts:
         api_block += f"""
 - Function signature : {ctx.func_signature}
   Call order        : {" -> ".join(ctx.call_order)}
   Constraints       : {", ".join(ctx.constraints)}
   Spec source       : {ctx.source_type}
+"""
+        extern_decls += f"extern {ctx.func_signature};\n"
+
+    # 헤더 include 지시 — 내용을 복붙하는 게 아니라 #include 한 줄로 쓰도록 명시
+    # "복붙하라"고 시키면 LLM이 구조체를 중복 정의하는 원인이 됐음
+    header_include_lines = ""
+    header_section = ""
+    if header_filenames:
+        header_include_lines = "\n".join(f'#include "{h}"' for h in header_filenames)
+        header_section = f"""
+HEADER FILES:
+The target source is compiled with these headers available.
+Start your harness with EXACTLY these lines (in this order, nothing else before them):
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+{header_include_lines}
+
+The headers above already define all necessary types (structs, typedefs, etc).
+DO NOT redefine or redeclare any type — just use them directly after the includes.
+
+For reference, the header content is shown below (READ ONLY — do not copy-paste structs):
+```c
+{header_content}
+```
 """
 
     prompt = f"""You are a C/C++ security testing expert.
@@ -113,6 +143,13 @@ Write a libFuzzer fuzz driver in C for the following APIs.
 [Logic Group: {group_name}]
 {api_block}
 
+These functions are REAL functions that already exist in the target source
+file. At compile time, your driver file will be compiled together with the
+original target source file, so the real implementation will be linked in.
+{header_section}
+Use exactly these extern declarations AFTER the includes (copy verbatim):
+{extern_decls}
+
 STRICT RULES:
 1. Return type of LLVMFuzzerTestOneInput MUST be int, NEVER void
 2. All comments MUST be in English only, NEVER use Korean
@@ -120,8 +157,22 @@ STRICT RULES:
 4. Map input data(data, size) to API parameters appropriately
 5. Handle memory allocation/deallocation explicitly
 6. Output ONLY raw C code, no markdown, no explanation
+7. Do NOT write a function body for any extern function listed above.
+   Their real implementation is linked from the original target source.
+8. Do NOT invent or call any function not explicitly listed above.
+9. Do NOT define `main`. The fuzzing runtime provides its own `main`.
+10. Do NOT redefine or redeclare any struct, typedef, or function already
+    declared in the included headers. No duplicate typedefs. No empty structs.
+11. The FIRST lines of your output must be the #include lines shown above.
+    Do not add any code or comments before them.
+12. NEVER cast the fuzzer input (const uint8_t *data) directly to a mutable
+    pointer and pass it to a function that writes through that pointer.
+    Always malloc() + memcpy() a separate buffer first.
+    Direct const-cast causes libFuzzer to abort with
+    "fuzz target overwrites its const input".
 """
     return prompt
+
 
 
 # ---------------------------------------------------------------------
@@ -129,7 +180,9 @@ STRICT RULES:
 # ---------------------------------------------------------------------
 
 def generate_harness(schedule: list[ScheduleResult],
-                     logic_groups: dict[str, list[int]]) -> list[FuzzDriver]:
+                     logic_groups: dict[str, list[int]],
+                     header_content: str = "",
+                     header_filenames: list[str] | None = None) -> list[FuzzDriver]:
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     drivers = []
 
@@ -144,11 +197,13 @@ def generate_harness(schedule: list[ScheduleResult],
             print(f"  [WARN] {group_name} no context found, skipping")
             continue
 
-        prompt = build_prompt(group_name, contexts)
+        prompt = build_prompt(group_name, contexts,
+                              header_content=header_content,
+                              header_filenames=header_filenames)
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1000,
+            max_tokens=1500,
             temperature=0.2,
         )
         code = response.choices[0].message.content.strip()
