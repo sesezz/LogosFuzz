@@ -22,8 +22,43 @@ try:
 except Exception:
     HAVE_CLANG = False
 
+_libclang_resolved = False
+
+
+def _resolve_libclang():
+    """기본 탐색이 실패할 때만 pip ``libclang`` 패키지에 동봉된 라이브러리를 등록한다.
+
+    Windows에서는 동봉된 ``clang/native/libclang.dll``을 cindex가 자동으로
+    찾지 못해, 원인 없이 정규식 폴백에 빠진다(=다운스트림 API 0개).
+    기본 탐색이 되는 환경(주로 Linux)의 동작까지 바꾸지 않기 위해
+    먼저 그대로 시도해보고, 실패한 경우에만 동봉 라이브러리를 지정한다.
+    """
+    global _libclang_resolved
+    if _libclang_resolved or cindex.Config.loaded:
+        return
+    _libclang_resolved = True
+
+    try:
+        cindex.Index.create()
+        return  # 기본 탐색 성공 - 건드리지 않는다
+    except Exception:
+        pass
+
+    try:
+        import clang.native
+        native_dir = os.path.dirname(clang.native.__file__)
+        for lib_name in ("libclang.dll", "libclang.so", "libclang.dylib"):
+            candidate = os.path.join(native_dir, lib_name)
+            if os.path.exists(candidate):
+                cindex.Config.set_library_file(candidate)
+                return
+    except Exception:
+        pass
+
 
 def analyze_with_clang(path, clang_args=None):
+    _resolve_libclang()
+
     if clang_args is None:
         # 시스템 include 경로를 명시하지 않으면 libclang이 size_t 같은
         # 표준 typedef를 resolve하지 못하고 int로 잘못 파싱한다.
