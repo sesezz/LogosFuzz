@@ -42,13 +42,92 @@ from dataclasses import dataclass, field
 # 1. 시그니처 모델 및 파서
 # ---------------------------------------------------------------------
 
+# C 문법 구성요소. 함수 호출처럼 생겼지만 함수가 아니라서 절대 모킹 대상이
+# 되면 안 된다. 호출 심볼 목록을 넘겨주는 쪽(EXT/KB)이 걸러 주기를 기대하지
+# 않고 여기서도 막는다 - 실제로 can-utils 검증에서 `sizeof`가 모킹 후보로
+# 올라왔다.
+_C_CONSTRUCTS = {
+    "sizeof", "alignof", "_Alignof", "offsetof", "typeof", "__typeof__",
+    "va_start", "va_arg", "va_end", "va_copy",
+    "static_assert", "_Static_assert", "defined",
+    "if", "for", "while", "switch", "do", "else", "case", "goto", "return",
+}
+
 # libc 등 표준 런타임이 이미 제공하는 심볼은 모킹 대상에서 제외한다
 # (printf/malloc 등을 stub으로 덮으면 오히려 하네스가 깨진다).
+#
+# 왜 소켓/POSIX 계열까지 넣나
+# ---------------------------
+# 3단계 검증(linux-can/can-utils)에서 실제 SocketCAN 유틸리티 `isotpsend.c`를
+# 대상으로 돌리자 `socket`/`bind`/`setsockopt`/`close`/`write`/`if_nametoindex`
+# 같은 표준 POSIX 함수가 전부 "정의되지 않은 심볼"로 잡혀 stub 생성 대상이
+# 됐다. 목록이 stdio/string/stdlib 계열만 담고 있었기 때문이다.
+#
+# 이대로 하네스에 적용하면 두 가지가 터진다.
+#   1) 진짜 libc `socket()`과 시그니처가 다른 가짜 stub이 함께 컴파일되면서
+#      링크 충돌
+#   2) 링크가 통과하더라도 진짜 소켓 호출이 stub으로 조용히 대체되어, 대상이
+#      실제로는 아무 통신도 하지 않는 채 "정상 동작"으로 보임
+#
+# 자동차 오픈소스는 대부분 SocketCAN(`socket(PF_CAN,...)`,
+# `ioctl(SIOCGIFINDEX)`, `bind`, `setsockopt`)에 의존하므로, 이 목록을
+# 넓히지 않으면 "CAN/UDS 모킹이 실제 프로토콜에서 통하는가"의 답이 "아니오"가
+# 된다. 모킹해야 할 것은 libc가 아니라 **대상 라이브러리가 정의하지 않은
+# 프로토콜/장치 API**다.
 LIBC_ALLOWLIST = {
-    "printf", "fprintf", "sprintf", "snprintf", "puts", "putchar",
+    # stdio
+    "printf", "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf",
+    "vsprintf", "vsnprintf", "puts", "putchar", "putc", "fputc", "fputs",
+    "getc", "fgetc", "gets", "fgets", "scanf", "fscanf", "sscanf",
+    "fopen", "fdopen", "freopen", "fclose", "fread", "fwrite", "fflush",
+    "fseek", "ftell", "rewind", "feof", "ferror", "clearerr", "perror",
+    "setbuf", "setvbuf", "remove", "rename", "tmpfile",
+    # string / memory
     "malloc", "calloc", "realloc", "free", "memcpy", "memmove", "memset",
-    "strlen", "strcmp", "strncmp", "strcpy", "strncpy", "strcat", "strdup",
-    "abort", "exit", "assert", "getenv", "atoi", "atol", "qsort",
+    "memcmp", "memchr", "strlen", "strnlen", "strcmp", "strncmp",
+    "strcasecmp", "strncasecmp", "strcpy", "strncpy", "strcat", "strncat",
+    "strdup", "strndup", "strchr", "strrchr", "strstr", "strcasestr",
+    "strtok", "strtok_r", "strspn", "strcspn", "strpbrk", "strerror",
+    "strerror_r", "strsignal", "bzero", "bcopy",
+    # stdlib
+    "abort", "exit", "_exit", "atexit", "getenv", "setenv", "unsetenv",
+    "atoi", "atol", "atoll", "atof", "strtol", "strtoul", "strtoll",
+    "strtoull", "strtod", "strtof", "abs", "labs", "llabs", "div",
+    "qsort", "bsearch", "rand", "srand", "random", "srandom", "system",
+    # ctype
+    "isalpha", "isdigit", "isalnum", "isspace", "isxdigit", "isupper",
+    "islower", "isprint", "ispunct", "iscntrl", "isgraph", "toupper",
+    "tolower",
+    # POSIX 파일/디스크립터
+    "open", "close", "read", "write", "pread", "pwrite", "lseek", "fcntl",
+    "ioctl", "dup", "dup2", "pipe", "unlink", "stat", "fstat", "lstat",
+    "access", "mkdir", "rmdir", "chdir", "getcwd", "readlink", "fsync",
+    "mmap", "munmap", "isatty", "fileno",
+    # POSIX 소켓 / 네트워크 - SocketCAN 대상에 필수
+    "socket", "socketpair", "bind", "connect", "listen", "accept",
+    "send", "sendto", "sendmsg", "recv", "recvfrom", "recvmsg",
+    "setsockopt", "getsockopt", "getsockname", "getpeername", "shutdown",
+    "getaddrinfo", "freeaddrinfo", "gai_strerror", "getnameinfo",
+    "inet_ntop", "inet_pton", "inet_addr", "inet_ntoa",
+    "htons", "htonl", "ntohs", "ntohl",
+    "if_nametoindex", "if_indextoname", "if_nameindex", "if_freenameindex",
+    "select", "pselect", "poll", "ppoll",
+    "epoll_create", "epoll_create1", "epoll_ctl", "epoll_wait",
+    # 시간
+    "time", "clock", "clock_gettime", "clock_nanosleep", "gettimeofday",
+    "settimeofday", "localtime", "localtime_r", "gmtime", "gmtime_r",
+    "mktime", "strftime", "difftime", "nanosleep", "sleep", "usleep",
+    "alarm",
+    # 프로세스 / 시그널 / 스레드
+    "getpid", "getppid", "fork", "execv", "execvp", "execl", "execlp",
+    "waitpid", "wait", "kill", "signal", "sigaction", "sigemptyset",
+    "sigfillset", "sigaddset", "sigprocmask", "raise",
+    "pthread_create", "pthread_join", "pthread_mutex_init",
+    "pthread_mutex_lock", "pthread_mutex_unlock", "pthread_mutex_destroy",
+    "pthread_cond_init", "pthread_cond_wait", "pthread_cond_signal",
+    # 기타 유틸
+    "getopt", "getopt_long", "basename", "dirname", "assert",
+    "__assert_fail", "syslog", "openlog", "closelog",
     "LLVMFuzzerTestOneInput",  # 하네스 진입점은 GEN-03-01이 정의한다
 }
 
@@ -266,7 +345,7 @@ def find_mock_candidates(defined: list[str], called: list[str]) -> list[str]:
     seen: set[str] = set()
     candidates: list[str] = []
     for name in called:
-        if name in defined_set or name in LIBC_ALLOWLIST:
+        if name in defined_set or name in LIBC_ALLOWLIST or name in _C_CONSTRUCTS:
             continue
         if name in seen:
             continue
