@@ -3,8 +3,8 @@ import json
 import pytest
 
 from logosfuzz.common.models import SIGNAL_UDS_P2, SIGNAL_WATCHDOG, LogicGroup
-from src.knowledge_base import KnowledgeBase
-from src.logic_groups import (
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
+from logosfuzz.schedule.logic_groups import (
     build_groups,
     extract_groups,
     extract_realtime_signals,
@@ -319,7 +319,7 @@ def test_to_group_map_matches_sch_02_02_input_shape(kb):
 
 
 def test_priority_comes_from_synergy_when_available(kb):
-    pytest.importorskip("sch_02_02_synergy_scheduler")
+    pytest.importorskip("logosfuzz.schedule.sch_02_02_synergy_scheduler")
     groups = build_groups(kb, with_priority=True)
 
     assert any(g.priority > 0 for g in groups)

@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from src.kb_adapters import (
+from logosfuzz.knowledge.kb_adapters import (
     api_reference,
     as_include_path,
     call_sequences_by_file,
@@ -13,7 +13,7 @@ from src.kb_adapters import (
     suggest_fixes,
     to_synergy_inputs,
 )
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 HEADER = """
 #ifndef UDS_H
@@ -96,7 +96,7 @@ def kb(tmp_path):
 
 
 def test_to_synergy_inputs_produces_the_real_sch_dataclasses(kb):
-    sch = pytest.importorskip("sch_02_02_synergy_scheduler")
+    sch = pytest.importorskip("logosfuzz.schedule.sch_02_02_synergy_scheduler")
     apis, constraints = to_synergy_inputs(kb)
 
     assert apis and constraints
@@ -147,7 +147,7 @@ def test_source_type_can_be_overridden(kb):
 
 def test_synergy_pipeline_runs_on_real_b_modules(kb):
     """어댑터 출력이 B의 실제 계산 함수를 그대로 통과해야 한다."""
-    sch = pytest.importorskip("sch_02_02_synergy_scheduler")
+    sch = pytest.importorskip("logosfuzz.schedule.sch_02_02_synergy_scheduler")
     apis, constraints = to_synergy_inputs(kb)
 
     results = sch.compute_pairwise_synergy(apis, constraints)
@@ -158,7 +158,7 @@ def test_synergy_pipeline_runs_on_real_b_modules(kb):
 
 def test_call_adjacency_is_actually_scored(kb):
     """call_seq 에 자기 api_id 가 없으면 이 점수가 항상 0 이 된다 (회귀 방지)."""
-    sch = pytest.importorskip("sch_02_02_synergy_scheduler")
+    sch = pytest.importorskip("logosfuzz.schedule.sch_02_02_synergy_scheduler")
     apis, constraints = to_synergy_inputs(kb)
 
     results = sch.compute_pairwise_synergy(apis, constraints)
@@ -168,7 +168,7 @@ def test_call_adjacency_is_actually_scored(kb):
 
 
 def test_adjacent_calls_score_higher_than_distant_ones(kb):
-    sch = pytest.importorskip("sch_02_02_synergy_scheduler")
+    sch = pytest.importorskip("logosfuzz.schedule.sch_02_02_synergy_scheduler")
     apis, constraints = to_synergy_inputs(kb)
     results = {(r.api_a, r.api_b): r for r in sch.compute_pairwise_synergy(apis, constraints)}
 
@@ -181,8 +181,8 @@ def test_adjacent_calls_score_higher_than_distant_ones(kb):
 
 
 def test_resource_allocator_consumes_the_ranking(kb):
-    sch = pytest.importorskip("sch_02_02_synergy_scheduler")
-    alloc = pytest.importorskip("sch_02_03_resource_allocator")
+    sch = pytest.importorskip("logosfuzz.schedule.sch_02_02_synergy_scheduler")
+    alloc = pytest.importorskip("logosfuzz.schedule.sch_02_03_resource_allocator")
     apis, constraints = to_synergy_inputs(kb)
     results = sch.compute_pairwise_synergy(apis, constraints)
 

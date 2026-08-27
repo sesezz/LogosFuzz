@@ -6,7 +6,7 @@ import unittest
 from logosfuzz.analyze.models import FalsePositiveCrash, Verdict
 from logosfuzz.analyze.rootcause import analyze_false_positive
 from logosfuzz.generate.llm import FnLLMClient, ScriptedLLMClient
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 ASAN_LOG = """\
 ==1234==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xdeadbeef

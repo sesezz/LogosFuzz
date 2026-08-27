@@ -16,19 +16,19 @@ from dotenv import load_dotenv
 load_dotenv()  # cwd부터 상위로 .env 자동 탐색 (팀원 환경마다 경로가 다르므로 하드코딩 금지)
 
 # EXT 단계
-from src.ast_analyzer import analyze_file
+from logosfuzz.extract.ast_analyzer import analyze_file
 
 # SCH 단계
-from sch_02_02_synergy_scheduler import (
+from logosfuzz.schedule.sch_02_02_synergy_scheduler import (
     ApiMetadata, Constraint,
     compute_pairwise_synergy, rank_logic_groups,
 )
-from sch_02_03_resource_allocator import (
+from logosfuzz.schedule.sch_02_03_resource_allocator import (
     FuzzingRun, allocate_resources,
 )
 
 # GEN 단계
-from gen_03_01_harness_generator import (
+from logosfuzz.generate.gen_03_01_harness_generator import (
     ApiContext, collect_context, build_prompt,
     generate_harness, VECTOR_DB_MOCK,
 )

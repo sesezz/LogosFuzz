@@ -16,7 +16,7 @@ from logosfuzz.control.hitl.policy import HITLPolicy
 from logosfuzz.control.hitl.store import InMemoryReviewStore
 from logosfuzz.generate.compiler import FakeCompiler
 from logosfuzz.generate.llm import ScriptedLLMClient
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 ASAN_LOG = """\
 ==1234==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xdeadbeef

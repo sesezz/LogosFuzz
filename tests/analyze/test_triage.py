@@ -17,7 +17,7 @@ from logosfuzz.analyze.triage import (
     triage_clusters,
 )
 
-SAMPLE = Path(__file__).resolve().parent.parent / "samples" / "sanitizer_dlt.jsonl"
+SAMPLE = Path(__file__).resolve().parents[2] / "logosfuzz" / "analyze" / "samples" / "sanitizer_dlt.jsonl"
 
 
 def _cluster(category, frames, count=1, sanitizer="ASAN"):

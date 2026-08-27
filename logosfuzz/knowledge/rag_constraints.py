@@ -21,12 +21,12 @@ import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-from src.constraint_extractor import (
+from logosfuzz.extract.constraint_extractor import (
     FunctionFacts,
     extract_from_paths,
     iter_source_files,
 )
-from src.rag_index import BM25Index, DenseIndex, HybridRetriever
+from logosfuzz.knowledge.rag_index import BM25Index, DenseIndex, HybridRetriever
 
 KB_VERSION = 1
 
@@ -46,8 +46,8 @@ KIND_PRIORITY = {
 
 def _sources_from_compile_db(compile_db: str) -> List[str]:
     """compile_commands.json에서 소스 경로를 뽑아 실제 존재하는 것만 남긴다."""
-    from src.compile_commands import load_compile_commands
-    from src.compile_db_analyzer import normalize_path
+    from logosfuzz.extract.compile_commands import load_compile_commands
+    from logosfuzz.extract.compile_db_analyzer import normalize_path
 
     sources: List[str] = []
     for entry in load_compile_commands(compile_db):

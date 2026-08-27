@@ -23,8 +23,8 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple
 
-from src.kb_adapters import harness_context
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.kb_adapters import harness_context
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 from logosfuzz.generate.compiler import Compiler
 from logosfuzz.generate.llm import LLMClient, extract_code

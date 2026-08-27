@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 
-from schema import CVEReport
+from .schema import CVEReport
 
 
 def render_json(report: CVEReport, indent: int = 2) -> str:

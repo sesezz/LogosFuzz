@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.bear_integration import run_bear_build
+from logosfuzz.extract.bear_integration import run_bear_build
 
 
 def test_run_bear_build_creates_compile_commands(tmp_path, monkeypatch):
@@ -17,8 +17,8 @@ def test_run_bear_build_creates_compile_commands(tmp_path, monkeypatch):
         output_path.write_text(json.dumps(expected), encoding="utf-8")
         return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
 
-    monkeypatch.setattr("src.bear_integration.shutil.which", lambda name: "/usr/bin/bear")
-    monkeypatch.setattr("src.bear_integration.subprocess.run", fake_run)
+    monkeypatch.setattr("logosfuzz.extract.bear_integration.shutil.which", lambda name: "/usr/bin/bear")
+    monkeypatch.setattr("logosfuzz.extract.bear_integration.subprocess.run", fake_run)
 
     result = run_bear_build("gcc -c sample.c", output_path=str(output_path), cwd=str(tmp_path))
 
@@ -28,7 +28,7 @@ def test_run_bear_build_creates_compile_commands(tmp_path, monkeypatch):
 
 
 def test_run_bear_build_requires_bear_binary(monkeypatch):
-    monkeypatch.setattr("src.bear_integration.shutil.which", lambda name: None)
+    monkeypatch.setattr("logosfuzz.extract.bear_integration.shutil.which", lambda name: None)
 
     with pytest.raises(FileNotFoundError):
         run_bear_build("gcc -c sample.c", output_path="compile_commands.json")

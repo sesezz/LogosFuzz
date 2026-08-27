@@ -14,10 +14,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ana_05_02_cve_reporting.asan_parser import ParsedAsanLog, parse_asan_log
+from logosfuzz.analyze.reporting.asan_parser import ParsedAsanLog, parse_asan_log
 
 from logosfuzz.generate.llm import LLMClient
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 from .models import FalsePositiveCrash, RootCauseAnalysis
 

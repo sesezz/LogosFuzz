@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from src.rag_index import (
+from logosfuzz.knowledge.rag_index import (
     BM25Index,
     HybridRetriever,
     expand_query,

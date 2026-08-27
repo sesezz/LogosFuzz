@@ -27,7 +27,7 @@ import threading
 from pathlib import Path
 from typing import List, Optional
 
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 from .models import KBUpdateProposal, RootCauseAnalysis, now_iso
 

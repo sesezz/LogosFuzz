@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from src.knowledge_base import (
+from logosfuzz.knowledge.knowledge_base import (
     KnowledgeBase,
     header_declaration_docs,
     scan_file,

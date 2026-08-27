@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from src.compile_commands import load_compile_commands, list_sources
+from logosfuzz.extract.compile_commands import load_compile_commands, list_sources
 
 
 def test_load_compile_commands(tmp_path):

@@ -31,7 +31,7 @@ from logosfuzz.control.hitl.gate import HITLManager
 from logosfuzz.control.hitl.models import Checkpoint, DecisionType
 from logosfuzz.generate.compiler import Compiler
 from logosfuzz.generate.llm import LLMClient
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 from . import commit, regenerate
 from .audit import AuditTrailStore

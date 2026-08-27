@@ -11,14 +11,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from asan_parser import parse_asan_log
-from cwe_mapping import lookup_cwe, UNKNOWN_CWE
-from cvss_estimator import estimate_cvss
-from report_generator import build_cve_report
-from render import render_json, render_markdown
-from schema import Verdict
+from logosfuzz.analyze.reporting.asan_parser import parse_asan_log
+from logosfuzz.analyze.reporting.cwe_mapping import lookup_cwe, UNKNOWN_CWE
+from logosfuzz.analyze.reporting.cvss_estimator import estimate_cvss
+from logosfuzz.analyze.reporting.report_generator import build_cve_report
+from logosfuzz.analyze.reporting.render import render_json, render_markdown
+from logosfuzz.analyze.reporting.schema import Verdict
 
-SAMPLES_DIR = Path(__file__).resolve().parent.parent / "samples"
+SAMPLES_DIR = Path(__file__).resolve().parents[2] / "logosfuzz" / "analyze" / "reporting" / "samples"
 
 
 def _load_sample(name: str) -> dict:
@@ -160,7 +160,7 @@ def test_build_cve_report_end_to_end_sample2():
 
 
 def test_report_id_format():
-    from schema import CVEReport
+    from logosfuzz.analyze.reporting.schema import CVEReport
 
     rid = CVEReport.new_report_id(sequence=7, year=2026)
     assert rid == "LOGOSFUZZ-2026-000007"

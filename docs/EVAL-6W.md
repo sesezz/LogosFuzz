@@ -1,6 +1,6 @@
 # 6주차 평가: KB Coverage / API 추출 정확도 / RAG 검색 성공률
 
-`src/kb_eval.py` 하나로 세 지표를 함께 측정한다.
+`logosfuzz/knowledge/kb_eval.py` 하나로 세 지표를 함께 측정한다.
 
 ```bash
 python -m src.kb_eval run --paths examples/uds --labels examples/uds/labels.json --report

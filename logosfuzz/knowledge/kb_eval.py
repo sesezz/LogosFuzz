@@ -29,9 +29,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from src.constraint_extractor import iter_source_files
-from src.knowledge_base import KnowledgeBase
-from src.rag_index import split_identifier
+from logosfuzz.extract.constraint_extractor import iter_source_files
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.rag_index import split_identifier
 
 EVAL_VERSION = 1
 

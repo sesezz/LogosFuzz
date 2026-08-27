@@ -2,7 +2,7 @@
 ANA-05-02 리포트 생성 CLI
 
 사용법:
-    python3 generate_report_cli.py samples/sample_crash_1.json --seq 1
+    python3 -m logosfuzz.analyze.reporting.generate_report_cli logosfuzz/analyze/reporting/samples/sample_crash_1.json --seq 1
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ import argparse
 import json
 from pathlib import Path
 
-from render import render_json, render_markdown
-from report_generator import build_cve_report
+from .render import render_json, render_markdown
+from .report_generator import build_cve_report
 
 
 def main() -> None:

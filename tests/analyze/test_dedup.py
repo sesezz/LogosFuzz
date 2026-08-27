@@ -8,7 +8,7 @@ from logosfuzz.analyze.dedup import CrashDeduplicator, deduplicate
 from logosfuzz.analyze.loader import load_jsonl_findings
 from logosfuzz.analyze.models import CrashRecord, Frame
 
-SAMPLE = Path(__file__).resolve().parent.parent / "samples" / "sanitizer_dlt.jsonl"
+SAMPLE = Path(__file__).resolve().parents[2] / "logosfuzz" / "analyze" / "samples" / "sanitizer_dlt.jsonl"
 
 
 def _rec(category, frames, group="g", crash_input=None):

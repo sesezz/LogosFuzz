@@ -32,7 +32,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-from src.constraint_extractor import (
+from logosfuzz.extract.constraint_extractor import (
     FunctionFacts,
     doc_constraints,
     extract_doc_comment,
@@ -40,8 +40,8 @@ from src.constraint_extractor import (
     iter_source_files,
     mask_source,
 )
-from src.rag_constraints import build_document
-from src.rag_index import BM25Index, DenseIndex, HybridRetriever
+from logosfuzz.knowledge.rag_constraints import build_document
+from logosfuzz.knowledge.rag_index import BM25Index, DenseIndex, HybridRetriever
 
 KB_VERSION = 1
 
@@ -148,8 +148,8 @@ def scan_file(path: str, text: Optional[str] = None) -> FileInfo:
 
 def _compile_db_entries(compile_db: str) -> Dict[str, dict]:
     """compile_commands.json 을 파일 경로 -> {flags, directory} 로 정리한다."""
-    from src.compile_commands import load_compile_commands
-    from src.compile_db_analyzer import extract_clang_args, normalize_path
+    from logosfuzz.extract.compile_commands import load_compile_commands
+    from logosfuzz.extract.compile_db_analyzer import extract_clang_args, normalize_path
 
     entries: Dict[str, dict] = {}
     for entry in load_compile_commands(compile_db):

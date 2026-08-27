@@ -27,7 +27,7 @@ from __future__ import annotations
 import re
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 # ---------------------------------------------------------------------------
 # B (SCH-02-02 / SCH-02-03) 지원
@@ -96,7 +96,7 @@ def to_synergy_inputs(
 
 def _synergy_classes():
     try:  # 실제 B 모듈이 있으면 그대로 쓴다
-        from sch_02_02_synergy_scheduler import ApiMetadata, Constraint
+        from logosfuzz.schedule.sch_02_02_synergy_scheduler import ApiMetadata, Constraint
 
         return ApiMetadata, Constraint
     except Exception:  # pragma: no cover - B 모듈이 없는 환경용 대체

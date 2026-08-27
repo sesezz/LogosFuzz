@@ -9,7 +9,7 @@ from logosfuzz.analyze.kb_feedback import (
     rebuild_with_overrides,
 )
 from logosfuzz.analyze.models import RootCauseAnalysis
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 
 def _kb() -> KnowledgeBase:

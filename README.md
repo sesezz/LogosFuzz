@@ -136,7 +136,7 @@ python -m src.knowledge_base stats --kb build/kb.json
 ```python
 from src.knowledge_base import KnowledgeBase
 from src.kb_adapters import to_synergy_inputs
-from sch_02_02_synergy_scheduler import compute_pairwise_synergy
+from logosfuzz.schedule.sch_02_02_synergy_scheduler import compute_pairwise_synergy
 
 kb = KnowledgeBase.load("build/kb.json")
 apis, constraints = to_synergy_inputs(kb)       # ApiMetadata / Constraint 를 그대로 생성
