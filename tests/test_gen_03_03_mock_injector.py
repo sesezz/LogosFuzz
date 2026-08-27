@@ -123,3 +123,36 @@ def test_insert_mocks_include_style():
     plan = build_mock_plan("lgh", defined=[], called=["dep"])
     out = insert_mocks("int main(){}", plan, style="include")
     assert '#include "mocks_lgh.h"' in out
+
+
+# --- libc 허용목록 범위 ----------------------------------------------------
+#
+# 3단계 검증(linux-can/can-utils, `isotpsend.c`)에서 표준 POSIX/소켓 함수가
+# 전부 "정의되지 않은 심볼"로 잡혀 stub 생성 대상이 됐다. 진짜 libc `socket()`과
+# 시그니처가 다른 가짜 stub 이 함께 컴파일되면 링크가 깨지거나, 진짜 소켓 호출이
+# stub 으로 조용히 대체되어 대상이 아무 통신도 안 하면서 정상으로 보인다.
+
+SOCKETCAN_CALLS = [
+    "socket", "bind", "setsockopt", "close", "write", "if_nametoindex",
+    "getopt", "perror", "scanf", "sscanf", "strtoul", "usleep", "basename",
+]
+
+
+def test_posix_socket_calls_are_not_mock_candidates():
+    assert find_mock_candidates([], SOCKETCAN_CALLS) == []
+
+
+def test_c_constructs_are_never_mock_candidates():
+    """`sizeof` 는 연산자지 함수가 아니다 - 실제로 후보에 올라왔었다."""
+    assert find_mock_candidates([], ["sizeof", "va_start", "offsetof"]) == []
+
+
+def test_protocol_apis_are_still_mock_candidates():
+    """허용목록을 넓혔다고 진짜 모킹 대상까지 놓치면 안 된다."""
+    candidates = find_mock_candidates([], ["isotp_send", "uds_read_did", "can_send"])
+    assert candidates == ["isotp_send", "uds_read_did", "can_send"]
+
+
+def test_locally_defined_socket_wrapper_is_not_mocked():
+    """대상이 직접 정의한 함수는 이름이 겹쳐도 모킹하지 않는다."""
+    assert find_mock_candidates(["can_socket_open"], ["can_socket_open", "socket"]) == []

@@ -391,3 +391,82 @@ def test_stats_reports_grouping_basis(kb):
     assert result["apis"] == len(kb.documents)
     assert result["groups_with_realtime_signal"] >= 1
     assert "uds_ctx_t" in result["state_types"]
+
+
+# -- 호출 관계 병합 범위 ----------------------------------------------------
+#
+# can-utils(API 675개) 실측에서 호출 관계를 제한 없이 이었더니 전이적 병합으로
+# API 의 90%(609/675)가 상태 타입 하나 밑으로 전부 빨려 들어갔다. 그룹은 GEN 이
+# 하네스 하나를 만드는 단위라, 이 크기면 퍼징 단위로 쓸 수 없다. 아래 테스트가
+# 그 병합 범위를 고정한다.
+
+TWO_MACHINES_HEADER = """
+#ifndef TWO_H
+#define TWO_H
+typedef struct a_ctx { int x; } a_ctx_t;
+typedef struct b_ctx { int y; } b_ctx_t;
+
+int a_open(a_ctx_t *ctx);
+int a_step(a_ctx_t *ctx);
+int b_open(b_ctx_t *ctx);
+int b_step(b_ctx_t *ctx);
+int shared_util(int v);
+#endif
+"""
+
+TWO_MACHINES_IMPL = """
+#include "two.h"
+
+int shared_util(int v) { return v + 1; }
+
+int a_open(a_ctx_t *ctx) { return shared_util(ctx->x); }
+
+int a_step(a_ctx_t *ctx)
+{
+    /* A 머신이 B 머신 API 를 부른다 - 그렇다고 한 상태 머신은 아니다 */
+    b_ctx_t tmp;
+    b_open(&tmp);
+    return ctx->x;
+}
+
+int b_open(b_ctx_t *ctx) { return ctx->y; }
+
+int b_step(b_ctx_t *ctx) { return shared_util(ctx->y); }
+"""
+
+
+@pytest.fixture
+def two_machines_kb(tmp_path):
+    (tmp_path / "two.h").write_text(TWO_MACHINES_HEADER, encoding="utf-8")
+    (tmp_path / "two.c").write_text(TWO_MACHINES_IMPL, encoding="utf-8")
+    return KnowledgeBase.build(paths=[str(tmp_path)])
+
+
+def test_call_edge_does_not_merge_two_state_machines(two_machines_kb):
+    """양쪽 다 상태 타입을 가지면 호출 관계로 잇지 않는다."""
+    groups = extract_groups(two_machines_kb)
+
+    assert _group_of(groups, "a_step") is not _group_of(groups, "b_open")
+
+
+def test_state_machine_members_stay_together(two_machines_kb):
+    """같은 핸들 타입을 쓰는 API 는 여전히 한 그룹이다."""
+    groups = extract_groups(two_machines_kb)
+
+    assert _group_of(groups, "a_open") is _group_of(groups, "a_step")
+    assert _group_of(groups, "b_open") is _group_of(groups, "b_step")
+
+
+def test_typeless_helper_is_absorbed_by_a_caller(two_machines_kb):
+    """핸들 타입이 없는 유틸은 호출 관계로 흡수된다(원래 의도)."""
+    groups = extract_groups(two_machines_kb)
+    helper_group = _group_of(groups, "shared_util")
+
+    assert len(helper_group.api_names) > 1
+
+
+def test_max_group_blocks_call_link_merging(two_machines_kb):
+    """상한을 1로 두면 호출 관계 병합이 아예 일어나지 않는다."""
+    groups = extract_groups(two_machines_kb, max_group=1)
+
+    assert _group_of(groups, "shared_util").api_names == ["shared_util"]
