@@ -34,6 +34,7 @@ from typing import Dict, Iterable, List, Optional, Sequence
 
 from src.constraint_extractor import (
     FunctionFacts,
+    destructure_macro_declaration,
     doc_constraints,
     extract_doc_comment,
     extract_from_text,
@@ -69,7 +70,7 @@ STRUCT_TAG_RE = re.compile(r"\b(?:struct|union)\s+([A-Za-z_]\w*)\s*\{")
 # 테스트/예제 코드로 볼 경로 표지.
 #
 # 왜 필요한가 - Eclipse S-CORE `logging` 저장소를 색인했더니 API 388개 중
-# **188개(48.5%)가 테스트 코드**였고, SCH 가 뽑은 최우선 로직 그룹이 전부
+# **187개(48.2%)가 테스트 코드**였고, SCH 가 뽑은 최우선 로직 그룹이 전부
 # gtest 픽스처(`SetUp`/`TearDown`)였다. 테스트 헬퍼를 퍼징 대상으로 올리면
 # GEN 이 그걸 호출하는 하네스를 만들고, 그 결과는 대상 라이브러리에 대해
 # 아무것도 말해 주지 않는다.
@@ -161,6 +162,35 @@ def header_declaration_docs(text: str) -> Dict[str, str]:
     return docs
 
 
+def macro_declared_symbols(masked: str) -> Dict[str, str]:
+    """매크로로 선언된 함수 이름 -> 파라미터 문자열.
+
+    libpng 은 공개 API 를 전부 `PNG_EXPORT(idx, rettype, name, (params));` 로
+    선언한다. 일반 프로토타입 정규식으로는 이름이 `PNG_EXPORT` 로 잡혀서
+    **헤더가 무엇을 선언하는지 알 수 없게 된다** — png.h 를 스캔하면 인식되는
+    심볼이 매크로 이름 7개뿐이었다. 그러면 `header_for()`/`declaring_files()`
+    가 무용해지고, "이 API 가 공개인가"를 판단할 수 없다.
+    """
+    found: Dict[str, str] = {}
+    for match in re.finditer(r"\b([A-Z][A-Z0-9_]{2,})\s*\(", masked):
+        open_paren = match.end() - 1
+        depth, close = 0, None
+        for i in range(open_paren, len(masked)):
+            if masked[i] == "(":
+                depth += 1
+            elif masked[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    close = i
+                    break
+        if close is None:
+            continue
+        parsed = destructure_macro_declaration(masked[open_paren + 1:close])
+        if parsed and parsed["name"] not in _NON_SYMBOLS:
+            found.setdefault(parsed["name"], parsed["return_type"])
+    return found
+
+
 def scan_file(path: str, text: Optional[str] = None) -> FileInfo:
     """파일에서 include / 선언 심볼 / 타입 이름을 뽑는다."""
     if text is None:
@@ -170,6 +200,8 @@ def scan_file(path: str, text: Optional[str] = None) -> FileInfo:
     declares = {
         name for name in DECL_RE.findall(masked) if name not in _NON_SYMBOLS
     }
+    # 매크로로 선언되는 API 도 헤더가 "선언한" 것으로 센다.
+    declares |= set(macro_declared_symbols(masked))
     types = set(TYPEDEF_BLOCK_RE.findall(masked))
     types |= {n for n in TYPEDEF_ALIAS_RE.findall(masked) if n not in _NON_SYMBOLS}
     types |= set(TAG_RE.findall(masked))
