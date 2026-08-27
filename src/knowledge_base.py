@@ -280,6 +280,14 @@ class KnowledgeBase:
             if path.endswith(HEADER_SUFFIXES)
         }
         for document in documents:
+            # 내부 링키지 여부. 별도 컴파일 단위인 하네스는 `static` 함수를
+            # extern 으로 링크할 수 없다. 이걸 기록해 두지 않으면 SCH 가 static
+            # 함수를 퍼징 대상 그룹에 넣고, GEN 이 그걸 호출하는 하네스를 만들어
+            # "undefined reference" 로 링크가 깨진다. 소스 수준 에러가 아니라
+            # 자가 치유 루프가 아무리 돌아도 고칠 수 없는 실패다.
+            document["is_static"] = (
+                document.get("signature", "").lstrip().startswith("static")
+            )
             document["called_by"] = sorted(set(callers.get(document["function"], [])))
             info = file_infos.get(document["file"])
             document["includes"] = list(info.includes) if info else []

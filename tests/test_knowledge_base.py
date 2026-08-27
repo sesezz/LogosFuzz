@@ -309,3 +309,47 @@ def test_saved_kb_keeps_korean_text(kb, tmp_path):
     payload = json.loads(path.read_text(encoding="utf-8"))
     document = next(d for d in payload["documents"] if d["function"] == "lib_open")
     assert "컨텍스트를 연다" in document["doc"]
+
+
+# -- 링키지 ---------------------------------------------------------------
+#
+# 4단계 검증(dlt-daemon 파싱 모듈)에서, SCH 가 `static` 함수를 퍼징 대상 그룹에
+# 넣고 GEN 이 그걸 호출하는 하네스를 만들어 "undefined reference" 로 링크가
+# 깨졌다. 소스 수준 에러가 아니라 자가 치유가 아무리 돌아도 못 고치는 실패다.
+# 소비자가 거를 수 있도록 KB 가 링키지를 기록해야 한다.
+
+LINKAGE_SOURCE = """
+#include <stddef.h>
+
+static int helper_internal(const char *buf, size_t len)
+{
+    return (int)len;
+}
+
+int lib_public_entry(const char *buf, size_t len)
+{
+    return helper_internal(buf, len);
+}
+"""
+
+
+def test_static_functions_are_marked(tmp_path):
+    (tmp_path / "linkage.c").write_text(LINKAGE_SOURCE, encoding="utf-8")
+    built = KnowledgeBase.build(paths=[str(tmp_path)])
+
+    internal = next(d for d in built.documents if d["function"] == "helper_internal")
+    public = next(d for d in built.documents if d["function"] == "lib_public_entry")
+
+    assert internal["is_static"] is True
+    assert public["is_static"] is False
+
+
+def test_linkage_survives_save_and_load(tmp_path):
+    (tmp_path / "linkage.c").write_text(LINKAGE_SOURCE, encoding="utf-8")
+    path = tmp_path / "kb.json"
+    KnowledgeBase.build(paths=[str(tmp_path)]).save(str(path))
+
+    reloaded = KnowledgeBase.load(str(path))
+    internal = next(d for d in reloaded.documents if d["function"] == "helper_internal")
+
+    assert internal["is_static"] is True
