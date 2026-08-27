@@ -5,13 +5,14 @@ GEN-03 하네스 생성 - LLM 클라이언트 & 리페어 프롬프트
 자가 치유 루프(GEN-03-02)가 컴파일 에러를 LLM에 되먹여 소스를 수정할 때 사용한다.
 
 - LLMClient       : 인터페이스(complete)
-- OpenAILLMClient : GPT-4o-mini 연동 자리(골격 - 실제 호출부는 TODO)
+- OpenAILLMClient : GPT-4o-mini 등 OpenAI 호환 모델 연동 (openai>=1.0 클라이언트 사용)
 - ScriptedLLMClient / FnLLMClient : 테스트/데모용
 - RepairPromptBuilder : 컴파일 로그 기반 수정 프롬프트 생성
 - extract_code    : LLM 응답에서 코드 블록만 추출
 """
 from __future__ import annotations
 
+import os
 import re
 from abc import ABC, abstractmethod
 from typing import Callable, Dict, List, Optional
@@ -32,31 +33,53 @@ class LLMClient(ABC):
 
 class OpenAILLMClient(LLMClient):
     """
-    GPT-4o-mini 등 OpenAI 호환 모델 연동 자리(골격).
+    GPT-4o-mini 등 OpenAI 호환 모델 연동.
 
-    실제 배포 시 openai 패키지로 채운다. 여기서는 의존성을 끌어오지 않기 위해
-    호출 시 명확한 안내와 함께 예외를 던진다.
+    api_key를 명시하지 않으면 OPENAI_API_KEY 환경변수(.env 로드는 호출자 책임)를 사용한다.
+    openai 패키지(>=1.0, `from openai import OpenAI` 스타일)가 필요하다.
     """
 
     def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.2,
-                 api_key: Optional[str] = None) -> None:
+                 api_key: Optional[str] = None, base_url: Optional[str] = None,
+                 max_retries: int = 2) -> None:
         self.model = model
         self.temperature = temperature
-        self.api_key = api_key
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        self.base_url = base_url
+        self.max_retries = max_retries
+        self._client = None
 
-    def complete(self, prompt: str, *, system: str = "") -> str:  # pragma: no cover
-        # TODO(GEN-03): 아래 주석을 실제 호출로 교체
-        #   from openai import OpenAI
-        #   client = OpenAI(api_key=self.api_key)
-        #   resp = client.chat.completions.create(
-        #       model=self.model, temperature=self.temperature,
-        #       messages=[{"role": "system", "content": system},
-        #                 {"role": "user", "content": prompt}])
-        #   return resp.choices[0].message.content
-        raise NotImplementedError(
-            "OpenAILLMClient는 골격입니다. openai 클라이언트를 연결하거나 "
-            "ScriptedLLMClient/FnLLMClient를 사용하세요."
+    def _get_client(self):
+        if self._client is None:
+            try:
+                from openai import OpenAI
+            except ImportError as e:  # pragma: no cover
+                raise RuntimeError(
+                    "openai 패키지가 설치되어 있지 않습니다. `pip install openai`로 설치하세요."
+                ) from e
+            if not self.api_key:
+                raise RuntimeError(
+                    "OPENAI_API_KEY가 설정되어 있지 않습니다. 환경변수로 설정하거나 "
+                    "OpenAILLMClient(api_key=...)로 직접 전달하세요."
+                )
+            kwargs = {"api_key": self.api_key}
+            if self.base_url:
+                kwargs["base_url"] = self.base_url
+            self._client = OpenAI(**kwargs)
+        return self._client
+
+    def complete(self, prompt: str, *, system: str = "") -> str:
+        client = self._get_client()
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        resp = client.chat.completions.create(
+            model=self.model,
+            temperature=self.temperature,
+            messages=messages,
         )
+        return resp.choices[0].message.content or ""
 
 
 class FnLLMClient(LLMClient):
