@@ -33,6 +33,12 @@ from gen_03_01_harness_generator import (
     generate_harness, VECTOR_DB_MOCK,
 )
 
+# GEN-03-02 자가 치유(컴파일 에러 자동 복구)
+from logosfuzz.generate.compiler import SubprocessCompiler
+from logosfuzz.generate.llm import OpenAILLMClient
+from logosfuzz.generate.models import HarnessDraft
+from logosfuzz.generate.selfheal import SelfHealLoop
+
 
 # ---------------------------------------------------------------------
 # EXT 출력 → ApiMetadata 변환
@@ -116,7 +122,8 @@ def auto_group(apis: list[ApiMetadata]) -> dict[str, list[int]]:
 # 전체 파이프라인 실행
 # ---------------------------------------------------------------------
 
-def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600):
+def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
+                 max_round: int = 3, cc: str = "clang"):
 
     print(f"\n[EXT] {source_path} 분석 중...")
     ext_result = analyze_file(source_path)
@@ -171,6 +178,39 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600):
                                header_content=header_content,
                                header_filenames=header_filenames)
 
+    # GEN-03-02: 생성된 하네스를 실제로 컴파일해보고, 실패하면 컴파일 에러를
+    # LLM에 되먹여 고친다. 이 단계가 없으면 컴파일 불가 하네스가 그대로
+    # 저장돼서 사용자가 손으로 고쳐야 했다.
+    heal_reports = []
+    if max_round > 0:
+        print(f"\n[GEN-03-02] 자가 치유 (max-round={max_round})...")
+        loop = SelfHealLoop(
+            compiler=SubprocessCompiler(
+                cc=cc, std="c11", sanitizers="address",
+                include_dirs=[str(source_dir)],
+            ),
+            llm=OpenAILLMClient(),
+            max_round=max_round,
+            on_round=lambda r: print(
+                f"    [R{r.index}] {'LLM수정' if r.repaired_by_llm else '초안  '}"
+                f" → {'OK' if r.ok else 'ERR'}"
+            ),
+        )
+        for d in drivers:
+            code = d.code.replace("```c", "").replace("```", "").strip()
+            print(f"  ▶ {d.group_name}")
+            report = loop.run(HarnessDraft(
+                logic_group=d.group_name,
+                source=code,
+                project=Path(source_path).stem,
+            ))
+            heal_reports.append(report)
+            print(f"    결과: {report.outcome.value}")
+            if report.success:
+                d.code = report.final_source
+    else:
+        print("\n[GEN-03-02] 자가 치유 생략(--max-round 0)")
+
     # 그룹별로 별도 파일에 저장한다. 한 파일에 이어 붙이면 그룹마다
     # LLVMFuzzerTestOneInput이 중복 정의돼 컴파일이 안 되고, 사용자가 매번
     # 손으로 잘라내야 했다. 원본 소스 경로도 헤더 주석에 남겨서
@@ -197,6 +237,12 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600):
         written.append(harness_path)
         print(f"  저장 완료: {harness_path}")
 
+    if heal_reports:
+        ok = sum(1 for r in heal_reports if r.success)
+        repaired = sum(1 for r in heal_reports if r.success and r.rounds_used > 0)
+        print(f"\n[GEN-03-02] 컴파일 성공 {ok}/{len(heal_reports)} "
+              f"(그중 LLM 복구 {repaired}건)")
+
     print("\n=== 파이프라인 완료 ===")
     print("\n다음 단계 - 각 하네스를 원본 소스와 함께 링크해서 컴파일:")
     print("  (타겟 소스가 자체 main()을 갖고 있어도 안전하도록 -Dmain=main_disabled 포함)")
@@ -210,6 +256,10 @@ if __name__ == "__main__":
     parser.add_argument("--source", required=True, help="분석할 C/C++ 소스 파일")
     parser.add_argument("--output", default="harness_output.c", help="출력 하네스 파일")
     parser.add_argument("--budget", type=int, default=3600, help="총 퍼징 예산(초)")
+    parser.add_argument("--max-round", type=int, default=3,
+                        help="GEN-03-02 자가 치유 최대 반복(0이면 생략)")
+    parser.add_argument("--cc", default="clang", help="컴파일러 실행 파일")
     args = parser.parse_args()
 
-    run_pipeline(args.source, args.output, args.budget)
+    run_pipeline(args.source, args.output, args.budget,
+                 max_round=args.max_round, cc=args.cc)

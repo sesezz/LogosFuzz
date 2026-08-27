@@ -22,10 +22,24 @@ from logosfuzz.analyze.dedup import CrashDeduplicator
 from logosfuzz.analyze.loader import load_records
 from logosfuzz.analyze.models import CrashCluster
 from logosfuzz.analyze.triage import (
+    LLMTriager,
     RuleBasedTriager,
     summarize,
     triage_clusters,
 )
+
+
+def _make_triager(args: argparse.Namespace):
+    """--llm이 주어지면 LLM 판별기를, 아니면 규칙 기반을 쓴다.
+
+    LLMTriager는 호출/파싱 실패 시 스스로 규칙 기반으로 폴백하므로,
+    LLM이 없거나 죽어도 판별 자체가 멈추지는 않는다.
+    """
+    if not getattr(args, "llm", False):
+        return RuleBasedTriager()
+    from logosfuzz.generate.llm import OpenAILLMClient
+
+    return LLMTriager(client=OpenAILLMClient(model=args.model), model_name=args.model)
 
 
 def _write(path: str | None, payload: dict) -> None:
@@ -67,12 +81,13 @@ def _run_dedup(args: argparse.Namespace) -> int:
 
 def _run_triage(args: argparse.Namespace) -> int:
     clusters, meta = _clusters_from_inputs(args.inputs, args.depth)
-    results = triage_clusters(clusters, RuleBasedTriager())
+    triager = _make_triager(args)
+    results = triage_clusters(clusters, triager)
     summary = summarize(results)
 
     by_id = {c.cluster_id: c for c in clusters}
     payload = {
-        "triage_model": RuleBasedTriager.model_name,
+        "triage_model": triager.model_name,
         "input": meta,
         "summary": summary,
         "results": [
@@ -107,13 +122,14 @@ def _run_analyze(args: argparse.Namespace) -> int:
     dedup = CrashDeduplicator(depth=args.depth)
     dedup.extend(load_records(args.inputs))
     clusters = dedup.clusters()
-    results = triage_clusters(clusters, RuleBasedTriager())
+    triager = _make_triager(args)
+    results = triage_clusters(clusters, triager)
     summary = summarize(results)
     tri_by_id = {r.cluster_id: r for r in results}
 
     payload = {
         "dedup": dedup.to_dict(),
-        "triage_model": RuleBasedTriager.model_name,
+        "triage_model": triager.model_name,
         "summary": summary,
         "findings": [
             {
@@ -156,12 +172,16 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("inputs", nargs="+", help="dedup.json 또는 원시 sanitizer 입력")
     t.add_argument("--depth", type=int, default=3, help="원시 입력일 때 dedup 프레임 수(기본 3)")
     t.add_argument("--output", "-o", help="판별 결과 JSON 저장 경로")
+    t.add_argument("--llm", action="store_true", help="LLM 기반 판별 사용(기본: 규칙 기반)")
+    t.add_argument("--model", default="gpt-4o-mini", help="--llm일 때 사용할 모델")
     t.set_defaults(func=_run_triage)
 
     a = sub.add_parser("analyze", help="dedup→triage 파이프라인")
     a.add_argument("inputs", nargs="+", help="원시 sanitizer 입력(JSONL/dir/summary)")
     a.add_argument("--depth", type=int, default=3, help="시그니처 상위 프레임 수(기본 3)")
     a.add_argument("--output", "-o", help="통합 결과 JSON 저장 경로")
+    a.add_argument("--llm", action="store_true", help="LLM 기반 판별 사용(기본: 규칙 기반)")
+    a.add_argument("--model", default="gpt-4o-mini", help="--llm일 때 사용할 모델")
     a.set_defaults(func=_run_analyze)
     return p
 
