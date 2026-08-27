@@ -376,6 +376,22 @@ def test_is_test_path_recognises_common_layouts():
     assert not is_test_path("score/mw/log/detail/common/dlt_format.cpp")
 
 
+def test_is_test_path_recognises_score_ut_ct_convention():
+    """S-CORE 는 `unit_test/` 아래에 `ut_`/`ct_` 접두사를 쓴다.
+
+    이 관례를 모르면 baselibs 소스 1,730개 중 22개가 퍼징 대상으로 샜다.
+    다른 팀원들이 S-CORE 를 다룰 때 쓴 필터에서 확인한 것이다.
+    """
+    assert is_test_path("score/json/internal/parser/vajson/unit_test/ut_number.cpp")
+    assert is_test_path("score/json/internal/parser/vajson/unit_test/parser/ut_bool.cpp")
+    assert is_test_path("score/json/internal/parser/vajson/unit_test/ct_vajson_v2_parsers.cpp")
+    assert is_test_path("score/result/rust/result_example_cpp.cpp")
+    # 토큰 경계를 지켜야 한다. 아래는 프로덕션 코드다.
+    assert not is_test_path("score/json/internal/parser/vajson/number.cpp")
+    assert not is_test_path("score/mw/log/detail/output_statement.cpp")
+    assert not is_test_path("src/console/dlt_receive.c")
+
+
 def test_linkage_survives_save_and_load(tmp_path):
     (tmp_path / "linkage.c").write_text(LINKAGE_SOURCE, encoding="utf-8")
     path = tmp_path / "kb.json"

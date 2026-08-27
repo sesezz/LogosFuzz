@@ -85,10 +85,15 @@ _TEST_DIR_SEGMENTS = {
     "test", "tests", "testing", "ut", "it", "mock", "mocks",
     "gtest", "gmock", "example", "examples", "benchmark", "benchmarks",
     "fuzz", "fuzzing",
+    # Eclipse S-CORE 관례. `unit_test/` 아래에 gtest 픽스처가 들어간다.
+    "unit_test", "unit_tests", "component_test", "component_tests",
 }
 
-# 파일 이름 자체가 테스트임을 드러내는 형태: `x_test.cpp`, `test_x.c`, `x.test.ts`
-_TEST_FILE_RE = re.compile(r"(^|[._-])(test|tests|mock|benchmark)([._-]|$)")
+# 파일 이름 자체가 테스트임을 드러내는 형태: `x_test.cpp`, `test_x.c`, `x.test.ts`.
+# `ut_`/`ct_` 접두사는 S-CORE 의 단위/컴포넌트 테스트 관례다 (`ut_number.cpp`).
+_TEST_FILE_RE = re.compile(
+    r"(^|[._-])(test|tests|mock|benchmark|ut|ct|example|examples)([._-]|$)"
+)
 
 # 함수 정의가 아니라 선언으로만 잡히면 안 되는 이름들
 _NON_SYMBOLS = {
