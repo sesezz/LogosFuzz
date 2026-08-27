@@ -181,13 +181,22 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
     # GEN-03-02: 생성된 하네스를 실제로 컴파일해보고, 실패하면 컴파일 에러를
     # LLM에 되먹여 고친다. 이 단계가 없으면 컴파일 불가 하네스가 그대로
     # 저장돼서 사용자가 손으로 고쳐야 했다.
+    # 대상 프로젝트가 커널 UAPI 헤더를 동봉하는 경우(can-utils의 include/)
+    # 시스템 헤더보다 먼저 오도록 include 경로 앞에 넣는다.
+    include_dirs = [str(source_dir)]
+    bundled_include = source_dir / "include"
+    if bundled_include.is_dir():
+        include_dirs.insert(0, str(bundled_include))
+
     heal_reports = []
     if max_round > 0:
         print(f"\n[GEN-03-02] 자가 치유 (max-round={max_round})...")
+        # 컴파일 조건은 아래 [OUT]이 안내하는 실제 빌드 명령과 맞춰야 한다.
+        # `-std=c11`(엄격 ISO)을 주면 struct timespec 같은 POSIX 타입이 가려져,
+        # 실제 빌드는 되는 하네스가 자가 치유 단계에서만 실패로 잡힌다.
         loop = SelfHealLoop(
             compiler=SubprocessCompiler(
-                cc=cc, std="c11", sanitizers="address",
-                include_dirs=[str(source_dir)],
+                cc=cc, sanitizers="address", include_dirs=include_dirs,
             ),
             llm=OpenAILLMClient(),
             max_round=max_round,
@@ -219,6 +228,8 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = Path(output_path).stem
 
+    inc_flags = "".join(f" -I{d}" for d in include_dirs)
+
     print(f"\n[OUT] {output_dir}/ 에 그룹별 하네스 저장 중...")
     written = []
     for d in drivers:
@@ -229,8 +240,8 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
             f"// Link against original target source: {source_path}\n"
             f"// Suggested build (see logosfuzz_fixes patch notes: -Dmain=main_disabled\n"
             f"// avoids a link clash if the target source defines its own main()):\n"
-            f"//   clang -g -O1 -fsanitize=address,fuzzer -Dmain=main_disabled "
-            f"-o {harness_path.stem} {harness_path.name} {source_path}\n\n"
+            f"//   clang -g -O1 -fsanitize=address,fuzzer -Dmain=main_disabled"
+            f"{inc_flags} -o {harness_path.stem} {harness_path.name} {source_path}\n\n"
         )
         with open(harness_path, "w", encoding="utf-8") as f:
             f.write(header + code + "\n")
@@ -247,8 +258,8 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
     print("\n다음 단계 - 각 하네스를 원본 소스와 함께 링크해서 컴파일:")
     print("  (타겟 소스가 자체 main()을 갖고 있어도 안전하도록 -Dmain=main_disabled 포함)")
     for p in written:
-        print(f"  clang -g -O1 -fsanitize=address,fuzzer -Dmain=main_disabled "
-              f"-o {p.stem} {p.name} {source_path}")
+        print(f"  clang -g -O1 -fsanitize=address,fuzzer -Dmain=main_disabled"
+              f"{inc_flags} -o {p.stem} {p.name} {source_path}")
 
 
 if __name__ == "__main__":
