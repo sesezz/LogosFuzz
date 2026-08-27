@@ -66,6 +66,29 @@ STRUCT_ALIAS_RE = re.compile(
 )
 STRUCT_TAG_RE = re.compile(r"\b(?:struct|union)\s+([A-Za-z_]\w*)\s*\{")
 
+# 테스트/예제 코드로 볼 경로 표지.
+#
+# 왜 필요한가 - Eclipse S-CORE `logging` 저장소를 색인했더니 API 388개 중
+# **188개(48.5%)가 테스트 코드**였고, SCH 가 뽑은 최우선 로직 그룹이 전부
+# gtest 픽스처(`SetUp`/`TearDown`)였다. 테스트 헬퍼를 퍼징 대상으로 올리면
+# GEN 이 그걸 호출하는 하네스를 만들고, 그 결과는 대상 라이브러리에 대해
+# 아무것도 말해 주지 않는다.
+#
+# `is_static` 과 같은 원칙으로 다룬다. KB 는 **사실만 기록**하고, 거를지 말지는
+# 소비자(SCH/GEN)가 정한다. 테스트 코드도 색인해 두면 ANA 가 "이 크래시가
+# 테스트에서만 불리는 함수에서 났는가"를 판단할 때 쓸 수 있다.
+# 경로 **세그먼트**가 이 중 하나면 테스트 트리로 본다. 절대 경로 전체에 대해
+# 부분 문자열로 찾으면 상위 디렉토리 이름(사용자 폴더, 빌드 임시 경로 등)에
+# 우연히 "test" 가 들어 있을 때 제품 코드를 테스트로 오판한다.
+_TEST_DIR_SEGMENTS = {
+    "test", "tests", "testing", "ut", "it", "mock", "mocks",
+    "gtest", "gmock", "example", "examples", "benchmark", "benchmarks",
+    "fuzz", "fuzzing",
+}
+
+# 파일 이름 자체가 테스트임을 드러내는 형태: `x_test.cpp`, `test_x.c`, `x.test.ts`
+_TEST_FILE_RE = re.compile(r"(^|[._-])(test|tests|mock|benchmark)([._-]|$)")
+
 # 함수 정의가 아니라 선언으로만 잡히면 안 되는 이름들
 _NON_SYMBOLS = {
     "if", "for", "while", "switch", "return", "sizeof", "defined", "typedef",
@@ -90,6 +113,25 @@ class FileInfo:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def is_test_path(path: str) -> bool:
+    """이 파일이 테스트/예제 코드인가.
+
+    디렉토리 세그먼트와 파일 이름으로 판단한다. 정확한 분류는 빌드 시스템만 알
+    수 있지만, 이것만으로도 gtest 픽스처가 퍼징 대상으로 올라오는 것은 막는다.
+
+    >>> is_test_path("score/datarouter/test/ut/ut_logging/x.cpp")
+    True
+    >>> is_test_path("score/mw/log/detail/common/dlt_format.cpp")
+    False
+    """
+    parts = [p.lower() for p in str(path).replace("\\", "/").split("/") if p]
+    if not parts:
+        return False
+    if any(segment in _TEST_DIR_SEGMENTS for segment in parts[:-1]):
+        return True
+    return bool(_TEST_FILE_RE.search(Path(parts[-1]).stem))
 
 
 def _read(path: str) -> str:
@@ -288,6 +330,7 @@ class KnowledgeBase:
             document["is_static"] = (
                 document.get("signature", "").lstrip().startswith("static")
             )
+            document["is_test"] = is_test_path(document["file"])
             document["called_by"] = sorted(set(callers.get(document["function"], [])))
             info = file_infos.get(document["file"])
             document["includes"] = list(info.includes) if info else []
