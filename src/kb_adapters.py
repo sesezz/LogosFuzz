@@ -27,7 +27,9 @@ from __future__ import annotations
 import re
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from src.knowledge_base import KnowledgeBase
+from pathlib import Path
+
+from src.knowledge_base import HEADER_SUFFIXES, KnowledgeBase
 
 # ---------------------------------------------------------------------------
 # B (SCH-02-02 / SCH-02-03) 지원
@@ -383,3 +385,100 @@ def constraints_for_triage(kb: KnowledgeBase, name: str,
         c for c in document["constraints"]
         if c.get("confidence", 0.0) >= min_confidence
     ]
+
+
+# ---------------------------------------------------------------------------
+# 코드 경로를 여는 설정 API (GEN-03-01 하네스 프롬프트용)
+# ---------------------------------------------------------------------------
+#
+# 2단계 검증(Magma libpng)에서 자동 생성 하네스의 커버리지가 823, 사람이 쓴
+# OSS-Fuzz 드라이버가 1454 였다. 원인을 확인하니 차이는 하나였다 - 사람 쪽은
+# `png_set_expand` / `png_set_gray_to_rgb` / `png_set_scale_16` 같은
+# **변환 설정 API 를 의도적으로 켠다.** 그 하나하나가 디코딩 코드의 큰 덩어리를
+# 연다. 자동 생성 하네스는 기본 읽기 경로만 걸었다.
+#
+# 지식베이스는 API 목록과 시그니처를 알지만 "이 setter 가 코드 경로를 여는
+# 스위치"라는 것은 모른다. 그래서 이름과 타입만으로 후보를 좁혀 GEN 에 넘긴다.
+#
+# 좁히는 기준 두 가지 (둘 다 KB 가 이미 아는 사실이다)
+#   1. 대상과 **같은 상태 핸들**을 첫 인자로 받는다 - 그 핸들의 동작을 바꾼다
+#   2. 헤더에 선언된 **공개 API** 다 - 내부 헬퍼(png_colorspace_set_*)를 뺀다
+#
+# libpng 실측: 이 기준으로 OSS-Fuzz 가 켜는 7개를 모두 회수한다.
+
+_CONFIG_NAME_RE = re.compile(r"_(set|option|enable|disable|add|with)(_|$)")
+
+# 비공개 헤더 표지. `pngpriv.h` 처럼 라이브러리 내부용으로만 배포되는 헤더에
+# 선언된 것은 공개 API 가 아니다. 이걸 구분하지 않으면 `png_colorspace_set_*`
+# 같은 내부 헬퍼가 하네스 프롬프트에 섞인다.
+_PRIVATE_HEADER_RE = re.compile(r"(priv|private|internal|impl|detail)", re.I)
+
+
+def _has_public_header(kb: KnowledgeBase, name: str) -> bool:
+    for path in kb.declaring_files(name):
+        stem = Path(str(path).replace("\\", "/")).name
+        if stem.endswith(HEADER_SUFFIXES) and not _PRIVATE_HEADER_RE.search(stem):
+            return True
+    return False
+
+
+def _first_param_type(document: dict) -> str:
+    params = document.get("params") or []
+    return str(params[0].get("type", "")) if params else ""
+
+
+def configuration_apis(kb: KnowledgeBase, handle_type: str,
+                       public_only: bool = True,
+                       limit: int = 60) -> List[dict]:
+    """``handle_type`` 의 동작을 바꾸는 공개 설정 API 목록.
+
+    Args:
+        kb: 통합 지식베이스.
+        handle_type: 상태 핸들 타입 이름의 일부(예: ``"png_struct"``).
+            libpng 처럼 ``png_structp``/``png_structrp``/``png_const_structrp``
+            로 갈라지는 별칭을 한 번에 잡으려고 부분 일치를 쓴다.
+        public_only: 헤더에 선언된 API 만 남긴다.
+        limit: 최대 개수.
+
+    Returns:
+        ``{"function", "signature", "doc"}`` dict 목록. 이름 순 정렬.
+    """
+    if not handle_type:
+        return []
+
+    picked: Dict[str, dict] = {}
+    for document in kb.documents:
+        name = document["function"]
+        if name in picked:
+            continue
+        if document.get("is_static") or document.get("is_test"):
+            continue
+        if not _CONFIG_NAME_RE.search(name):
+            continue
+        if handle_type not in _first_param_type(document):
+            continue
+        if public_only and not _has_public_header(kb, name):
+            continue
+        picked[name] = {
+            "function": name,
+            "signature": document.get("signature", ""),
+            "doc": " ".join((document.get("doc") or "").split())[:160],
+        }
+
+    return sorted(picked.values(), key=lambda d: d["function"])[:limit]
+
+
+def render_configuration_apis(entries: Sequence[dict]) -> str:
+    """설정 API 목록을 하네스 프롬프트 조각으로 직렬화한다."""
+    if not entries:
+        return ""
+    lines = [
+        "[동작을 바꾸는 설정 API — 켜면 새 코드 경로가 열린다]",
+        "  기본 경로만 태우면 라이브러리의 일부만 검사하게 된다. 아래에서 서로",
+        "  충돌하지 않는 것들을 골라 켜고, 어떤 조합을 쓸지는 퍼징 입력으로 정하라.",
+    ]
+    for entry in entries:
+        lines.append(f"  {entry['signature'] or entry['function']}")
+        if entry["doc"]:
+            lines.append(f"      {entry['doc']}")
+    return "\n".join(lines)
