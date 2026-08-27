@@ -58,8 +58,16 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
 
 
-def rule_triage(cluster: CrashCluster) -> TriageResult:
-    """결정적 휴리스틱으로 하나의 클러스터를 판별한다."""
+def rule_triage(cluster: CrashCluster, context=None) -> TriageResult:
+    """결정적 휴리스틱으로 하나의 클러스터를 판별한다.
+
+    Args:
+        cluster: 판별 대상.
+        context: :class:`~logosfuzz.analyze.reachability.ReachabilityContext`
+            (선택). 주어지면 정적으로 증명 가능한 도달 가능성 신호를 점수에
+            반영한다. 불변식 추론이 필요한 사안은 여기서 판정하지 않는다 —
+            그건 ``reachability.render_for_prompt()`` 로 LLM 판별기에 넘긴다.
+    """
     rep = cluster.representative
     cat = cluster.bug_type
     signals: list[str] = []
@@ -114,6 +122,14 @@ def rule_triage(cluster: CrashCluster) -> TriageResult:
         score += 0.05
         signals.append("asan-high-fidelity")
 
+    # (5) 도달 가능성: 이 함수를 실제 제품 코드가 부르는가
+    if context is not None:
+        from logosfuzz.analyze.reachability import derive_signals
+
+        delta, reach_signals = derive_signals(context)
+        score += delta
+        signals.extend(reach_signals)
+
     score = _clamp(score)
 
     loc = f"{rep.traceback[0].file}:{rep.traceback[0].line}" if rep.traceback else "위치 미상"
@@ -140,6 +156,24 @@ def rule_triage(cluster: CrashCluster) -> TriageResult:
             f"사람 검토(HITL)로 확정이 필요하다."
         )
 
+    # 도달 가능성 근거는 HITL 검토자가 가장 먼저 봐야 할 정보이므로 근거문에 남긴다.
+    if "harness-only-caller" in signals:
+        rationale += (
+            " 이 함수는 헤더에 선언돼 있지 않고 대상 트리에서 하네스/테스트 코드만 "
+            "호출한다 — 제품 경로가 아니라 하네스가 만들어낸 상황일 가능성이 크다."
+        )
+    elif "unreferenced-internal-function" in signals:
+        rationale += (
+            " 이 함수는 헤더에도 선언돼 있지 않고 대상 트리 어디에서도 호출되지 않는다"
+            "(사실상 죽은 코드) — 외부 입력이 닿는 경로를 확인할 수 없다."
+        )
+    elif "public-api-no-in-tree-caller" in signals:
+        rationale += (
+            " 이 함수는 공개 헤더에 선언된 API 이나 대상 트리 안에는 호출부가 없다 — "
+            "의도된 호출자가 라이브러리를 링크하는 외부 애플리케이션이라는 뜻이므로, "
+            "도달 불가로 해석하면 안 된다."
+        )
+
     return TriageResult(
         verdict=verdict,
         confidence=confidence,
@@ -151,12 +185,31 @@ def rule_triage(cluster: CrashCluster) -> TriageResult:
 
 
 class RuleBasedTriager:
-    """결정적 규칙 기반 판별기(기본)."""
+    """결정적 규칙 기반 판별기(기본).
+
+    Args:
+        context_provider: ``cluster -> ReachabilityContext`` 콜러블(선택).
+            ``reachability.SourceReachabilityProvider(대상_소스_루트)`` 를 넣으면
+            호출부 증거를 점수에 반영한다. 없으면 기존 동작 그대로다.
+    """
 
     model_name = RULE_MODEL_NAME
 
+    def __init__(self, context_provider=None) -> None:
+        self.context_provider = context_provider
+
     def triage(self, cluster: CrashCluster) -> TriageResult:
-        return rule_triage(cluster)
+        return rule_triage(cluster, context=_safe_context(self.context_provider, cluster))
+
+
+def _safe_context(provider, cluster):
+    """컨텍스트 수집 실패가 판별 자체를 막지 않게 감싼다."""
+    if provider is None:
+        return None
+    try:
+        return provider(cluster)
+    except Exception:
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -165,16 +218,61 @@ class RuleBasedTriager:
 
 _TRIAGE_SYSTEM = (
     "너는 C/C++ 퍼징 크래시를 분석해 정탐(true_positive)과 "
-    "오탐(false_positive)을 판별하는 보안 분석가다. 판단이 모호하면 "
-    "needs_review로 답한다. 반드시 JSON 하나만 출력한다."
+    "오탐(false_positive)을 판별하는 보안 분석가다.\n"
+    "핵심 판단 기준은 '메모리 오류가 났는가'가 아니라 "
+    "'그 오류를 유발한 인자·상태가 공개 API 경로로 도달 가능한가'다. "
+    "sanitizer가 오류를 잡았다는 사실만으로 정탐이라고 결론짓지 마라 — "
+    "퍼저가 라이브러리의 불변식을 우회해 직접 만들어낸 상태라면 오탐이다.\n"
+    "판단이 모호하면 needs_review로 답한다. 반드시 JSON 하나만 출력한다."
 )
 
+# 도달 가능성 판정을 실제로 시키는 질문. 1단계 검증에서 두 판별기가 똑같이
+# 틀린 이유가 "이 질문을 받은 적이 없어서"였다.
+_REACHABILITY_QUESTION = """\
+판별 절차 — 아래 순서로 따져라.
+  1. 크래시가 난 지점에서 무엇을 읽거나 쓰다 경계를 벗어났는가?
+  2. 그 경계를 정하는 값(길이·인덱스·크기 필드)은 누가 넣은 값인가?
+  3. 하네스가 공개 API 계약을 어겼는가? (NULL 금지 인자에 NULL, 초기화 API
+     건너뛰기, 내부 구조체 필드 직접 조작 등)
+  4. **결정적 질문 — 3번이 "어겼다"라도 여기서 끝내지 마라.**
+     계약을 지킨 호출만으로 2번의 값이 만들어질 수 있는가?
+     위 증거의 "이 상태에 값을 기록하는 API" 본문을 읽고, 그 API 를 문서대로
+     호출했을 때 크래시를 유발한 값(길이·인덱스·크기)이 저장될 수 있는지 보라.
+     - 만들어질 수 있다 -> **true_positive**
+       (하네스가 계약을 어겼더라도 함수 자체의 로직 결함이다. 기록 API 가
+        길이를 캡핑하지 않는데 소비 API 가 그 길이를 그대로 믿는 식의
+        비대칭이 대표적이다.)
+     - 계약 위반이 **있어야만** 재현된다(기록 API 가 그 값을 막는다)
+       -> **false_positive**
+     - 기록 API 소스가 없거나 판단이 안 선다 -> needs_review (추측 금지)
 
-def build_triage_prompt(cluster: CrashCluster) -> str:
-    """클러스터 대표 결함을 LLM 판별용 프롬프트로 직렬화한다."""
+  주의 — 흔한 오판: "in-tree 호출부가 0곳"은 오탐 근거가 **아니다**.
+  공개 헤더에 선언된 API 는 의도된 호출자가 이 소스 트리 밖(라이브러리를
+  링크하는 서드파티 애플리케이션)이다. 호출부가 없다는 건 도달 불가가 아니라
+  in-tree 공격 표면이 없다는 뜻일 뿐이다. 헤더에 선언돼 있으면 공개 API 로
+  취급하고, 3번 질문(계약 위반이 필요한가)으로 판단하라."""
+
+
+def build_triage_prompt(cluster: CrashCluster, context=None) -> str:
+    """클러스터 대표 결함을 LLM 판별용 프롬프트로 직렬화한다.
+
+    Args:
+        cluster: 판별 대상.
+        context: :class:`~logosfuzz.analyze.reachability.ReachabilityContext`
+            (선택). 주어지면 호출부·링키지·결함 라인 소스를 증거로 함께 싣는다.
+            이게 없으면 모델이 볼 수 있는 건 콜스택뿐이라 "ASAN 이 잡았으니
+            정탐"이라는 결론밖에 못 낸다.
+    """
     rep = cluster.representative
     frames = "\n".join(f"  #{i} {f.file}:{f.line}" for i, f in enumerate(rep.traceback))
     raw = "\n".join(rep.raw_log[:20])
+
+    evidence = ""
+    if context is not None:
+        from logosfuzz.analyze.reachability import render_for_prompt
+
+        evidence = render_for_prompt(context) + "\n\n"
+
     return (
         f"[결함 유형] {cluster.bug_type}\n"
         f"[Sanitizer] {rep.sanitizer}\n"
@@ -182,10 +280,13 @@ def build_triage_prompt(cluster: CrashCluster) -> str:
         f"[재현 입력 수] {cluster.count}\n"
         f"[콜스택]\n{frames}\n"
         f"[원문 로그]\n{raw}\n\n"
+        f"{evidence}"
         "위 크래시가 대상 라이브러리의 실제 취약점(true_positive)인지, "
-        "하네스/모킹/환경 요인에 의한 가짜 크래시(false_positive)인지 판별하라.\n"
+        "하네스/모킹/환경 요인에 의한 가짜 크래시(false_positive)인지 판별하라.\n\n"
+        f"{_REACHABILITY_QUESTION}\n\n"
         '출력 형식(JSON): {"verdict": "true_positive|false_positive|needs_review", '
-        '"confidence": 0.0~1.0, "rationale": "근거 한두 문장"}'
+        '"confidence": 0.0~1.0, "rationale": "근거 한두 문장(어느 호출부를 근거로 '
+        '삼았는지 명시)"}'
     )
 
 
@@ -223,26 +324,34 @@ class LLMTriager:
         fallback: 폴백 판별기(기본 RuleBasedTriager).
     """
 
-    def __init__(self, client, model_name: str = "deepseek-r1", fallback=None) -> None:
+    def __init__(self, client, model_name: str = "deepseek-r1", fallback=None,
+                 context_provider=None) -> None:
         self.client = client
         self.model_name = model_name
-        self.fallback = fallback or RuleBasedTriager()
+        self.context_provider = context_provider
+        self.fallback = fallback or RuleBasedTriager(context_provider=context_provider)
 
     def triage(self, cluster: CrashCluster) -> TriageResult:
+        context = _safe_context(self.context_provider, cluster)
         try:
-            raw = self.client.complete(build_triage_prompt(cluster), system=_TRIAGE_SYSTEM)
+            raw = self.client.complete(
+                build_triage_prompt(cluster, context=context), system=_TRIAGE_SYSTEM
+            )
         except Exception:
             return self._fallback(cluster, "llm-call-failed")
         parsed = parse_llm_verdict(raw)
         if parsed is None:
             return self._fallback(cluster, "llm-parse-failed")
+        signals = ["llm-judgment"]
+        if context is not None and context.resolved:
+            signals.append("reachability-context")
         return TriageResult(
             verdict=Verdict(str(parsed["verdict"])),
             confidence=_clamp(float(parsed.get("confidence", 0.5))),
             rationale=str(parsed.get("rationale", "")).strip() or "(근거 미제공)",
             triage_model=self.model_name,
             cluster_id=cluster.cluster_id,
-            signals=["llm-judgment"],
+            signals=signals,
         )
 
     def _fallback(self, cluster: CrashCluster, reason: str) -> TriageResult:
