@@ -5,6 +5,7 @@ import pytest
 from src.knowledge_base import (
     KnowledgeBase,
     header_declaration_docs,
+    is_test_path,
     scan_file,
 )
 
@@ -342,6 +343,37 @@ def test_static_functions_are_marked(tmp_path):
 
     assert internal["is_static"] is True
     assert public["is_static"] is False
+
+
+def test_test_code_is_marked(tmp_path):
+    """Eclipse S-CORE 색인에서 API 388개 중 188개(48.5%)가 테스트 코드였고,
+    SCH 가 뽑은 최우선 그룹이 전부 gtest 픽스처였다."""
+    src = tmp_path / "score" / "mw"
+    src.mkdir(parents=True)
+    (src / "formatter.cpp").write_text(
+        "int format_entry(const char *buf, int len)\n{\n    return len;\n}\n",
+        encoding="utf-8",
+    )
+    tests = tmp_path / "score" / "mw" / "test" / "ut"
+    tests.mkdir(parents=True)
+    (tests / "formatter_test.cpp").write_text(
+        "int SetUp(int fixture)\n{\n    return fixture;\n}\n", encoding="utf-8"
+    )
+    built = KnowledgeBase.build(paths=[str(tmp_path)])
+
+    product = next(d for d in built.documents if d["function"] == "format_entry")
+    fixture = next(d for d in built.documents if d["function"] == "SetUp")
+
+    assert product["is_test"] is False
+    assert fixture["is_test"] is True
+
+
+def test_is_test_path_recognises_common_layouts():
+    assert is_test_path("score/mw/log/detail/common/dlt_format_test.cpp")
+    assert is_test_path("logging/score/datarouter/test/ut/ut_logging/x.cpp")
+    assert is_test_path("src/mocks/fake_socket.cpp")
+    assert not is_test_path("src/shared/dlt_common.c")
+    assert not is_test_path("score/mw/log/detail/common/dlt_format.cpp")
 
 
 def test_linkage_survives_save_and_load(tmp_path):
