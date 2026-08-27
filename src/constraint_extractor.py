@@ -373,6 +373,70 @@ def _skip_ws(text: str, pos: int) -> int:
     return pos
 
 
+# 함수를 매크로로 감싸 선언·정의하는 라이브러리가 있다. libpng 이 대표적이다.
+#
+#   PNG_FUNCTION(png_structp, PNGAPI
+#   png_create_read_struct,(png_const_charp v, ...), PNG_ALLOCATED)
+#   { ... }
+#
+# 이걸 그대로 스캔하면 함수 이름이 `PNG_FUNCTION` 으로 잡히고, 진짜 API 는
+# 지식베이스에서 통째로 사라진다. 실제로 libpng 색인에서
+# `png_create_read_struct` 가 빠져 GEN 이 하네스를 만들 때 참조할 수 없었다.
+_MACRO_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,}$")
+
+
+def destructure_macro_declaration(args: str, offset: int = 0):
+    """매크로 인자에서 (함수명, 이름 위치, 파라미터 범위, 반환형)을 분해한다.
+
+    규칙은 하나다 — **마지막 최상위 괄호 그룹이 파라미터 목록**이고, 그 앞의
+    마지막 식별자가 함수 이름이다. 이 규칙 하나로 선언(PNG_EXPORT)과
+    정의(PNG_FUNCTION) 양쪽이 처리된다.
+
+        PNG_EXPORT(64, void, png_destroy_read_struct, (png_structpp a, ...))
+                                ^이름                  ^파라미터
+        PNG_FUNCTION(png_structp, PNGAPI png_create_read_struct, (...), ATTR)
+                                         ^이름                    ^파라미터
+
+    찾지 못하면 None.
+    """
+    depth = 0
+    group = None            # (열린 위치, 닫힌 위치) — 마지막 최상위 괄호 그룹
+    start = -1
+    for i, ch in enumerate(args):
+        if ch == "(":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0 and start >= 0:
+                group = (start, i)
+    if group is None:
+        return None
+
+    head = args[: group[0]]
+    identifiers = list(re.finditer(r"[A-Za-z_]\w*", head))
+    if not identifiers:
+        return None
+    name_match = identifiers[-1]
+
+    # 반환형 정리. 매크로마다 앞에 붙는 것이 다르다.
+    #   PNG_EXPORT(64, void, name, (...))       -> 색인 번호 64 를 버린다
+    #   PNG_FUNCTION(png_structp, PNGAPI name, ...) -> 호출 규약 PNGAPI 를 버린다
+    # 숫자만인 조각과 대문자 매크로(호출 규약/속성)를 걷어내고 남은 것을 쓴다.
+    segments = [s.strip() for s in head[: name_match.start()].split(",")]
+    kept = [s for s in segments if s and not s.isdigit() and not _MACRO_NAME_RE.match(s)]
+    if not kept:
+        kept = [s for s in segments if s and not s.isdigit()]
+
+    return {
+        "name": name_match.group(0),
+        "name_start": offset + name_match.start(),
+        "params_span": (offset + group[0] + 1, offset + group[1]),
+        "return_type": " ".join(" ".join(kept).split()),
+    }
+
+
 def find_functions(masked: str) -> List[dict]:
     """함수 정의의 위치 정보를 찾는다. (중첩된 정의는 건너뛴다)"""
     found: List[dict] = []
@@ -401,11 +465,35 @@ def find_functions(masked: str) -> List[dict]:
 
         raw_prefix = _decl_prefix(masked, match.start())
         prefix = raw_prefix.strip()
-        if not prefix or prefix[-1] in REJECT_PREFIX_TAIL:
-            continue
-        prefix_tokens = re.findall(r"[A-Za-z_]\w*", prefix)
-        if not prefix_tokens or prefix_tokens[-1] in CONTROL_KEYWORDS:
-            continue
+
+        # 매크로로 감싼 정의라면 진짜 함수 이름·파라미터로 바꿔 끼운다.
+        # 이 판정은 **prefix 검사보다 먼저** 해야 한다. 매크로 정의는 반환형이
+        # 매크로 인자 안에 있어서 앞에 아무 토큰도 없고, 그러면 아래 prefix
+        # 검사에 걸려 통째로 버려진다. libpng 의 png_create_read_struct 가
+        # 정확히 그렇게 사라졌다.
+        entry_name, entry_name_start = name, match.start()
+        entry_params = (paren_open + 1, paren_close)
+        entry_return = " ".join(prefix.split())
+        macro_wrapped = False
+        if _MACRO_NAME_RE.match(name):
+            inner = destructure_macro_declaration(
+                masked[paren_open + 1:paren_close], paren_open + 1
+            )
+            if inner:
+                macro_wrapped = True
+                entry_name = inner["name"]
+                entry_name_start = inner["name_start"]
+                entry_params = inner["params_span"]
+                entry_return = inner["return_type"] or entry_return
+
+        if not macro_wrapped:
+            if not prefix or prefix[-1] in REJECT_PREFIX_TAIL:
+                continue
+            prefix_tokens = re.findall(r"[A-Za-z_]\w*", prefix)
+            if not prefix_tokens or prefix_tokens[-1] in CONTROL_KEYWORDS:
+                continue
+        elif prefix and prefix[-1] in REJECT_PREFIX_TAIL:
+            continue  # 매크로라도 호출식 한가운데면 정의가 아니다
 
         body_end = match_delim(masked, pos, "{", "}")
         if body_end is None:
@@ -413,14 +501,14 @@ def find_functions(masked: str) -> List[dict]:
 
         found.append(
             {
-                "name": name,
+                "name": entry_name,
                 # 반환형이 시작되는 위치. 마스킹된 주석은 공백이므로 lstrip 하면
                 # 실제 선언 첫 글자로 이동한다 (그 앞이 doc 주석 영역).
                 "decl_start": match.start() - len(raw_prefix.lstrip()),
-                "name_start": match.start(),
-                "params_span": (paren_open + 1, paren_close),
+                "name_start": entry_name_start,
+                "params_span": entry_params,
                 "body_span": (pos, body_end),
-                "return_type": " ".join(prefix.split()),
+                "return_type": entry_return,
             }
         )
         scan_from = body_end + 1

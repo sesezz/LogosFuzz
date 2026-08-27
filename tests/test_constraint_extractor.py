@@ -1,4 +1,5 @@
 from src.constraint_extractor import (
+    destructure_macro_declaration,
     extract_from_paths,
     extract_from_text,
     mask_source,
@@ -364,3 +365,81 @@ def test_example_source_is_parsed():
     read_all = next(f for f in facts if f.name == "read_all")
     assert _find(read_all.constraints, "resource", "fopen")
     assert read_all.return_type.endswith("*")
+
+
+# -- 매크로로 감싼 함수 정의 ------------------------------------------------
+#
+# libpng 은 공개 API 를 PNG_FUNCTION / PNG_EXPORT 매크로로 선언·정의한다.
+# 그대로 스캔하면 함수 이름이 `PNG_FUNCTION` 으로 잡히고 진짜 API 가 지식베이스
+# 에서 통째로 사라진다. 실제로 libpng 색인에서 `png_create_read_struct` 가 빠져
+# GEN 이 하네스를 만들 때 참조할 수 없었다(2단계 검증).
+
+MACRO_WRAPPED = """
+/* Create a PNG structure for reading, and allocate any memory needed. */
+PNG_FUNCTION(png_structp,PNGAPI
+png_create_read_struct,(png_const_charp user_png_ver, png_voidp error_ptr,
+    png_error_ptr error_fn, png_error_ptr warn_fn),PNG_ALLOCATED)
+{
+   return png_create_read_struct_2(user_png_ver, error_ptr, error_fn, warn_fn);
+}
+
+static PNG_FUNCTION(void, png_default_error,(png_const_structrp png_ptr,
+    png_const_charp error_message),PNG_NORETURN)
+{
+   png_error(png_ptr, error_message);
+}
+
+void PNGAPI
+png_set_sig_bytes(png_structrp png_ptr, int num_bytes)
+{
+   if (png_ptr == NULL) { return; }
+}
+"""
+
+
+def test_macro_wrapped_definition_yields_the_real_function():
+    names = [f.name for f in extract_from_text(MACRO_WRAPPED)]
+
+    assert "png_create_read_struct" in names
+    assert "PNG_FUNCTION" not in names
+
+
+def test_macro_wrapped_definition_keeps_params_and_return_type():
+    fact = next(f for f in extract_from_text(MACRO_WRAPPED)
+                if f.name == "png_create_read_struct")
+
+    assert fact.return_type == "png_structp"          # 호출 규약 PNGAPI 는 뺀다
+    assert [p.name for p in fact.params] == [
+        "user_png_ver", "error_ptr", "error_fn", "warn_fn"
+    ]
+
+
+def test_macro_wrapped_definition_with_prefix_still_works():
+    """`static PNG_FUNCTION(...)` 처럼 앞에 토큰이 붙은 형태."""
+    fact = next(f for f in extract_from_text(MACRO_WRAPPED)
+                if f.name == "png_default_error")
+
+    assert fact.return_type == "void"
+    assert [p.name for p in fact.params] == ["png_ptr", "error_message"]
+
+
+def test_plain_definition_is_unaffected():
+    fact = next(f for f in extract_from_text(MACRO_WRAPPED)
+                if f.name == "png_set_sig_bytes")
+
+    assert [p.name for p in fact.params] == ["png_ptr", "num_bytes"]
+
+
+def test_declaration_style_macro_is_destructured():
+    """PNG_EXPORT(idx, rettype, name, (params)) 형태 - 색인 번호를 버린다."""
+    parsed = destructure_macro_declaration(
+        "64, void, png_destroy_read_struct, "
+        "(png_structpp a, png_infopp b, png_infopp c)"
+    )
+
+    assert parsed["name"] == "png_destroy_read_struct"
+    assert parsed["return_type"] == "void"
+
+
+def test_macro_without_parameter_group_is_ignored():
+    assert destructure_macro_declaration("JUST, SOME, TOKENS") is None
