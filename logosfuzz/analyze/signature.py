@@ -58,6 +58,11 @@ _HARNESS_MARKERS = (
     "llvmfuzzertestoneinput",
     "fuzz_target",
     "fuzzer_test",
+    # GEN-03-01 산출물은 보통 ``*_generated.c(pp)`` 또는 ``/gen/`` 아래에
+    # 저장된다. 이 경로는 대상 라이브러리와 분리된 하네스 코드이므로
+    # 대상 프레임으로 세면 ANA-05-01이 하네스 자체 버그를 정탐으로 올린다.
+    "_generated.",
+    "/gen/",
 )
 
 

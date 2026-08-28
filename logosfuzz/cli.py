@@ -18,6 +18,12 @@ from pathlib import Path
 from logosfuzz.config import CoverageMode, Engine, FuzzConfig, LogicGroup
 from logosfuzz.execute.errors import ExecuteError
 from logosfuzz.execute.fuzz_session import FuzzSession
+from logosfuzz.reporting.summary import (
+    ValidationSummaryError,
+    build_validation_summary,
+    load_json,
+    write_validation_summary,
+)
 
 
 def discover_groups(harness_dir: Path, groups_spec: Path | None) -> list:
@@ -72,11 +78,65 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="EXE-04-02 sanitizer 산출물(JSONL/디렉터리/fuzz_summary.json)")
     a.add_argument("--depth", type=int, default=3, help="시그니처 상위 프레임 수(기본 3)")
     a.add_argument("--output", "-o", type=Path, default=None, help="통합 결과 JSON 저장 경로")
+    a.add_argument("--source-root", help="대상 C/C++ 소스 트리(도달 가능성 증거 수집)")
+    a.add_argument("--harness-dir", help="크래시를 낸 하네스 소스 디렉터리(선택)")
+
+    s = sub.add_parser(
+        "summary",
+        help="fuzz_summary.json과 analyze 결과를 공유용 validation-summary.json으로 통합",
+    )
+    s.add_argument("--run", required=True, type=Path, help="fuzz_summary.json 경로")
+    s.add_argument("--analysis", type=Path, default=None, help="analyze 결과 JSON 경로")
+    s.add_argument("--gen", "--generation", dest="generation", type=Path, default=None,
+                   help="GEN-03-04 gen_validation_summary.json 경로")
+    s.add_argument("--selection", type=Path, default=None,
+                   help="EXT/SCH 대상 선정·제약 조건 결과 JSON 경로")
+    s.add_argument("--output", "-o", type=Path, required=True,
+                   help="표준 검증 결과 JSON 저장 경로")
+    s.add_argument("--project", default="", help="프로젝트 또는 대상 이름")
+    s.add_argument("--environment", default="", help="실행 환경(local|ec2)")
+    s.add_argument("--target", default="", help="검증 대상 이름")
+    s.add_argument("--commit", dest="commit_sha", default="", help="검증한 커밋 SHA")
     return p
 
 
 def main(argv: list | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    if args.command == "summary":
+        try:
+            run = load_json(args.run)
+            analysis = load_json(args.analysis) if args.analysis else None
+            generation = load_json(args.generation) if args.generation else None
+            selection = load_json(args.selection) if args.selection else None
+            metadata = {
+                key: value for key, value in {
+                    "project": args.project,
+                    "environment": args.environment,
+                    "target": args.target,
+                    "commit": args.commit_sha,
+                }.items() if value
+            }
+            result = build_validation_summary(
+                run,
+                analysis,
+                metadata=metadata,
+                generation_summary=generation,
+                selection_summary=selection,
+            )
+            path = write_validation_summary(args.output, result)
+        except (OSError, ValidationSummaryError) as e:
+            print(f"[SUMMARY 오류] {e}", file=sys.stderr)
+            return 1
+        print(
+            f"[SUMMARY] 그룹 {result['metrics']['groups']}개 | "
+            f"크래시 {result['metrics']['crashes']}건 | "
+            f"정탐 {result['metrics']['true_positive']} | "
+            f"오탐 {result['metrics']['false_positive']} | "
+            f"검토필요 {result['metrics']['needs_review']}"
+        )
+        print(f"  -> {path}")
+        return 0
 
     if args.command == "analyze":
         # ANA 파트로 위임(설계서 기능 흐름도의 analyze 명령)

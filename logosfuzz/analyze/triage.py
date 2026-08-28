@@ -117,8 +117,11 @@ def rule_triage(cluster: CrashCluster, context=None) -> TriageResult:
         score += 0.05
         signals.append("reproduced")
 
-    # (4) sanitizer 신뢰도: ASAN 메모리 오류는 오탐이 드물다
-    if rep.sanitizer.upper() == "ASAN" and cat in _MEMORY_BUGS:
+    # (4) sanitizer 신뢰도: ASAN 메모리 오류는 오탐이 드물다. 다만 프레임이
+    # 하네스에만 있으면 sanitizer가 확인한 것은 대상 라이브러리가 아니라
+    # 하네스의 메모리 접근이므로 이 보너스를 주지 않는다.
+    if (rep.sanitizer.upper() == "ASAN" and cat in _MEMORY_BUGS
+            and has_application_frame(rep)):
         score += 0.05
         signals.append("asan-high-fidelity")
 
