@@ -84,6 +84,10 @@ def ext_to_api_metadata(ext_json: list[dict]) -> list[ApiMetadata]:
             param_str = ", ".join(
                 f"{p['type']} {p['name']}".strip() for p in params
             )
+            # 가변인자 함수는 `...`까지 살려야 헤더 선언과 타입이 일치한다.
+            # 빠뜨리면 하네스의 extern 선언이 conflicting types를 낸다.
+            if fn.get("is_variadic"):
+                param_str = f"{param_str}, ..." if param_str else "..."
             signature = f"{return_type} {name}({param_str})"
 
             apis.append(ApiMetadata(

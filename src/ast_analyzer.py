@@ -122,6 +122,14 @@ def analyze_with_clang(path, clang_args=None):
                 ]
             except Exception:
                 entry['params'] = []
+            # 가변인자(`...`)는 get_arguments()에 나오지 않는다. 표시하지 않으면
+            # 하네스가 `f(char *a, char *b)`로 extern 선언을 만들어 헤더의
+            # `f(char *a, char *b, ...)`와 conflicting types가 된다
+            # (dlt-daemon의 dlt_execute_command에서 실제 발생).
+            try:
+                entry['is_variadic'] = bool(node.type.is_function_variadic())
+            except Exception:
+                entry['is_variadic'] = False
             try:
                 entry['is_static'] = (node.storage_class == cindex.StorageClass.STATIC)
             except Exception:
