@@ -60,11 +60,17 @@ def analyze_with_clang(path, clang_args=None):
     _resolve_libclang()
 
     if clang_args is None:
-        # 시스템 include 경로를 명시하지 않으면 libclang이 size_t 같은
-        # 표준 typedef를 resolve하지 못하고 int로 잘못 파싱한다.
-        # clang 내장 resource dir을 찾아서 자동으로 추가한다.
-        import subprocess, shutil
         clang_args = ["-std=c11"]
+
+    # clang 내장 resource dir(stddef.h 등)은 호출자가 clang_args를 넘겼든
+    # 아니든 항상 붙여야 한다. 이게 빠지면 libclang이 size_t 같은 표준
+    # typedef를 resolve하지 못하고 `int`로 잘못 보고한다.
+    #   실제: dlt_message_header(..., size_t textlength, ...)
+    #   오인: dlt_message_header(..., int    textlength, ...)
+    # 그 시그니처로 하네스가 extern 선언을 만들면 헤더와 conflicting types로
+    # 컴파일이 깨진다(dlt-daemon에서 10건 중 8건이 이 원인이었다).
+    if not any(str(a).startswith("-resource-dir") for a in clang_args):
+        import subprocess, shutil
         clang_bin = shutil.which("clang") or "clang"
         try:
             resource_dir = subprocess.check_output(
@@ -73,7 +79,9 @@ def analyze_with_clang(path, clang_args=None):
                 text=True,
             ).strip()
             if resource_dir:
-                clang_args += [f"-I{resource_dir}/include"]
+                inc = f"-I{resource_dir}/include"
+                if inc not in clang_args:
+                    clang_args = list(clang_args) + [inc]
         except Exception:
             pass
 
