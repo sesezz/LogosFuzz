@@ -122,11 +122,42 @@ def auto_group(apis: list[ApiMetadata]) -> dict[str, list[int]]:
 # 전체 파이프라인 실행
 # ---------------------------------------------------------------------
 
+def resolve_include_dirs(source_path: str, extra: list[str] | None = None) -> list[str]:
+    """EXT 분석과 컴파일에서 공통으로 쓸 include 경로를 정한다.
+
+    소스 디렉터리와 그 안의 ``include/``는 자동으로 잡고, 프로젝트 헤더가
+    저장소 최상단(``<repo>/include``)이나 빌드 산출물(``build/include``)에
+    있는 경우를 위해 ``--include``로 추가 지정할 수 있게 한다.
+    """
+    source_dir = Path(source_path).resolve().parent
+    dirs: list[str] = []
+    for d in (extra or []):
+        p = Path(d).expanduser().resolve()
+        if p.is_dir():
+            dirs.append(str(p))
+    bundled = source_dir / "include"
+    if bundled.is_dir():
+        dirs.append(str(bundled))
+    dirs.append(str(source_dir))
+    # 순서 유지 중복 제거
+    return list(dict.fromkeys(dirs))
+
+
 def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
-                 max_round: int = 3, cc: str = "clang"):
+                 max_round: int = 3, cc: str = "clang",
+                 include: list[str] | None = None):
+
+    # EXT에도 include 경로를 넘겨야 한다. 넘기지 않으면 libclang이 프로젝트
+    # 헤더를 찾지 못해 typedef된 struct 포인터를 전부 `int *`로 보고한다
+    # (dlt-daemon에서 실제로 `DltMessage *msg` → `int * msg`로 추출됐다).
+    # 그 상태로 GEN에 넘기면 잘못된 타입의 하네스가 대량 생성된다.
+    include_dirs = resolve_include_dirs(source_path, include)
+    clang_args = ["-std=c11"] + [f"-I{d}" for d in include_dirs]
 
     print(f"\n[EXT] {source_path} 분석 중...")
-    ext_result = analyze_file(source_path)
+    if include_dirs:
+        print(f"  include 경로: {include_dirs}")
+    ext_result = analyze_file(source_path, clang_args=clang_args)
     ext_json = [ext_result]
     print(f"  분석 완료: FUNCTION_DECL {ext_result['counts'].get('FUNCTION_DECL', 0)}개 발견")
 
@@ -183,10 +214,8 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
     # 저장돼서 사용자가 손으로 고쳐야 했다.
     # 대상 프로젝트가 커널 UAPI 헤더를 동봉하는 경우(can-utils의 include/)
     # 시스템 헤더보다 먼저 오도록 include 경로 앞에 넣는다.
-    include_dirs = [str(source_dir)]
-    bundled_include = source_dir / "include"
-    if bundled_include.is_dir():
-        include_dirs.insert(0, str(bundled_include))
+    # EXT 분석에 쓴 경로를 그대로 재사용해서, 분석과 컴파일이 같은 헤더를
+    # 보도록 맞춘다(둘이 어긋나면 자가 치유가 멀쩡한 하네스를 실패로 잡는다).
 
     heal_reports = []
     if max_round > 0:
@@ -270,7 +299,12 @@ if __name__ == "__main__":
     parser.add_argument("--max-round", type=int, default=3,
                         help="GEN-03-02 자가 치유 최대 반복(0이면 생략)")
     parser.add_argument("--cc", default="clang", help="컴파일러 실행 파일")
+    parser.add_argument("--include", "-I", action="append", metavar="DIR",
+                        help="추가 include 경로(반복 지정 가능). 프로젝트 헤더가 "
+                             "소스와 다른 디렉터리에 있으면 반드시 지정해야 한다 "
+                             "— 없으면 EXT가 struct 포인터를 int로 오인한다.")
     args = parser.parse_args()
 
     run_pipeline(args.source, args.output, args.budget,
-                 max_round=args.max_round, cc=args.cc)
+                 max_round=args.max_round, cc=args.cc,
+                 include=args.include)
