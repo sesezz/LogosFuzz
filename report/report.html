@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LogosFuzz — 퍼징 결과 리포트</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">⬡</span>
+        <span class="logo-text">LogosFuzz</span>
+      </div>
+      <div class="header-meta" id="header-meta">—</div>
+    </div>
+  </header>
+
+  <main>
+    <!-- 드래그앤드롭 존 -->
+    <section class="drop-zone" id="drop-zone">
+      <div class="drop-inner">
+        <div class="drop-icon">↓</div>
+        <p class="drop-label">validation-summary.json을 여기에 끌어다 놓거나</p>
+        <label class="file-btn" for="file-input">파일 선택</label>
+        <input type="file" id="file-input" accept=".json" hidden>
+        <p class="drop-hint">또는 샘플 데이터로 미리 보기:</p>
+        <button class="sample-btn" id="load-sample">샘플 불러오기</button>
+      </div>
+    </section>
+
+    <!-- 리포트 본문 (JSON 로드 후 표시) -->
+    <div id="report" class="report-body hidden">
+
+      <!-- 요약 헤더 -->
+      <section class="summary-bar">
+        <div class="summary-card" id="s-project">
+          <span class="s-label">프로젝트</span>
+          <span class="s-value" id="v-project">—</span>
+        </div>
+        <div class="summary-card" id="s-env">
+          <span class="s-label">환경</span>
+          <span class="s-value" id="v-env">—</span>
+        </div>
+        <div class="summary-card" id="s-target">
+          <span class="s-label">타겟</span>
+          <span class="s-value" id="v-target">—</span>
+        </div>
+        <div class="summary-card" id="s-generated">
+          <span class="s-label">생성 시각</span>
+          <span class="s-value" id="v-generated">—</span>
+        </div>
+      </section>
+
+      <!-- 지표 카드 -->
+      <section class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-num" id="m-groups">—</div>
+          <div class="metric-label">로직 그룹</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-num" id="m-crashes">—</div>
+          <div class="metric-label">크래시</div>
+        </div>
+        <div class="metric-card accent-green">
+          <div class="metric-num" id="m-tp">—</div>
+          <div class="metric-label">정탐</div>
+        </div>
+        <div class="metric-card accent-red">
+          <div class="metric-num" id="m-fp">—</div>
+          <div class="metric-label">오탐</div>
+        </div>
+        <div class="metric-card accent-yellow">
+          <div class="metric-num" id="m-review">—</div>
+          <div class="metric-label">검토 필요</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-num" id="m-engine">—</div>
+          <div class="metric-label">엔진</div>
+        </div>
+      </section>
+
+      <!-- 그룹별 실행 결과 -->
+      <section class="section">
+        <h2 class="section-title">그룹별 퍼징 결과</h2>
+        <div class="table-wrap">
+          <table class="data-table" id="group-table">
+            <thead>
+              <tr>
+                <th>그룹</th>
+                <th>상태</th>
+                <th>실행 속도 (exec/s)</th>
+                <th>커버리지</th>
+                <th>크래시</th>
+                <th>타임아웃</th>
+                <th>컴파일 오류</th>
+              </tr>
+            </thead>
+            <tbody id="group-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ANA 분석 결과 -->
+      <section class="section">
+        <h2 class="section-title">크래시 분석 결과</h2>
+        <div id="findings-container">
+          <p class="empty-msg">크래시 없음</p>
+        </div>
+      </section>
+
+      <!-- GEN 하네스 생성 요약 -->
+      <section class="section">
+        <h2 class="section-title">하네스 생성 요약</h2>
+        <div class="gen-summary" id="gen-summary"></div>
+      </section>
+
+      <!-- JSON 다운로드 -->
+      <section class="section download-section">
+        <button class="download-btn" id="download-btn">원본 JSON 다운로드</button>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <span>LogosFuzz · LLM-assisted Fuzzing Pipeline</span>
+  </footer>
+
+  <script src="report.js"></script>
+</body>
+</html>
