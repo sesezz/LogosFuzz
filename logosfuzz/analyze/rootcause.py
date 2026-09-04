@@ -7,17 +7,17 @@ LLM(예: DeepSeek-R1)에 넣어 "왜 오탐인가"를 자연어로 요약한다.
 
 새 LLM 추상화를 만들지 않고 GEN-03의 `logosfuzz.generate.llm.LLMClient`
 ("프롬프트 -> 텍스트" 인터페이스)를 그대로 재사용한다. 로그 파싱도
-`ana_05_02_cve_reporting.asan_parser.parse_asan_log`를 그대로 쓴다
+`logosfuzz.analyze.cve_reporting.asan_parser.parse_asan_log`를 그대로 쓴다
 (ANA-05-02가 이미 검증한 파서를 중복 구현하지 않는다).
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from ana_05_02_cve_reporting.asan_parser import ParsedAsanLog, parse_asan_log
+from logosfuzz.analyze.cve_reporting.asan_parser import ParsedAsanLog, parse_asan_log
 
 from logosfuzz.generate.llm import LLMClient
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 from .models import FalsePositiveCrash, RootCauseAnalysis
 

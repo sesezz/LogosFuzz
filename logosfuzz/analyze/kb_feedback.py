@@ -7,11 +7,11 @@ ANA-05-03 STEP 2: KB 변경 제안(diff) 생성 및 오버라이드 저장소
 상태로 넘기는 역할까지만 한다 - HITL 승인 게이트(CTR-06-02)가 막고 있는
 동안에는 `KnowledgeBase`도 `KBOverrideStore`도 건드리지 않는다.
 
-`src/knowledge_base.py`(EXT-01)의 document 스키마에는 `updated_at` 필드가
+`logosfuzz/knowledge/knowledge_base.py`(EXT-01)의 document 스키마에는 `updated_at` 필드가
 없고 그 파일은 변경하지 않기로 했으므로(설계 승인 사항), api_id별 오버라이드
 텍스트와 갱신 시각을 별도 JSON 사이드 스토어에 보관한다.
 
-임베딩은 `src/rag_index.py`의 `DenseIndex`와 동일하게 `sentence-transformers`가
+임베딩은 `logosfuzz/knowledge/rag_index.py`의 `DenseIndex`와 동일하게 `sentence-transformers`가
 설치되어 있을 때만 계산한다(선택적 의존성 - 없으면 embedding=None으로 스텁).
 
 "Vector DB에 upsert"의 알려진 제약: `BM25Index`/`DenseIndex`는 append-only라
@@ -27,7 +27,7 @@ import threading
 from pathlib import Path
 from typing import List, Optional
 
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 from .models import KBUpdateProposal, RootCauseAnalysis, now_iso
 
@@ -50,7 +50,7 @@ def embed_text(text: str) -> Optional[List[float]]:
 class KBOverrideStore:
     """api_id -> 승인된 역피드백 오버라이드 텍스트/갱신시각.
 
-    `src/knowledge_base.py`(EXT-01)의 KB JSON 파일과는 별개의 사이드 스토어다.
+    `logosfuzz/knowledge/knowledge_base.py`(EXT-01)의 KB JSON 파일과는 별개의 사이드 스토어다.
     ERD의 `API_METADATA.updated_at`에 해당하는 값은 여기서만 갱신된다.
     `logosfuzz.control.hitl.store.JsonReviewStore`와 동일하게 스레드 락 +
     원자적 쓰기(tmp -> replace) 패턴을 따른다.

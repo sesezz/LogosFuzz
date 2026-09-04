@@ -7,7 +7,7 @@ ANA-05-03 STEP 4: 재생성 트리거 (GEN-03-01 재호출 -> GEN-03-02 자가�
 태워 컴파일 성공 여부까지 검증한다.
 
 GEN-03-01(초안 생성)은 이 저장소에 재사용 가능한 형태로 구현되어 있지
-않다 - 루트의 `gen_03_01_harness_generator.py`는 하드코딩된 데모 데이터와
+않다 - `logosfuzz/generate/llm_harness_generator.py`는 하드코딩된 데모 데이터와
 OpenAI 직접 호출 전용 `__main__` 스크립트라 함수로 불러 쓸 수 없다. 그래서
 "GEN-03-01 재호출"은 이 모듈이 KB 컨텍스트(오버라이드 포함)로 프롬프트를
 구성해 `LLMClient`에 초안을 요청하는 `_draft_via_llm()`으로 대체한다.
@@ -23,8 +23,8 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple
 
-from src.kb_adapters import harness_context
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.kb_adapters import harness_context
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 from logosfuzz.generate.compiler import Compiler
 from logosfuzz.generate.llm import LLMClient, extract_code

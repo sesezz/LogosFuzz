@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from src.kb_adapters import (
+from logosfuzz.knowledge.kb_adapters import (
     configuration_apis,
     render_configuration_apis,
     api_reference,
@@ -15,7 +15,7 @@ from src.kb_adapters import (
     suggest_fixes,
     to_synergy_inputs,
 )
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 HEADER = """
 #ifndef UDS_H

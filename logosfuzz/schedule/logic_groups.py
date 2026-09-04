@@ -26,8 +26,8 @@ EXE-04-03 (타임아웃 산정) 의 공통 작업 단위가 된다.
 
 사용법
 ------
-  python -m src.logic_groups build --paths examples/uds --output build/groups.json
-  python -m src.logic_groups show --groups build/groups.json
+  python -m logosfuzz.schedule.logic_groups build --paths examples/uds --output build/groups.json
+  python -m logosfuzz.schedule.logic_groups show --groups build/groups.json
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ from logosfuzz.common.models import (
     LogicGroup,
     RealtimeSignal,
 )
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 GROUPS_VERSION = 1
 
@@ -456,12 +456,12 @@ def attach_priorities(groups: Sequence[GroupInfo], kb: KnowledgeBase) -> bool:
     SCH 모듈을 임포트할 수 없으면 우선순위 0.0 으로 두고 False 를 반환한다.
     """
     try:
-        from sch_02_02_synergy_scheduler import (
+        from logosfuzz.schedule.sch_02_02_synergy_scheduler import (
             compute_pairwise_synergy,
             rank_logic_groups,
         )
 
-        from src.kb_adapters import to_synergy_inputs
+        from logosfuzz.knowledge.kb_adapters import to_synergy_inputs
     except Exception:
         return False
 

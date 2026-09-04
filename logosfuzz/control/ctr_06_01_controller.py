@@ -9,8 +9,8 @@ Responsibilities
 
 Usage
 -----
-python ctr_06_01_controller.py --source test_target.c --output harness_output.c
-python ctr_06_01_controller.py --regression --baseline baseline.json
+python -m logosfuzz.control.ctr_06_01_controller --source test_target.c --output harness_output.c
+python -m logosfuzz.control.ctr_06_01_controller --regression --baseline baseline.json
 """
 
 from __future__ import annotations

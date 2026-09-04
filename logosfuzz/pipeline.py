@@ -3,7 +3,7 @@ pipeline.py : EXT → SCH → GEN 전체 파이프라인 연계
 
 실행 방법
 ---------
-python pipeline.py --source test_target.c --output harness_output.c
+python -m logosfuzz.pipeline --source test_target.c --output harness_output.c
 """
 
 from __future__ import annotations
@@ -19,19 +19,19 @@ from dotenv import load_dotenv
 load_dotenv()  # cwd부터 상위로 .env 자동 탐색 (팀원 환경마다 경로가 다르므로 하드코딩 금지)
 
 # EXT 단계
-from src.ast_analyzer import analyze_file
+from logosfuzz.extract.ast_analyzer import analyze_file
 
 # SCH 단계
-from sch_02_02_synergy_scheduler import (
+from logosfuzz.schedule.sch_02_02_synergy_scheduler import (
     ApiMetadata, Constraint,
     compute_pairwise_synergy, rank_logic_groups,
 )
-from sch_02_03_resource_allocator import (
+from logosfuzz.schedule.sch_02_03_resource_allocator import (
     FuzzingRun, allocate_resources,
 )
 
 # GEN 단계
-from gen_03_01_harness_generator import (
+from logosfuzz.generate.llm_harness_generator import (
     ApiContext, collect_context, build_prompt,
     generate_harness, VECTOR_DB_MOCK,
 )
@@ -41,7 +41,7 @@ from logosfuzz.generate.compiler import SubprocessCompiler
 from logosfuzz.generate.llm import OpenAILLMClient
 from logosfuzz.generate.models import HarnessDraft
 from logosfuzz.generate.selfheal import SelfHealLoop
-from gen_03_03_mock_injector import build_mock_plan, insert_mocks
+from logosfuzz.generate.gen_03_03_mock_injector import build_mock_plan, insert_mocks
 
 
 # ---------------------------------------------------------------------

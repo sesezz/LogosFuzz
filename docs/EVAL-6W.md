@@ -1,10 +1,10 @@
 # 6주차 평가: KB Coverage / API 추출 정확도 / RAG 검색 성공률
 
-`src/kb_eval.py` 하나로 세 지표를 함께 측정한다.
+`logosfuzz/knowledge/kb_eval.py` 하나로 세 지표를 함께 측정한다.
 
 ```bash
-python -m src.kb_eval run --paths examples/uds --labels examples/uds/labels.json --report
-python -m src.kb_eval run --paths <소스경로> -o build/eval.json
+python -m logosfuzz.knowledge.kb_eval run --paths examples/uds --labels examples/uds/labels.json --report
+python -m logosfuzz.knowledge.kb_eval run --paths <소스경로> -o build/eval.json
 ```
 
 ## 정답셋(ground truth)을 어디서 얻는가

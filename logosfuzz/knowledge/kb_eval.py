@@ -15,9 +15,9 @@ A 를 먼저 시도하고 실패하면 B 로 내려간다. 어느 쪽을 썼는�
 
 사용법
 ------
-  python -m src.kb_eval run --paths examples/uds --labels examples/uds/labels.json \
+  python -m logosfuzz.knowledge.kb_eval run --paths examples/uds --labels examples/uds/labels.json \
       --output build/eval.json
-  python -m src.kb_eval run --paths examples/uds --labels examples/uds/labels.json --report
+  python -m logosfuzz.knowledge.kb_eval run --paths examples/uds --labels examples/uds/labels.json --report
 """
 from __future__ import annotations
 
@@ -29,9 +29,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from src.constraint_extractor import iter_source_files
-from src.knowledge_base import KnowledgeBase
-from src.rag_index import split_identifier
+from logosfuzz.extract.constraint_extractor import iter_source_files
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.rag_index import split_identifier
 
 EVAL_VERSION = 1
 

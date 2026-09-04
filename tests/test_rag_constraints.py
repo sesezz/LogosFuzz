@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from src.rag_constraints import ConstraintKB, build_document, build_kb
-from src.constraint_extractor import extract_from_text
+from logosfuzz.knowledge.rag_constraints import ConstraintKB, build_document, build_kb
+from logosfuzz.extract.constraint_extractor import extract_from_text
 
 SOURCE = """
 #include <stdlib.h>

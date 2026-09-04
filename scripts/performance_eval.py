@@ -11,8 +11,8 @@ Metrics
 
 Usage
 -----
-python performance_eval.py
-python performance_eval.py --output report.json
+python scripts/performance_eval.py
+python scripts/performance_eval.py --output report.json
 """
 
 from __future__ import annotations

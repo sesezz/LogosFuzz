@@ -1,4 +1,4 @@
-from src.constraint_extractor import (
+from logosfuzz.extract.constraint_extractor import (
     destructure_macro_declaration,
     extract_from_paths,
     extract_from_text,

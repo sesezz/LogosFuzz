@@ -1,8 +1,8 @@
 """EXT-01-02: C/C++ 소스에서 API 제약조건(constraint)을 추출한다.
 
-`src.ast_analyzer`가 파일 단위의 거친 구조를 본다면, 이 모듈은 함수 단위로
+`logosfuzz.extract.ast_analyzer`가 파일 단위의 거친 구조를 본다면, 이 모듈은 함수 단위로
 "이 API를 호출하려면 무엇이 참이어야 하는가"를 추출한다. 추출 결과는
-`src.rag_constraints`가 RAG 지식베이스로 색인한다.
+`logosfuzz.knowledge.rag_constraints`가 RAG 지식베이스로 색인한다.
 
 추출하는 제약조건 종류:
   - null_check   : 포인터 인자에 대한 NULL 검사 (호출 전 non-NULL 요구)
@@ -16,7 +16,7 @@
   - doc          : 주석에 서술된 제약조건
 
 사용법:
-  python -m src.constraint_extractor examples --output build/constraints.json
+  python -m logosfuzz.extract.constraint_extractor examples --output build/constraints.json
 """
 from __future__ import annotations
 

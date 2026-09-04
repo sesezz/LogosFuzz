@@ -1,6 +1,6 @@
 """GEN-03-03 Mocking 코드 삽입 단위 테스트."""
 
-from gen_03_03_mock_injector import (
+from logosfuzz.generate.gen_03_03_mock_injector import (
     FunctionSignature,
     build_mock_plan,
     default_return,

@@ -40,10 +40,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from asan_parser import parse_asan_log
-from cwe_mapping import lookup_cwe
-from cvss_estimator import estimate_cvss
-from schema import (
+from .asan_parser import parse_asan_log
+from .cwe_mapping import lookup_cwe
+from .cvss_estimator import estimate_cvss
+from .schema import (
     AffectedComponent,
     CrashDetails,
     CVEReport,

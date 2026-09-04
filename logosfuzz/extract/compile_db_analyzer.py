@@ -4,8 +4,8 @@ import os
 import shlex
 from pathlib import Path
 
-from src.ast_analyzer import analyze_file
-from src.compile_commands import load_compile_commands
+from logosfuzz.extract.ast_analyzer import analyze_file
+from logosfuzz.extract.compile_commands import load_compile_commands
 
 
 def extract_clang_args(command: str):

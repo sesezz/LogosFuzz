@@ -3,8 +3,8 @@ import json
 import pytest
 
 from logosfuzz.common.models import SIGNAL_UDS_P2, SIGNAL_WATCHDOG, LogicGroup
-from src.knowledge_base import KnowledgeBase
-from src.logic_groups import (
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
+from logosfuzz.schedule.logic_groups import (
     build_groups,
     extract_groups,
     extract_realtime_signals,

@@ -1,5 +1,29 @@
 # LogosFuzz
 
+## 저장소 구조
+
+기능(파이프라인 단계) 기준으로 `logosfuzz/` 패키지 아래에 모아 두었다.
+
+```
+logosfuzz/
+  extract/      EXT-01 : 소스/컴파일 DB 파싱, AST·제약조건 추출
+  knowledge/    EXT-01-04 : 통합 지식베이스 + RAG 색인/검색, KB 어댑터·평가
+  schedule/     SCH-02 : Logic Group 추출, 시너지 우선순위, 자원 할당
+  generate/     GEN-03 : 하네스 생성·컴파일 자가치유·검증, Mock 주입
+  execute/      EXE-04 : 격리 퍼징 실행, 커버리지·크래시 수집, 코퍼스 관리
+  analyze/      ANA-05 : 크래시 트리아지·근본원인·KB 피드백
+    cve_reporting/  ANA-05-02 : 크래시 -> CVE 리포트 생성
+  reporting/    리포트 요약 및 정적 HTML 리포트(web/)
+  control/      CTR-06 : 파이프라인 컨트롤러, HITL 게이트
+  common/       공통 모델·로깅
+  pipeline.py   EXT -> SCH -> GEN 연계 실행 스크립트
+docs/           파트별 설계 문서
+examples/       샘플 타깃 소스와 실행 예제
+scripts/        검증 아티팩트 준비, 성능 평가 등 보조 스크립트
+tests/          패키지 공통 테스트 (일부 테스트는 각 서브패키지 tests/ 에 위치)
+docker/         퍼징 실행용 컨테이너 이미지
+```
+
 ## EXT-01-03 bear 빌드 통합
 
 이 저장소는 `bear`를 사용해 컴파일 명령 데이터베이스를 생성하는 초기 통합을 제공합니다.
@@ -27,14 +51,14 @@
 WSL에서 `bear`를 실행한 다음 Windows에서 분석을 수행하려면:
 
 ```bash
-wsl bash -lc "cd /mnt/c/Users/Lenovo/Fuzz && python3 -m src.bear_integration --build 'gcc -c build/sample.c -o build/sample.o' --output build/compile_commands.json --cwd ."
-python -m src.compile_db_analyzer --compile-db build/compile_commands.json --output build/compile_analysis.json
+wsl bash -lc "cd /mnt/c/Users/Lenovo/Fuzz && python3 -m logosfuzz.extract.bear_integration --build 'gcc -c build/sample.c -o build/sample.o' --output build/compile_commands.json --cwd ."
+python -m logosfuzz.extract.compile_db_analyzer --compile-db build/compile_commands.json --output build/compile_analysis.json
 ```
 
 또는 Windows에서 `bear`가 직접 설치되어 있다면:
 
 ```bash
-python -m src.bear_integration --build "gcc -c build/sample.c -o build/sample.o" --output build/compile_commands.json --cwd .
+python -m logosfuzz.extract.bear_integration --build "gcc -c build/sample.c -o build/sample.o" --output build/compile_commands.json --cwd .
 ```
 
 `run_bear_build(build_command, output_path=None, cwd=None)` 함수를 직접 호출하면, `bear` 실행 후 `compile_commands.json` 파일을 생성할 수 있습니다.
@@ -42,7 +66,7 @@ python -m src.bear_integration --build "gcc -c build/sample.c -o build/sample.o"
 ### 예시
 
 ```python
-from src.bear_integration import run_bear_build
+from logosfuzz.extract.bear_integration import run_bear_build
 
 result = run_bear_build("gcc -c build/sample.c -o build/sample.o", output_path="build/compile_commands.json", cwd=".")
 print(result["status"])
@@ -53,7 +77,7 @@ print(result["status"])
 생성된 `compile_commands.json`을 읽으려면:
 
 ```python
-from src.compile_commands import load_compile_commands
+from logosfuzz.extract.compile_commands import load_compile_commands
 
 entries = load_compile_commands("build/compile_commands.json")
 print(entries)
@@ -64,13 +88,13 @@ print(entries)
 `compile_commands.json`에 기록된 컴파일 플래그를 활용하여 각 소스 파일을 분석하려면:
 
 ```bash
-python -m src.compile_db_analyzer --compile-db build/compile_commands.json --output build/compile_analysis.json
+python -m logosfuzz.extract.compile_db_analyzer --compile-db build/compile_commands.json --output build/compile_analysis.json
 ```
 
 또는 파이썬에서 직접:
 
 ```python
-from src.compile_db_analyzer import analyze_compile_commands
+from logosfuzz.extract.compile_db_analyzer import analyze_compile_commands
 
 results = analyze_compile_commands("build/compile_commands.json", output_path="build/compile_analysis.json")
 print(results)
@@ -92,23 +116,23 @@ C/C++ 소스에서 함수별 API 제약조건(NULL 검사, 버퍼·길이 쌍, �
 
 ```bash
 # 지식베이스 구축 (경로 또는 compile_commands.json 기반)
-python -m src.rag_constraints build --paths examples --output build/kb.json
-python -m src.rag_constraints build --compile-db build/compile_commands.json --output build/kb.json
+python -m logosfuzz.knowledge.rag_constraints build --paths examples --output build/kb.json
+python -m logosfuzz.knowledge.rag_constraints build --compile-db build/compile_commands.json --output build/kb.json
 
 # 검색 (한국어 질의 지원)
-python -m src.rag_constraints query --kb build/kb.json "버퍼 길이 제약" --top-k 3
+python -m logosfuzz.knowledge.rag_constraints query --kb build/kb.json "버퍼 길이 제약" --top-k 3
 
 # 하네스 생성용 컨텍스트 블록
-python -m src.rag_constraints context --kb build/kb.json --function parse_header
+python -m logosfuzz.knowledge.rag_constraints context --kb build/kb.json --function parse_header
 
 # 커버리지 통계 (6주차 API 추출 정확도 평가용)
-python -m src.rag_constraints stats --kb build/kb.json
+python -m logosfuzz.knowledge.rag_constraints stats --kb build/kb.json
 ```
 
 파이썬에서 직접 사용하려면:
 
 ```python
-from src.rag_constraints import ConstraintKB
+from logosfuzz.knowledge.rag_constraints import ConstraintKB
 
 kb = ConstraintKB.load("build/kb.json")
 print(kb.context_for("parse_header"))      # LLM 프롬프트에 넣을 텍스트 블록
@@ -126,17 +150,17 @@ B/D 파트가 바로 쓸 수 있는 형태로 내보냅니다. 자세한 내용�
 [docs/EXT-01-04.md](docs/EXT-01-04.md) 참고.
 
 ```bash
-python -m src.knowledge_base build --paths examples/uds --output build/kb.json
-python -m src.knowledge_base show  --kb build/kb.json --api uds_read_did
-python -m src.knowledge_base stats --kb build/kb.json
+python -m logosfuzz.knowledge.knowledge_base build --paths examples/uds --output build/kb.json
+python -m logosfuzz.knowledge.knowledge_base show  --kb build/kb.json --api uds_read_did
+python -m logosfuzz.knowledge.knowledge_base stats --kb build/kb.json
 ```
 
 **B 파트 (SCH-02-02/03)** — 목업 하드코딩을 한 줄로 대체합니다. B의 파일은 수정하지 않습니다.
 
 ```python
-from src.knowledge_base import KnowledgeBase
-from src.kb_adapters import to_synergy_inputs
-from sch_02_02_synergy_scheduler import compute_pairwise_synergy
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.kb_adapters import to_synergy_inputs
+from logosfuzz.schedule.sch_02_02_synergy_scheduler import compute_pairwise_synergy
 
 kb = KnowledgeBase.load("build/kb.json")
 apis, constraints = to_synergy_inputs(kb)       # ApiMetadata / Constraint 를 그대로 생성
@@ -146,14 +170,14 @@ results = compute_pairwise_synergy(apis, constraints)
 **B 파트 (GEN-03-01)** — 하네스 프롬프트 컨텍스트 (시그니처 + 제약조건 + include + 플래그):
 
 ```python
-from src.kb_adapters import harness_context
+from logosfuzz.knowledge.kb_adapters import harness_context
 print(harness_context(kb, "uds_read_did"))
 ```
 
 **D 파트 (GEN-03-02)** — 컴파일 에러 자가치유:
 
 ```python
-from src.kb_adapters import suggest_fixes
+from logosfuzz.knowledge.kb_adapters import suggest_fixes
 suggest_fixes(kb, compiler_stderr)
 # [{"error": "implicit_declaration", "action": "add_include",
 #   "detail": '#include "uds.h"', "compile_flag": "-Iexamples/uds", ...}]
@@ -162,7 +186,7 @@ suggest_fixes(kb, compiler_stderr)
 **D 파트 (ANA-05-01/02)** — 리포트 조인 키와 판별 근거:
 
 ```python
-from src.kb_adapters import api_reference, constraints_for_triage
+from logosfuzz.knowledge.kb_adapters import api_reference, constraints_for_triage
 api_reference(kb, "uds_read_did")                                  # api_id/시그니처/헤더
 constraints_for_triage(kb, "uds_read_did", min_confidence=0.7)     # 신뢰도 높은 제약조건
 ```

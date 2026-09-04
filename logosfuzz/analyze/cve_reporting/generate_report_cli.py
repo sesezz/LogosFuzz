@@ -11,8 +11,8 @@ import argparse
 import json
 from pathlib import Path
 
-from render import render_json, render_markdown
-from report_generator import build_cve_report
+from .render import render_json, render_markdown
+from .report_generator import build_cve_report
 
 
 def main() -> None:

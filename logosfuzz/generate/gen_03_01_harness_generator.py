@@ -28,11 +28,11 @@ from dataclasses import dataclass, field
 from openai import OpenAI
 
 # SCH 단계 모듈에서 가져옴
-from sch_02_02_synergy_scheduler import (
+from logosfuzz.schedule.sch_02_02_synergy_scheduler import (
     ApiMetadata, Constraint,
     compute_pairwise_synergy, rank_logic_groups,
 )
-from sch_02_03_resource_allocator import (
+from logosfuzz.schedule.sch_02_03_resource_allocator import (
     FuzzingRun, allocate_resources, ScheduleResult
 )
 

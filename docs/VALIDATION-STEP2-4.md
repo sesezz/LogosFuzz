@@ -35,11 +35,11 @@
 | 1 | EXE | `docker/Dockerfile` | ENTRYPOINT 이중 적용으로 컨테이너 안에서 명령이 실행되지 않음(exit 0 위장) |
 | 2 | GEN | `logosfuzz/generate/llm.py` | `OpenAILLMClient` 가 골격이라 자가 치유가 실행된 적 없음 |
 | 3 | ANA | `analyze/reachability.py`(신규), `triage.py` | 판별기가 호출부 정보를 본 적이 없음 |
-| 4 | SCH | `src/logic_groups.py` | 호출 관계 전이적 병합에 범위 제한이 없어 그룹 폭발 |
-| 5 | GEN | `gen_03_03_mock_injector.py` | `LIBC_ALLOWLIST` 에 소켓/POSIX 계열 누락 |
-| 6 | EXT | `src/knowledge_base.py` | 함수 링키지(`static`)를 기록하지 않음 |
+| 4 | SCH | `logosfuzz/schedule/logic_groups.py` | 호출 관계 전이적 병합에 범위 제한이 없어 그룹 폭발 |
+| 5 | GEN | `logosfuzz/generate/gen_03_03_mock_injector.py` | `LIBC_ALLOWLIST` 에 소켓/POSIX 계열 누락 |
+| 6 | EXT | `logosfuzz/knowledge/knowledge_base.py` | 함수 링키지(`static`)를 기록하지 않음 |
 | 7 | GEN | `generate/compiler.py`, `hygiene.py`(신규), `selfheal.py` | 실행 불가를 만드는 C 경고를 성공으로 취급 / 대상 함수 재선언 / 언어 미판별 |
-| 8 | EXT | `src/knowledge_base.py` | 테스트 코드 여부를 기록하지 않음 |
+| 8 | EXT | `logosfuzz/knowledge/knowledge_base.py` | 테스트 코드 여부를 기록하지 않음 |
 
 ### 1.1 격리 실행 버그 — 실증
 

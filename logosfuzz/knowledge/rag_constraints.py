@@ -2,16 +2,16 @@
 
 파이프라인:
   1. `compile_commands.json`(EXT-01-03) 또는 경로 목록에서 소스를 모은다.
-  2. `src.constraint_extractor`로 함수별 제약조건을 추출한다.
-  3. 함수 하나를 문서 하나로 만들어 `src.rag_index`에 색인한다.
+  2. `logosfuzz.extract.constraint_extractor`로 함수별 제약조건을 추출한다.
+  3. 함수 하나를 문서 하나로 만들어 `logosfuzz.knowledge.rag_index`에 색인한다.
   4. 하네스 생성기(GEN-03-01)가 질의하면 프롬프트에 넣을 컨텍스트를 돌려준다.
 
 사용법:
-  python -m src.rag_constraints build --paths examples --output build/kb.json
-  python -m src.rag_constraints build --compile-db build/compile_commands.json \
+  python -m logosfuzz.knowledge.rag_constraints build --paths examples --output build/kb.json
+  python -m logosfuzz.knowledge.rag_constraints build --compile-db build/compile_commands.json \
       --output build/kb.json
-  python -m src.rag_constraints query --kb build/kb.json "buffer length check" --top-k 3
-  python -m src.rag_constraints context --kb build/kb.json --function parse_header
+  python -m logosfuzz.knowledge.rag_constraints query --kb build/kb.json "buffer length check" --top-k 3
+  python -m logosfuzz.knowledge.rag_constraints context --kb build/kb.json --function parse_header
 """
 from __future__ import annotations
 
@@ -21,12 +21,12 @@ import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-from src.constraint_extractor import (
+from logosfuzz.extract.constraint_extractor import (
     FunctionFacts,
     extract_from_paths,
     iter_source_files,
 )
-from src.rag_index import BM25Index, DenseIndex, HybridRetriever
+from logosfuzz.knowledge.rag_index import BM25Index, DenseIndex, HybridRetriever
 
 KB_VERSION = 1
 
@@ -46,8 +46,8 @@ KIND_PRIORITY = {
 
 def _sources_from_compile_db(compile_db: str) -> List[str]:
     """compile_commands.json에서 소스 경로를 뽑아 실제 존재하는 것만 남긴다."""
-    from src.compile_commands import load_compile_commands
-    from src.compile_db_analyzer import normalize_path
+    from logosfuzz.extract.compile_commands import load_compile_commands
+    from logosfuzz.extract.compile_db_analyzer import normalize_path
 
     sources: List[str] = []
     for entry in load_compile_commands(compile_db):

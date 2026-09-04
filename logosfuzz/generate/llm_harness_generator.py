@@ -13,11 +13,11 @@ from openai import OpenAI
 
 load_dotenv()  # cwd부터 상위로 .env 자동 탐색 (팀원 환경마다 경로가 다르므로 하드코딩 금지)
 
-from sch_02_02_synergy_scheduler import (
+from logosfuzz.schedule.sch_02_02_synergy_scheduler import (
     ApiMetadata, Constraint,
     compute_pairwise_synergy, rank_logic_groups,
 )
-from sch_02_03_resource_allocator import (
+from logosfuzz.schedule.sch_02_03_resource_allocator import (
     FuzzingRun, allocate_resources, ScheduleResult
 )
 

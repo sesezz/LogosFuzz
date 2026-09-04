@@ -8,7 +8,7 @@ from logosfuzz.analyze.models import KBUpdateProposal
 from logosfuzz.analyze.regenerate import draft_via_llm, trigger_regeneration
 from logosfuzz.generate.compiler import FakeCompiler
 from logosfuzz.generate.llm import ScriptedLLMClient
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 OK_SOURCE = ("```c\nint LLVMFuzzerTestOneInput(const uint8_t*d,size_t n)"
              "{return 0;} // COMPILE_OK\n```")

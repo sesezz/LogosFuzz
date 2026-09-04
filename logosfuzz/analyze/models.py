@@ -13,11 +13,11 @@ ANA 파트가 소비한다. 이 모듈은 그 원시 이벤트를 감싸는 정�
 :class:`RegenerationRecord`)을 함께 정의한다.
 
 의존성 원칙: 표준 라이브러리만 사용한다(프로젝트 pyproject ``dependencies=[]``).
-ANA-05-02(``ana_05_02_cve_reporting``)와는 코드 import가 아니라 **문자열 계약**
+ANA-05-02(``logosfuzz.analyze.cve_reporting``)와는 코드 import가 아니라 **문자열 계약**
 (verdict 값 = ``"true_positive"``/``"false_positive"``/``"needs_review"``)으로만
 연결한다 - 두 패키지가 서로를 import하지 않아 순환 의존을 원천 차단한다. 이
 모듈의 :class:`Verdict`가 그 계약을 대표하는 로컬 정의이며, ANA-05-03의
-:class:`FalsePositiveCrash`도 (과거 ``ana_05_02_cve_reporting.schema.Verdict``를
+:class:`FalsePositiveCrash`도 (과거 ``logosfuzz.analyze.cve_reporting.schema.Verdict``를
 직접 import하던 것에서) 이 로컬 enum을 쓰도록 통일했다.
 """
 
@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional
 class Verdict(str, Enum):
     """ANA-05-01 정/오탐 판별 결과.
 
-    문자열 값은 ``ana_05_02_cve_reporting/schema.py``의 ``Verdict`` enum과
+    문자열 값은 ``logosfuzz/analyze/cve_reporting/schema.py``의 ``Verdict`` enum과
     **정확히 동일**하게 맞춘다. ANA-05-01의 출력 dict를 ANA-05-02
     ``build_cve_report(triage_result=...)``가 그대로 소비하기 때문이다.
     """

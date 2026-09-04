@@ -55,7 +55,7 @@ class HarnessArtifact:
             따라야 GEN-03-04가 호출 여부를 판별할 수 있다.
         api_signatures: 정적 리뷰에서 비교할 원본 API 시그니처 목록.
         gen_model: 하네스를 생성한 LLM 모델명. ANA 단계가 추적할 수 있도록
-            `ana_05_02_cve_reporting`의 `harness.gen_model` 필드 컨벤션과
+            `logosfuzz/analyze/cve_reporting`의 `harness.gen_model` 필드 컨벤션과
             동일하게 전달한다.
         round_no: 현재 재시도 라운드(0부터 시작). `validate_with_retry`가
             갱신하며, 호출자가 직접 설정할 필요는 없다.

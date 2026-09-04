@@ -9,7 +9,7 @@
     `models.FalsePositiveCrash`가 그 매핑까지 포함한 최소 입력 계약의 스텁
     역할을 한다(`models.CrashRecord`와는 다른 타입 - 그쪽은 ANA-05-04가 쓰는
     "원시 크래시 레코드").
-  - (연계) ANA-05-02 CVE 리포트 - 별도 패키지 ``ana_05_02_cve_reporting``
+  - (연계) ANA-05-02 CVE 리포트 - 서브패키지 ``logosfuzz.analyze.cve_reporting``
 
 파이프라인: EXE-04-02(Sanitizer 모니터링) → ANA-05-04(중복 제거)
             → ANA-05-01(정/오탐) → ANA-05-03(역피드백/재생성) → ANA-05-02(CVE 리포트)

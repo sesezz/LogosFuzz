@@ -15,12 +15,12 @@
   * 심볼 -> 헤더 : 이 API를 쓰려면 어떤 헤더를 include 해야 하는지.
                 D의 GEN-03-02(컴파일 에러 자가치유)가 쓴다.
 
-B/D가 실제로 소비하는 형태로 바꾸는 어댑터는 `src.kb_adapters`에 있다.
+B/D가 실제로 소비하는 형태로 바꾸는 어댑터는 `logosfuzz.knowledge.kb_adapters`에 있다.
 
 사용법:
-  python -m src.knowledge_base build --paths examples --output build/kb_full.json
-  python -m src.knowledge_base show --kb build/kb_full.json --api parse_header
-  python -m src.knowledge_base stats --kb build/kb_full.json
+  python -m logosfuzz.knowledge.knowledge_base build --paths examples --output build/kb_full.json
+  python -m logosfuzz.knowledge.knowledge_base show --kb build/kb_full.json --api parse_header
+  python -m logosfuzz.knowledge.knowledge_base stats --kb build/kb_full.json
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-from src.constraint_extractor import (
+from logosfuzz.extract.constraint_extractor import (
     FunctionFacts,
     destructure_macro_declaration,
     doc_constraints,
@@ -41,8 +41,8 @@ from src.constraint_extractor import (
     iter_source_files,
     mask_source,
 )
-from src.rag_constraints import build_document
-from src.rag_index import BM25Index, DenseIndex, HybridRetriever
+from logosfuzz.knowledge.rag_constraints import build_document
+from logosfuzz.knowledge.rag_index import BM25Index, DenseIndex, HybridRetriever
 
 KB_VERSION = 1
 
@@ -227,8 +227,8 @@ def scan_file(path: str, text: Optional[str] = None) -> FileInfo:
 
 def _compile_db_entries(compile_db: str) -> Dict[str, dict]:
     """compile_commands.json 을 파일 경로 -> {flags, directory} 로 정리한다."""
-    from src.compile_commands import load_compile_commands
-    from src.compile_db_analyzer import extract_clang_args, normalize_path
+    from logosfuzz.extract.compile_commands import load_compile_commands
+    from logosfuzz.extract.compile_db_analyzer import extract_clang_args, normalize_path
 
     entries: Dict[str, dict] = {}
     for entry in load_compile_commands(compile_db):

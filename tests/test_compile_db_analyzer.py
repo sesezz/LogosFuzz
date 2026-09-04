@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from src.compile_db_analyzer import analyze_compile_commands
+from logosfuzz.extract.compile_db_analyzer import analyze_compile_commands
 
 
 def test_analyze_compile_commands(tmp_path, monkeypatch):

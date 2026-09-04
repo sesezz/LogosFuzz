@@ -1,7 +1,7 @@
 """Simple AST analyzer for C/C++ files.
 
 Usage:
-  python -m src.ast_analyzer path/to/file.c --output out.json
+  python -m logosfuzz.extract.ast_analyzer path/to/file.c --output out.json
 
 This script will use clang Python bindings if available; otherwise falls back to a
 lightweight regex-based extractor (includes, simple function names).

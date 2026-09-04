@@ -1,22 +1,19 @@
 """
 ANA-05-02 파이프라인 테스트
 
-실행: 프로젝트 루트(ana_05_02_cve_reporting)에서
-    python3 -m pytest tests/ -v
+실행: 프로젝트 루트에서
+    python -m pytest logosfuzz/analyze/cve_reporting/tests -v
 """
 
 import json
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from asan_parser import parse_asan_log
-from cwe_mapping import lookup_cwe, UNKNOWN_CWE
-from cvss_estimator import estimate_cvss
-from report_generator import build_cve_report
-from render import render_json, render_markdown
-from schema import Verdict
+from logosfuzz.analyze.cve_reporting.asan_parser import parse_asan_log
+from logosfuzz.analyze.cve_reporting.cwe_mapping import lookup_cwe, UNKNOWN_CWE
+from logosfuzz.analyze.cve_reporting.cvss_estimator import estimate_cvss
+from logosfuzz.analyze.cve_reporting.report_generator import build_cve_report
+from logosfuzz.analyze.cve_reporting.render import render_json, render_markdown
+from logosfuzz.analyze.cve_reporting.schema import Verdict
 
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "samples"
 
@@ -160,7 +157,7 @@ def test_build_cve_report_end_to_end_sample2():
 
 
 def test_report_id_format():
-    from schema import CVEReport
+    from logosfuzz.analyze.cve_reporting.schema import CVEReport
 
     rid = CVEReport.new_report_id(sequence=7, year=2026)
     assert rid == "LOGOSFUZZ-2026-000007"

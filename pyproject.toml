@@ -27,4 +27,4 @@ exclude = ["*.tests", "*.tests.*"]
 # testpaths 도 고정하지 않는다. 목록을 두면 새 테스트 폴더를 추가할 때마다
 # 여기에 등록해야 하고, 빠뜨리면 CI 가 조용히 건너뛴다(실제로 세 번 발생했다).
 # norecursedirs 기본값이 .venv/build/dist 를 이미 제외하므로 전체를 훑어도 안전하다.
-pythonpath = [".", "ana_05_02_cve_reporting"]
+pythonpath = ["."]

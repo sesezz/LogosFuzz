@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 # SCH-02-02 모듈에서 가져옴
-from sch_02_02_synergy_scheduler import (
+from logosfuzz.schedule.sch_02_02_synergy_scheduler import (
     ApiMetadata, Constraint,
     compute_pairwise_synergy, rank_logic_groups,
     SynergyWeights

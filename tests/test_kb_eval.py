@@ -3,7 +3,7 @@ import shutil
 
 import pytest
 
-from src.kb_eval import (
+from logosfuzz.knowledge.kb_eval import (
     GroundTruth,
     GroundTruthUnavailable,
     build_auto_queries,
@@ -17,7 +17,7 @@ from src.kb_eval import (
     render_report,
     resolve_ground_truth,
 )
-from src.knowledge_base import KnowledgeBase
+from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 HEADER = """
 #ifndef LIB_H
