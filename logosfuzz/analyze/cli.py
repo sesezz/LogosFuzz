@@ -21,25 +21,13 @@ from pathlib import Path
 from logosfuzz.analyze.dedup import CrashDeduplicator
 from logosfuzz.analyze.loader import load_records
 from logosfuzz.analyze.models import CrashCluster
+from logosfuzz.analyze.reachability import SourceReachabilityProvider
 from logosfuzz.analyze.triage import (
     LLMTriager,
     RuleBasedTriager,
     summarize,
     triage_clusters,
 )
-
-
-def _make_triager(args: argparse.Namespace):
-    """--llm이 주어지면 LLM 판별기를, 아니면 규칙 기반을 쓴다.
-
-    LLMTriager는 호출/파싱 실패 시 스스로 규칙 기반으로 폴백하므로,
-    LLM이 없거나 죽어도 판별 자체가 멈추지는 않는다.
-    """
-    if not getattr(args, "llm", False):
-        return RuleBasedTriager()
-    from logosfuzz.generate.llm import OpenAILLMClient
-
-    return LLMTriager(client=OpenAILLMClient(model=args.model), model_name=args.model)
 
 
 def _write(path: str | None, payload: dict) -> None:
@@ -58,6 +46,48 @@ def _clusters_from_inputs(inputs: list[str], depth: int) -> tuple[list[CrashClus
     dedup = CrashDeduplicator(depth=depth)
     dedup.extend(load_records(inputs))
     return dedup.clusters(), {"source": "raw-sanitizer", **dedup.stats().to_dict()}
+
+
+def _triager_for_args(
+    args: argparse.Namespace,
+) -> tuple[RuleBasedTriager | LLMTriager, SourceReachabilityProvider | None]:
+    """CLI 옵션에 따라 도달 가능성 증거를 주입한 판별기를 만든다.
+
+    ``--source-root``를 주지 않으면 기존 규칙 기반 동작을 그대로 유지한다.
+    소스 루트를 지정한 경우에만 ANA-05-01이 대상 함수의 정의, 공개 헤더,
+    프로덕션/하네스 호출부를 수집한다. 하네스 디렉터리는 선택 사항이라,
+    크래시 콜스택의 하네스 소스까지 연결할 때만 지정하면 된다.
+    """
+    provider = None
+    if getattr(args, "source_root", None):
+        provider = SourceReachabilityProvider(args.source_root, args.harness_dir)
+
+    fallback = RuleBasedTriager(context_provider=provider)
+    if not getattr(args, "llm", False):
+        return fallback, provider
+
+    from logosfuzz.generate.llm import OpenAILLMClient
+
+    model = getattr(args, "model", "gpt-4o-mini")
+    return (
+        LLMTriager(
+            client=OpenAILLMClient(model=model),
+            model_name=model,
+            fallback=fallback,
+            context_provider=provider,
+        ),
+        provider,
+    )
+
+
+def _reachability_dict(provider, cluster: CrashCluster) -> dict | None:
+    """판별 결과에 소스 근거를 보존한다(ANA/JSON 소비용)."""
+    if provider is None:
+        return None
+    try:
+        return provider(cluster).to_dict()
+    except Exception as exc:  # 분석 실패가 판별 전체를 막지 않도록 한다.
+        return {"error": f"reachability analysis failed: {exc}"}
 
 
 def _run_dedup(args: argparse.Namespace) -> int:
@@ -81,7 +111,7 @@ def _run_dedup(args: argparse.Namespace) -> int:
 
 def _run_triage(args: argparse.Namespace) -> int:
     clusters, meta = _clusters_from_inputs(args.inputs, args.depth)
-    triager = _make_triager(args)
+    triager, provider = _triager_for_args(args)
     results = triage_clusters(clusters, triager)
     summary = summarize(results)
 
@@ -98,6 +128,8 @@ def _run_triage(args: argparse.Namespace) -> int:
                 "count": by_id[r.cluster_id].count if r.cluster_id in by_id else 0,
                 "triage_result": r.to_triage_dict(),  # ← ANA-05-02 입력 계약
                 "signals": r.signals,
+                "reachability": _reachability_dict(provider, by_id[r.cluster_id])
+                if r.cluster_id in by_id else None,
             }
             for r in results
         ],
@@ -122,7 +154,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
     dedup = CrashDeduplicator(depth=args.depth)
     dedup.extend(load_records(args.inputs))
     clusters = dedup.clusters()
-    triager = _make_triager(args)
+    triager, provider = _triager_for_args(args)
     results = triage_clusters(clusters, triager)
     summary = summarize(results)
     tri_by_id = {r.cluster_id: r for r in results}
@@ -136,6 +168,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
                 **c.to_dict(),
                 "triage_result": tri_by_id[c.cluster_id].to_triage_dict(),
                 "signals": tri_by_id[c.cluster_id].signals,
+                "reachability": _reachability_dict(provider, c),
             }
             for c in clusters
         ],
@@ -172,6 +205,8 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("inputs", nargs="+", help="dedup.json 또는 원시 sanitizer 입력")
     t.add_argument("--depth", type=int, default=3, help="원시 입력일 때 dedup 프레임 수(기본 3)")
     t.add_argument("--output", "-o", help="판별 결과 JSON 저장 경로")
+    t.add_argument("--source-root", help="대상 C/C++ 소스 트리(도달 가능성 증거 수집)")
+    t.add_argument("--harness-dir", help="크래시를 낸 하네스 소스 디렉터리(선택)")
     t.add_argument("--llm", action="store_true", help="LLM 기반 판별 사용(기본: 규칙 기반)")
     t.add_argument("--model", default="gpt-4o-mini", help="--llm일 때 사용할 모델")
     t.set_defaults(func=_run_triage)
@@ -180,6 +215,8 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("inputs", nargs="+", help="원시 sanitizer 입력(JSONL/dir/summary)")
     a.add_argument("--depth", type=int, default=3, help="시그니처 상위 프레임 수(기본 3)")
     a.add_argument("--output", "-o", help="통합 결과 JSON 저장 경로")
+    a.add_argument("--source-root", help="대상 C/C++ 소스 트리(도달 가능성 증거 수집)")
+    a.add_argument("--harness-dir", help="크래시를 낸 하네스 소스 디렉터리(선택)")
     a.add_argument("--llm", action="store_true", help="LLM 기반 판별 사용(기본: 규칙 기반)")
     a.add_argument("--model", default="gpt-4o-mini", help="--llm일 때 사용할 모델")
     a.set_defaults(func=_run_analyze)

@@ -49,6 +49,13 @@ class SelfHealLoop:
     hitl: Optional[object] = None       # logosfuzz.control.hitl.HITLManager (선택)
     on_round: Optional[RoundCallback] = None
     knowledge: Optional[Dict[str, str]] = None  # RAG 힌트(선택)
+    # 초안과 **모든 수정 라운드**에 적용할 후처리. `hygiene.sanitize_harness` 를
+    # 넣으면 LLM 이 덧붙인 대상 함수 재선언을 결정적으로 걷어낸다.
+    #
+    # 초안에만 걸면 소용이 없다 - 수정 라운드에서 LLM 이 같은 선언을 다시 써 넣어
+    # `conflicting types` 가 부활하고, 루프는 같은 에러를 반복하다 정체로 끝난다.
+    # 그래서 훅을 루프 안에 둔다.
+    sanitize: Optional[Callable[[str, HarnessDraft], str]] = None
 
     def __post_init__(self) -> None:
         if self.prompt_builder is None:
@@ -57,10 +64,19 @@ class SelfHealLoop:
             raise ValueError("max_round는 0 이상이어야 합니다")
 
     # --------------------------------------------------------------------- #
+    def _clean(self, source: str, draft: HarnessDraft) -> str:
+        """후처리 훅. 실패해도 루프를 멈추지 않는다."""
+        if self.sanitize is None:
+            return source
+        try:
+            return self.sanitize(source, draft)
+        except Exception:
+            return source
+
     def run(self, draft: HarnessDraft) -> GenerateReport:
         start = time.monotonic()
         rounds: List[HealRound] = []
-        source = draft.source
+        source = self._clean(draft.source, draft)
         outcome = HealOutcome.EXHAUSTED
 
         # 라운드 0: 초안 컴파일
@@ -92,6 +108,8 @@ class SelfHealLoop:
 
             fixed = extract_code(response)
             note = extract_note(response)
+            if fixed:
+                fixed = self._clean(fixed, draft)
             if not fixed or fixed == source:
                 # LLM이 변화를 못 만들면 정체로 간주
                 outcome = HealOutcome.STAGNATED

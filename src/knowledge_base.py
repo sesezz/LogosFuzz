@@ -34,6 +34,7 @@ from typing import Dict, Iterable, List, Optional, Sequence
 
 from src.constraint_extractor import (
     FunctionFacts,
+    destructure_macro_declaration,
     doc_constraints,
     extract_doc_comment,
     extract_from_text,
@@ -66,6 +67,34 @@ STRUCT_ALIAS_RE = re.compile(
 )
 STRUCT_TAG_RE = re.compile(r"\b(?:struct|union)\s+([A-Za-z_]\w*)\s*\{")
 
+# 테스트/예제 코드로 볼 경로 표지.
+#
+# 왜 필요한가 - Eclipse S-CORE `logging` 저장소를 색인했더니 API 388개 중
+# **187개(48.2%)가 테스트 코드**였고, SCH 가 뽑은 최우선 로직 그룹이 전부
+# gtest 픽스처(`SetUp`/`TearDown`)였다. 테스트 헬퍼를 퍼징 대상으로 올리면
+# GEN 이 그걸 호출하는 하네스를 만들고, 그 결과는 대상 라이브러리에 대해
+# 아무것도 말해 주지 않는다.
+#
+# `is_static` 과 같은 원칙으로 다룬다. KB 는 **사실만 기록**하고, 거를지 말지는
+# 소비자(SCH/GEN)가 정한다. 테스트 코드도 색인해 두면 ANA 가 "이 크래시가
+# 테스트에서만 불리는 함수에서 났는가"를 판단할 때 쓸 수 있다.
+# 경로 **세그먼트**가 이 중 하나면 테스트 트리로 본다. 절대 경로 전체에 대해
+# 부분 문자열로 찾으면 상위 디렉토리 이름(사용자 폴더, 빌드 임시 경로 등)에
+# 우연히 "test" 가 들어 있을 때 제품 코드를 테스트로 오판한다.
+_TEST_DIR_SEGMENTS = {
+    "test", "tests", "testing", "ut", "it", "mock", "mocks",
+    "gtest", "gmock", "example", "examples", "benchmark", "benchmarks",
+    "fuzz", "fuzzing",
+    # Eclipse S-CORE 관례. `unit_test/` 아래에 gtest 픽스처가 들어간다.
+    "unit_test", "unit_tests", "component_test", "component_tests",
+}
+
+# 파일 이름 자체가 테스트임을 드러내는 형태: `x_test.cpp`, `test_x.c`, `x.test.ts`.
+# `ut_`/`ct_` 접두사는 S-CORE 의 단위/컴포넌트 테스트 관례다 (`ut_number.cpp`).
+_TEST_FILE_RE = re.compile(
+    r"(^|[._-])(test|tests|mock|benchmark|ut|ct|example|examples)([._-]|$)"
+)
+
 # 함수 정의가 아니라 선언으로만 잡히면 안 되는 이름들
 _NON_SYMBOLS = {
     "if", "for", "while", "switch", "return", "sizeof", "defined", "typedef",
@@ -90,6 +119,25 @@ class FileInfo:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def is_test_path(path: str) -> bool:
+    """이 파일이 테스트/예제 코드인가.
+
+    디렉토리 세그먼트와 파일 이름으로 판단한다. 정확한 분류는 빌드 시스템만 알
+    수 있지만, 이것만으로도 gtest 픽스처가 퍼징 대상으로 올라오는 것은 막는다.
+
+    >>> is_test_path("score/datarouter/test/ut/ut_logging/x.cpp")
+    True
+    >>> is_test_path("score/mw/log/detail/common/dlt_format.cpp")
+    False
+    """
+    parts = [p.lower() for p in str(path).replace("\\", "/").split("/") if p]
+    if not parts:
+        return False
+    if any(segment in _TEST_DIR_SEGMENTS for segment in parts[:-1]):
+        return True
+    return bool(_TEST_FILE_RE.search(Path(parts[-1]).stem))
 
 
 def _read(path: str) -> str:
@@ -119,6 +167,35 @@ def header_declaration_docs(text: str) -> Dict[str, str]:
     return docs
 
 
+def macro_declared_symbols(masked: str) -> Dict[str, str]:
+    """매크로로 선언된 함수 이름 -> 파라미터 문자열.
+
+    libpng 은 공개 API 를 전부 `PNG_EXPORT(idx, rettype, name, (params));` 로
+    선언한다. 일반 프로토타입 정규식으로는 이름이 `PNG_EXPORT` 로 잡혀서
+    **헤더가 무엇을 선언하는지 알 수 없게 된다** — png.h 를 스캔하면 인식되는
+    심볼이 매크로 이름 7개뿐이었다. 그러면 `header_for()`/`declaring_files()`
+    가 무용해지고, "이 API 가 공개인가"를 판단할 수 없다.
+    """
+    found: Dict[str, str] = {}
+    for match in re.finditer(r"\b([A-Z][A-Z0-9_]{2,})\s*\(", masked):
+        open_paren = match.end() - 1
+        depth, close = 0, None
+        for i in range(open_paren, len(masked)):
+            if masked[i] == "(":
+                depth += 1
+            elif masked[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    close = i
+                    break
+        if close is None:
+            continue
+        parsed = destructure_macro_declaration(masked[open_paren + 1:close])
+        if parsed and parsed["name"] not in _NON_SYMBOLS:
+            found.setdefault(parsed["name"], parsed["return_type"])
+    return found
+
+
 def scan_file(path: str, text: Optional[str] = None) -> FileInfo:
     """파일에서 include / 선언 심볼 / 타입 이름을 뽑는다."""
     if text is None:
@@ -128,6 +205,8 @@ def scan_file(path: str, text: Optional[str] = None) -> FileInfo:
     declares = {
         name for name in DECL_RE.findall(masked) if name not in _NON_SYMBOLS
     }
+    # 매크로로 선언되는 API 도 헤더가 "선언한" 것으로 센다.
+    declares |= set(macro_declared_symbols(masked))
     types = set(TYPEDEF_BLOCK_RE.findall(masked))
     types |= {n for n in TYPEDEF_ALIAS_RE.findall(masked) if n not in _NON_SYMBOLS}
     types |= set(TAG_RE.findall(masked))
@@ -280,6 +359,15 @@ class KnowledgeBase:
             if path.endswith(HEADER_SUFFIXES)
         }
         for document in documents:
+            # 내부 링키지 여부. 별도 컴파일 단위인 하네스는 `static` 함수를
+            # extern 으로 링크할 수 없다. 이걸 기록해 두지 않으면 SCH 가 static
+            # 함수를 퍼징 대상 그룹에 넣고, GEN 이 그걸 호출하는 하네스를 만들어
+            # "undefined reference" 로 링크가 깨진다. 소스 수준 에러가 아니라
+            # 자가 치유 루프가 아무리 돌아도 고칠 수 없는 실패다.
+            document["is_static"] = (
+                document.get("signature", "").lstrip().startswith("static")
+            )
+            document["is_test"] = is_test_path(document["file"])
             document["called_by"] = sorted(set(callers.get(document["function"], [])))
             info = file_infos.get(document["file"])
             document["includes"] = list(info.includes) if info else []

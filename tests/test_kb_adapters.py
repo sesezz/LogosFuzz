@@ -4,6 +4,8 @@ import subprocess
 import pytest
 
 from src.kb_adapters import (
+    configuration_apis,
+    render_configuration_apis,
     api_reference,
     as_include_path,
     call_sequences_by_file,
@@ -419,3 +421,97 @@ def test_constraints_for_triage_filters_by_confidence(kb):
 
 def test_constraints_for_triage_unknown_api(kb):
     assert constraints_for_triage(kb, "nope") == []
+
+
+# -- 코드 경로를 여는 설정 API ----------------------------------------------
+#
+# 2단계 검증(Magma libpng)에서 자동 생성 하네스 커버리지가 823, 사람이 쓴
+# OSS-Fuzz 드라이버가 1454 였다. 차이는 하나였다 - 사람 쪽은 png_set_expand 같은
+# 변환 설정 API 를 켜서 디코딩 코드의 큰 덩어리를 연다.
+
+CONFIG_HEADER = """
+#ifndef LIB_H
+#define LIB_H
+typedef struct dec_ctx { int mode; } dec_ctx_t;
+
+int dec_open(dec_ctx_t *ctx, const char *path);
+void dec_set_expand(dec_ctx_t *ctx);
+void dec_set_scale(dec_ctx_t *ctx, int factor);
+void dec_enable_checks(dec_ctx_t *ctx);
+#endif
+"""
+
+CONFIG_PRIVATE_HEADER = """
+#ifndef LIB_PRIV_H
+#define LIB_PRIV_H
+void dec_internal_set_state(dec_ctx_t *ctx, int state);
+#endif
+"""
+
+CONFIG_IMPL = """
+#include "lib.h"
+#include "libpriv.h"
+
+int dec_open(dec_ctx_t *ctx, const char *path) { return ctx ? 0 : -1; }
+void dec_set_expand(dec_ctx_t *ctx) { ctx->mode |= 1; }
+void dec_set_scale(dec_ctx_t *ctx, int factor) { ctx->mode += factor; }
+void dec_enable_checks(dec_ctx_t *ctx) { ctx->mode |= 2; }
+void dec_internal_set_state(dec_ctx_t *ctx, int state) { ctx->mode = state; }
+static void dec_set_hidden(dec_ctx_t *ctx) { ctx->mode = 0; }
+"""
+
+
+@pytest.fixture
+def config_kb(tmp_path):
+    (tmp_path / "lib.h").write_text(CONFIG_HEADER, encoding="utf-8")
+    (tmp_path / "libpriv.h").write_text(CONFIG_PRIVATE_HEADER, encoding="utf-8")
+    (tmp_path / "lib.c").write_text(CONFIG_IMPL, encoding="utf-8")
+    return KnowledgeBase.build(paths=[str(tmp_path)])
+
+
+def test_configuration_apis_finds_path_opening_setters(config_kb):
+    names = [a["function"] for a in configuration_apis(config_kb, "dec_ctx_t")]
+
+    assert "dec_set_expand" in names
+    assert "dec_set_scale" in names
+    assert "dec_enable_checks" in names
+
+
+def test_configuration_apis_excludes_the_main_entry_point(config_kb):
+    """`dec_open` 은 설정이 아니라 진입점이다."""
+    names = [a["function"] for a in configuration_apis(config_kb, "dec_ctx_t")]
+
+    assert "dec_open" not in names
+
+
+def test_configuration_apis_excludes_private_header_declarations(config_kb):
+    """비공개 헤더(libpriv.h)에만 선언된 내부 헬퍼는 제외한다."""
+    names = [a["function"] for a in configuration_apis(config_kb, "dec_ctx_t")]
+
+    assert "dec_internal_set_state" not in names
+
+
+def test_configuration_apis_excludes_static_functions(config_kb):
+    names = [a["function"] for a in configuration_apis(config_kb, "dec_ctx_t")]
+
+    assert "dec_set_hidden" not in names
+
+
+def test_configuration_apis_needs_the_handle_as_first_parameter(config_kb):
+    """다른 핸들 타입을 물으면 아무것도 나오면 안 된다."""
+    assert configuration_apis(config_kb, "other_ctx_t") == []
+
+
+def test_configuration_apis_returns_nothing_without_a_handle(config_kb):
+    assert configuration_apis(config_kb, "") == []
+
+
+def test_render_configuration_apis_lists_signatures(config_kb):
+    rendered = render_configuration_apis(configuration_apis(config_kb, "dec_ctx_t"))
+
+    assert "dec_set_expand" in rendered
+    assert "새 코드 경로" in rendered
+
+
+def test_render_is_empty_when_there_is_nothing_to_say():
+    assert render_configuration_apis([]) == ""

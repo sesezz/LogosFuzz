@@ -179,6 +179,7 @@ def state_types_of(document: dict, kb: KnowledgeBase) -> List[str]:
 class _UnionFind:
     def __init__(self, items: Iterable) -> None:
         self._parent = {item: item for item in items}
+        self._size = {item: 1 for item in self._parent}
 
     def find(self, item):
         root = item
@@ -192,6 +193,14 @@ class _UnionFind:
         ra, rb = self.find(a), self.find(b)
         if ra != rb:
             self._parent[rb] = ra
+            self._size[ra] += self._size[rb]
+
+    def size(self, item) -> int:
+        """``item`` 이 속한 묶음의 크기."""
+        return self._size[self.find(item)]
+
+    def connected(self, a, b) -> bool:
+        return self.find(a) == self.find(b)
 
     def groups(self) -> Dict[object, List]:
         clusters: Dict[object, List] = {}
@@ -234,6 +243,20 @@ class GroupInfo:
 GENERIC_TYPE_RATIO = 0.3
 MIN_APIS_FOR_RATIO = 20
 
+# 호출 관계로 병합할 때 허용하는 그룹 최대 크기.
+#
+# 왜 상한이 필요한가 — can-utils(API 675개) 실측
+# ------------------------------------------------
+# 호출 관계를 제한 없이 이으면 전이적 병합으로 API 의 **90%(609/675)** 가
+# `isobusfs_priv` 상태 타입 하나 밑으로 전부 빨려 들어갔다. "상태 기반으로
+# 의미 있게 쪼갠다"는 목적과 정반대로, 사실상 "전체를 한 그룹으로" 만드는
+# 것과 같다. 그룹은 GEN 이 하네스 하나를 만드는 단위이므로, 이 크기면
+# 하네스가 라이브러리 전체를 상대해야 해서 퍼징 단위로 쓸 수 없다.
+#
+# 32는 하네스 하나가 다루기 현실적인 API 수의 상한으로 잡은 값이고, CLI
+# `--max-call-group` 으로 조정할 수 있다.
+MAX_CALL_LINK_GROUP = 32
+
 
 def generic_types(owners_by_type: Dict[str, List[int]], total_apis: int,
                   ratio: float = GENERIC_TYPE_RATIO) -> List[str]:
@@ -252,8 +275,16 @@ def generic_types(owners_by_type: Dict[str, List[int]], total_apis: int,
 
 
 def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
-                   ratio: float = GENERIC_TYPE_RATIO) -> List[GroupInfo]:
-    """지식베이스에서 상태 기반 로직 그룹을 추출한다."""
+                   ratio: float = GENERIC_TYPE_RATIO,
+                   max_group: int = MAX_CALL_LINK_GROUP) -> List[GroupInfo]:
+    """지식베이스에서 상태 기반 로직 그룹을 추출한다.
+
+    Args:
+        kb: 통합 지식베이스.
+        link_calls: 호출 관계로 타입 없는 API 를 흡수할지.
+        ratio: 이 비율을 넘게 쓰이는 타입은 그룹을 구분 못 하므로 제외한다.
+        max_group: 호출 관계 병합으로 만들 수 있는 그룹 크기 상한.
+    """
     documents = sorted(kb.documents, key=lambda d: d["api_id"])
     if not documents:
         return []
@@ -286,12 +317,41 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
             union.union(first, other)
 
     # 2) 호출 관계 (핸들 타입이 없는 API 를 흡수)
+    #
+    # 여기서 두 가지를 지킨다. 전에는 모든 호출 엣지를 무조건 이어서, 서로 다른
+    # 상태 머신 두 개가 호출 한 번으로 통째로 합쳐지고 그게 전이적으로 번졌다.
+    #   (a) 양쪽 다 상태 타입을 가지면 잇지 않는다 - 각자 이미 자기 상태 머신에
+    #       속해 있다. 호출 관계는 위 docstring 대로 "핸들 타입이 없는 API 를
+    #       흡수"하는 용도다.
+    #   (b) 흡수하더라도 그룹이 max_group 을 넘지 않을 때만 잇는다 - 타입 없는
+    #       유틸 함수가 사슬처럼 이어져 눈덩이가 되는 것을 막는다.
+    #
+    # (a) 는 **그룹 단위**로 따져야 한다. 개별 API 두 개만 비교하면, 타입 없는
+    # 유틸 하나가 A 머신에 흡수된 뒤 그 유틸을 B 머신도 부르는 순간 A 와 B 가
+    # 유틸을 다리 삼아 합쳐진다. can-utils 의 609개 그룹이 정확히 이렇게 생겼다.
     if link_calls:
+        root_types: Dict[int, set] = {}
+        for api_id in by_id:
+            root_types.setdefault(union.find(api_id), set()).update(
+                types_by_api.get(api_id, ())
+            )
+
         for document in documents:
+            caller_id = document["api_id"]
             for callee in document.get("calls_internal", []):
                 callee_id = name_to_id.get(callee)
-                if callee_id is not None:
-                    union.union(document["api_id"], callee_id)
+                if callee_id is None:
+                    continue
+                caller_root, callee_root = union.find(caller_id), union.find(callee_id)
+                if caller_root == callee_root:
+                    continue
+                if root_types.get(caller_root) and root_types.get(callee_root):
+                    continue  # (a) 서로 다른 상태 머신 두 개를 잇는 셈이다
+                if union.size(caller_id) + union.size(callee_id) > max_group:
+                    continue  # (b) 눈덩이 방지
+                union.union(caller_id, callee_id)
+                merged = root_types.pop(caller_root, set()) | root_types.pop(callee_root, set())
+                root_types[union.find(caller_id)] = merged
 
     # 3) 남은 단독 API 는 같은 파일끼리
     clusters = union.groups()
@@ -414,9 +474,10 @@ def attach_priorities(groups: Sequence[GroupInfo], kb: KnowledgeBase) -> bool:
 
 
 def build_groups(kb: KnowledgeBase, link_calls: bool = True,
-                 with_priority: bool = True) -> List[GroupInfo]:
+                 with_priority: bool = True,
+                 max_group: int = MAX_CALL_LINK_GROUP) -> List[GroupInfo]:
     """추출 + 실시간 신호 결합 + 우선순위까지 한 번에."""
-    groups = extract_groups(kb, link_calls=link_calls)
+    groups = extract_groups(kb, link_calls=link_calls, max_group=max_group)
     attach_realtime_signals(groups, kb)
     if with_priority:
         attach_priorities(groups, kb)
@@ -508,6 +569,9 @@ def parse_args(argv=None):
     build_parser.add_argument("--no-call-links", action="store_true",
                               help="호출 관계로 잇지 않고 핸들 타입만으로 묶는다")
     build_parser.add_argument("--no-priority", action="store_true")
+    build_parser.add_argument("--max-call-group", type=int, default=MAX_CALL_LINK_GROUP,
+                              help="호출 관계 병합으로 만들 수 있는 그룹 크기 상한 "
+                                   f"(기본 {MAX_CALL_LINK_GROUP})")
 
     show_parser = subparsers.add_parser("show", help="그룹 내용 출력")
     show_parser.add_argument("--groups", required=True)
@@ -535,6 +599,7 @@ def main(argv=None):
             kb,
             link_calls=not args.no_call_links,
             with_priority=not args.no_priority,
+            max_group=args.max_call_group,
         )
         save_groups(groups, args.output)
         print(json.dumps({"output": args.output, **stats(groups)},

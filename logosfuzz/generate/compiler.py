@@ -21,6 +21,33 @@ from typing import List, Optional
 from .models import CompileResult, HarnessDraft
 
 
+# C 에서 **경고에 그치지만 하네스를 실행 불가로 만드는** 진단들.
+#
+# 왜 필요한가 — 2단계 검증에서 하네스 두 개가 첫 입력에 SEGV 로 죽었다. 원인은
+# `dlt_print_char_string` 의 실제 시그니처가 `char **text` 인데 `char *` 를
+# 넘긴 것이었다. C 에서 이건 **에러가 아니라 경고**라 빌드가 "성공"하고, 파이프
+# 라인은 `returncode == 0` 이고 로그에 `error:` 가 없으니 성공으로 집계한다.
+#
+# 즉 이 게이트가 없으면 "하네스 컴파일 성공률" 은 "링크까지 통과했다" 는 뜻이지
+# "실행 가능한 하네스" 라는 뜻이 아니다. 아래 네 가지는 전부 LLM 이 생성한
+# 하네스에서 흔하고, 전부 런타임에 죽거나 조용히 틀린 동작을 만든다.
+#
+#   incompatible-pointer-types  : char* <-> char** 등 포인터 층위 불일치
+#   implicit-function-declaration: 선언 없이 호출 -> 잘못된 시그니처로 링크
+#   int-conversion              : 정수를 포인터 자리에 전달
+#   return-type                 : LLVMFuzzerTestOneInput 이 int 를 안 돌려줌
+#
+# C++ 에서는 이미 전부 에러이므로 C 컴파일에만 붙인다.
+STRICT_C_WARNINGS = (
+    "-Werror=incompatible-pointer-types",
+    "-Werror=implicit-function-declaration",
+    "-Werror=int-conversion",
+    "-Werror=return-type",
+)
+
+_CPP_LANGUAGES = ("cpp", "c++", "cxx")
+
+
 class Compiler(ABC):
     """하네스 소스를 컴파일하고 결과를 반환하는 인터페이스."""
 
@@ -50,6 +77,7 @@ class SubprocessCompiler(Compiler):
         link_fuzzer: bool = False,             # True면 -fsanitize=fuzzer 링크
         timeout_sec: int = 120,
         workdir: Optional[str] = None,
+        strict_warnings: bool = True,          # 실행 불가를 만드는 C 경고를 에러로
     ) -> None:
         self.cc = cc
         self.std = std
@@ -60,14 +88,19 @@ class SubprocessCompiler(Compiler):
         self.link_fuzzer = link_fuzzer
         self.timeout_sec = timeout_sec
         self.workdir = workdir
+        self.strict_warnings = strict_warnings
 
     def available(self) -> bool:
         return shutil.which(self.cc) is not None
 
-    def _build_argv(self, src_path: Path, out_path: Path) -> List[str]:
+    def _build_argv(self, src_path: Path, out_path: Path,
+                    language: str = "c") -> List[str]:
         argv = [self.cc]
         if self.std:
             argv.append(f"-std={self.std}")
+        # C++ 에서는 이 진단들이 이미 에러라 붙이지 않는다(미지원 플래그 경고만 난다).
+        if self.strict_warnings and language not in _CPP_LANGUAGES:
+            argv += list(STRICT_C_WARNINGS)
         san = self.sanitizers
         if self.link_fuzzer:
             san = f"fuzzer,{san}" if san else "fuzzer"
@@ -94,7 +127,7 @@ class SubprocessCompiler(Compiler):
         src_path = base / f"{draft.logic_group}{suffix}"
         out_path = base / f"{draft.logic_group}.out"
         src_path.write_text(code, encoding="utf-8")
-        argv = self._build_argv(src_path, out_path)
+        argv = self._build_argv(src_path, out_path, draft.language)
 
         start = time.monotonic()
         try:

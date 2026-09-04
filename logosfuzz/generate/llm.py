@@ -5,13 +5,14 @@ GEN-03 하네스 생성 - LLM 클라이언트 & 리페어 프롬프트
 자가 치유 루프(GEN-03-02)가 컴파일 에러를 LLM에 되먹여 소스를 수정할 때 사용한다.
 
 - LLMClient       : 인터페이스(complete)
-- OpenAILLMClient : GPT-4o-mini 연동 자리(골격 - 실제 호출부는 TODO)
+- OpenAILLMClient : GPT-4o-mini 등 OpenAI 호환 모델 연동 (openai>=1.0 클라이언트 사용)
 - ScriptedLLMClient / FnLLMClient : 테스트/데모용
 - RepairPromptBuilder : 컴파일 로그 기반 수정 프롬프트 생성
 - extract_code    : LLM 응답에서 코드 블록만 추출
 """
 from __future__ import annotations
 
+import os
 import re
 from abc import ABC, abstractmethod
 from typing import Callable, Dict, List, Optional
@@ -31,32 +32,47 @@ class LLMClient(ABC):
 
 
 class OpenAILLMClient(LLMClient):
-    """GPT-4o-mini 등 OpenAI 호환 모델 연동.
+    """
+    GPT-4o-mini 등 OpenAI 호환 모델 연동.
 
-    ``openai`` 패키지는 호출 시점에 import한다. 이 모듈은 테스트에서
-    ScriptedLLMClient/FnLLMClient만으로도 쓰이므로, 모듈 import만으로
-    openai 의존성을 강제하지 않기 위해서다.
+    api_key를 명시하지 않으면 OPENAI_API_KEY 환경변수(.env 로드는 호출자 책임)를 사용한다.
+    openai 패키지(>=1.0, `from openai import OpenAI` 스타일)가 필요하다.
+    openai 패키지는 호출 시점에 import하므로 테스트 클라이언트만 사용할 때는
+    해당 의존성이 없어도 모듈을 import할 수 있다.
     """
 
     def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.2,
-                 api_key: Optional[str] = None, max_tokens: int = 1500) -> None:
+                 api_key: Optional[str] = None, base_url: Optional[str] = None,
+                 max_retries: int = 2, max_tokens: int = 1500) -> None:
         self.model = model
         self.temperature = temperature
-        self.api_key = api_key
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        self.base_url = base_url
+        self.max_retries = max_retries
         self.max_tokens = max_tokens
         self._client = None
 
-    def _ensure_client(self):
+    def _get_client(self):
         if self._client is None:
-            import os
-
-            from openai import OpenAI
-
-            self._client = OpenAI(api_key=self.api_key or os.environ.get("OPENAI_API_KEY"))
+            try:
+                from openai import OpenAI
+            except ImportError as e:  # pragma: no cover
+                raise RuntimeError(
+                    "openai 패키지가 설치되어 있지 않습니다. `pip install openai`로 설치하세요."
+                ) from e
+            if not self.api_key:
+                raise RuntimeError(
+                    "OPENAI_API_KEY가 설정되어 있지 않습니다. 환경변수로 설정하거나 "
+                    "OpenAILLMClient(api_key=...)로 직접 전달하세요."
+                )
+            kwargs = {"api_key": self.api_key, "max_retries": self.max_retries}
+            if self.base_url:
+                kwargs["base_url"] = self.base_url
+            self._client = OpenAI(**kwargs)
         return self._client
 
     def complete(self, prompt: str, *, system: str = "") -> str:
-        client = self._ensure_client()
+        client = self._get_client()
         messages = []
         if system:
             messages.append({"role": "system", "content": system})

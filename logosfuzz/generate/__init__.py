@@ -15,7 +15,17 @@ GEN (Generate) 계층 - LLM 기반 퍼징 하네스 자동 생성.
                         max_round=3, hitl=hitl_manager)
     report = loop.run(draft)
 """
-from .compiler import Compiler, FakeCompiler, SubprocessCompiler
+from .compiler import (
+    STRICT_C_WARNINGS,
+    Compiler,
+    FakeCompiler,
+    SubprocessCompiler,
+)
+from .hygiene import (
+    infer_language,
+    sanitize_harness,
+    strip_redundant_declarations,
+)
 from .llm import (
     FnLLMClient,
     LLMClient,
@@ -47,6 +57,10 @@ __all__ = [
     "parse_diagnostics",
     "Compiler",
     "SubprocessCompiler",
+    "STRICT_C_WARNINGS",
+    "sanitize_harness",
+    "strip_redundant_declarations",
+    "infer_language",
     "FakeCompiler",
     "LLMClient",
     "OpenAILLMClient",

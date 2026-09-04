@@ -5,6 +5,7 @@ import pytest
 from src.knowledge_base import (
     KnowledgeBase,
     header_declaration_docs,
+    is_test_path,
     scan_file,
 )
 
@@ -309,3 +310,94 @@ def test_saved_kb_keeps_korean_text(kb, tmp_path):
     payload = json.loads(path.read_text(encoding="utf-8"))
     document = next(d for d in payload["documents"] if d["function"] == "lib_open")
     assert "컨텍스트를 연다" in document["doc"]
+
+
+# -- 링키지 ---------------------------------------------------------------
+#
+# 4단계 검증(dlt-daemon 파싱 모듈)에서, SCH 가 `static` 함수를 퍼징 대상 그룹에
+# 넣고 GEN 이 그걸 호출하는 하네스를 만들어 "undefined reference" 로 링크가
+# 깨졌다. 소스 수준 에러가 아니라 자가 치유가 아무리 돌아도 못 고치는 실패다.
+# 소비자가 거를 수 있도록 KB 가 링키지를 기록해야 한다.
+
+LINKAGE_SOURCE = """
+#include <stddef.h>
+
+static int helper_internal(const char *buf, size_t len)
+{
+    return (int)len;
+}
+
+int lib_public_entry(const char *buf, size_t len)
+{
+    return helper_internal(buf, len);
+}
+"""
+
+
+def test_static_functions_are_marked(tmp_path):
+    (tmp_path / "linkage.c").write_text(LINKAGE_SOURCE, encoding="utf-8")
+    built = KnowledgeBase.build(paths=[str(tmp_path)])
+
+    internal = next(d for d in built.documents if d["function"] == "helper_internal")
+    public = next(d for d in built.documents if d["function"] == "lib_public_entry")
+
+    assert internal["is_static"] is True
+    assert public["is_static"] is False
+
+
+def test_test_code_is_marked(tmp_path):
+    """Eclipse S-CORE 색인에서 API 388개 중 188개(48.5%)가 테스트 코드였고,
+    SCH 가 뽑은 최우선 그룹이 전부 gtest 픽스처였다."""
+    src = tmp_path / "score" / "mw"
+    src.mkdir(parents=True)
+    (src / "formatter.cpp").write_text(
+        "int format_entry(const char *buf, int len)\n{\n    return len;\n}\n",
+        encoding="utf-8",
+    )
+    tests = tmp_path / "score" / "mw" / "test" / "ut"
+    tests.mkdir(parents=True)
+    (tests / "formatter_test.cpp").write_text(
+        "int SetUp(int fixture)\n{\n    return fixture;\n}\n", encoding="utf-8"
+    )
+    built = KnowledgeBase.build(paths=[str(tmp_path)])
+
+    product = next(d for d in built.documents if d["function"] == "format_entry")
+    fixture = next(d for d in built.documents if d["function"] == "SetUp")
+
+    assert product["is_test"] is False
+    assert fixture["is_test"] is True
+
+
+def test_is_test_path_recognises_common_layouts():
+    assert is_test_path("score/mw/log/detail/common/dlt_format_test.cpp")
+    assert is_test_path("logging/score/datarouter/test/ut/ut_logging/x.cpp")
+    assert is_test_path("src/mocks/fake_socket.cpp")
+    assert not is_test_path("src/shared/dlt_common.c")
+    assert not is_test_path("score/mw/log/detail/common/dlt_format.cpp")
+
+
+def test_is_test_path_recognises_score_ut_ct_convention():
+    """S-CORE 는 `unit_test/` 아래에 `ut_`/`ct_` 접두사를 쓴다.
+
+    이 관례를 모르면 baselibs 소스 1,730개 중 22개가 퍼징 대상으로 샜다.
+    다른 팀원들이 S-CORE 를 다룰 때 쓴 필터에서 확인한 것이다.
+    """
+    assert is_test_path("score/json/internal/parser/vajson/unit_test/ut_number.cpp")
+    assert is_test_path("score/json/internal/parser/vajson/unit_test/parser/ut_bool.cpp")
+    assert is_test_path("score/json/internal/parser/vajson/unit_test/ct_vajson_v2_parsers.cpp")
+    assert is_test_path("score/result/rust/result_example_cpp.cpp")
+    # 토큰 경계를 지켜야 한다. 아래는 프로덕션 코드다.
+    assert not is_test_path("score/json/internal/parser/vajson/number.cpp")
+    assert not is_test_path("score/mw/log/detail/output_statement.cpp")
+    assert not is_test_path("src/console/dlt_receive.c")
+
+
+def test_linkage_survives_save_and_load(tmp_path):
+    (tmp_path / "linkage.c").write_text(LINKAGE_SOURCE, encoding="utf-8")
+    path = tmp_path / "kb.json"
+    KnowledgeBase.build(paths=[str(tmp_path)]).save(str(path))
+
+    reloaded = KnowledgeBase.load(str(path))
+    internal = next(d for d in reloaded.documents if d["function"] == "helper_internal")
+
+    assert internal["is_static"] is True
