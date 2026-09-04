@@ -76,10 +76,26 @@ def _float(value: Any, default: float = 0.0) -> float:
 
 
 def _status(group: Mapping[str, Any]) -> str:
-    """실행 결과를 화면용 상태 하나로 정규화한다."""
+    """실행 결과를 화면용 상태 하나로 정규화한다.
+
+    우선순위는 ``timeout`` > ``crashed`` > ``failed`` > ``passed`` 다. 타임아웃이
+    앞서는 것은 ``test_timeout_takes_precedence_over_crash``가 고정한 계약이므로
+    유지한다.
+
+    ``crashed``의 판정 조건은 스키마 문서(``docs/VALIDATION-SUMMARY-SCHEMA.md``)의
+    정의 - "크래시 산출물 **또는 sanitizer 오류**가 확인됨" - 를 그대로 따른다.
+    새니타이저 결함만 있고 크래시 산출물이 없는 실행이 실제로 나온다(ASAN이
+    결함을 잡았지만 libFuzzer가 artifact를 남기지 못한 경우). 이때 결함을
+    ``passed``로 보고하면 리포트가 버그를 숨기게 된다.
+    """
     if bool(group.get("timed_out")):
         return "timeout"
-    if bool(group.get("crashed")) or bool(group.get("crashes")):
+    findings = group.get("sanitizer_findings")
+    if (
+        bool(group.get("crashed"))
+        or bool(group.get("crashes"))
+        or (isinstance(findings, list) and bool(findings))
+    ):
         return "crashed"
     exit_code = group.get("exit_code")
     if exit_code not in (None, 0):

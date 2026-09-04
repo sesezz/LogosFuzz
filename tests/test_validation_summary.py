@@ -84,6 +84,50 @@ def test_missing_analysis_is_explicitly_not_run():
     assert result["metrics"]["needs_review"] == 0
 
 
+def test_sanitizer_finding_alone_is_reported_as_crashed():
+    """크래시 산출물이 없어도 sanitizer 결함이 있으면 crashed 다.
+
+    스키마 문서의 정의 - "크래시 산출물 또는 sanitizer 오류가 확인됨" - 를 따른다.
+    ASAN이 결함을 잡았는데 libFuzzer가 artifact를 남기지 못한 실행이 실제로
+    관측된다. 이 경우를 passed 로 보고하면 리포트가 버그를 숨긴다.
+    """
+    run = _run_summary()
+    group = run["groups"][0]
+    group["crashed"] = False
+    group["crashes"] = []
+    group["exit_code"] = 0
+    group["sanitizer_findings"] = [{"category": "buffer-overflow"}]
+
+    result = build_validation_summary(run)
+
+    assert result["run"]["groups"][0]["status"] == "crashed"
+    assert result["run"]["groups"][0]["sanitizer_count"] == 1
+    assert result["run"]["groups"][0]["crash_count"] == 0
+    assert result["metrics"]["crashed_groups"] == 2   # 원래 crashed 이던 그룹 포함
+    assert result["metrics"]["passed_groups"] == 0
+
+
+def test_empty_sanitizer_findings_do_not_change_the_status():
+    """빈 결함 목록이 정상 실행을 crashed 로 만들지 않는다."""
+    run = _run_summary()
+    run["groups"][0]["sanitizer_findings"] = []
+
+    result = build_validation_summary(run)
+
+    assert result["run"]["groups"][0]["status"] == "passed"
+
+
+def test_non_list_sanitizer_findings_are_ignored_in_the_status():
+    """손상된 입력이 상태 판정을 흔들지 않는다."""
+    run = _run_summary()
+    run["groups"][0]["sanitizer_findings"] = "buffer-overflow"
+
+    result = build_validation_summary(run)
+
+    assert result["run"]["groups"][0]["status"] == "passed"
+    assert result["run"]["groups"][0]["sanitizer_count"] == 0
+
+
 def test_timeout_takes_precedence_over_crash():
     run = _run_summary()
     run["groups"][0]["timed_out"] = True
@@ -93,6 +137,23 @@ def test_timeout_takes_precedence_over_crash():
 
     assert result["run"]["groups"][0]["status"] == "timeout"
     assert result["metrics"]["timed_out_groups"] == 1
+
+
+def test_timeout_still_takes_precedence_over_a_sanitizer_finding():
+    """새니타이저 결함이 추가돼도 타임아웃 우선 계약은 유지된다.
+
+    이 우선순위는 스키마 소유자가 정한 것이라 임의로 뒤집지 않는다. 바꾸려면
+    팀 합의와 함께 이 테스트를 먼저 고쳐야 한다.
+    """
+    run = _run_summary()
+    group = run["groups"][0]
+    group["timed_out"] = True
+    group["sanitizer_findings"] = [{"category": "buffer-overflow"}]
+
+    result = build_validation_summary(run)
+
+    assert result["run"]["groups"][0]["status"] == "timeout"
+    assert result["run"]["groups"][0]["sanitizer_count"] == 1
 
 
 def test_write_and_load_round_trip(tmp_path):
