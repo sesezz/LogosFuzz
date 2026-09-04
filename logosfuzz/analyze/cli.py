@@ -23,6 +23,7 @@ from logosfuzz.analyze.loader import load_records
 from logosfuzz.analyze.models import CrashCluster
 from logosfuzz.analyze.reachability import SourceReachabilityProvider
 from logosfuzz.analyze.triage import (
+    LLMTriager,
     RuleBasedTriager,
     summarize,
     triage_clusters,
@@ -47,7 +48,9 @@ def _clusters_from_inputs(inputs: list[str], depth: int) -> tuple[list[CrashClus
     return dedup.clusters(), {"source": "raw-sanitizer", **dedup.stats().to_dict()}
 
 
-def _triager_for_args(args: argparse.Namespace) -> tuple[RuleBasedTriager, SourceReachabilityProvider | None]:
+def _triager_for_args(
+    args: argparse.Namespace,
+) -> tuple[RuleBasedTriager | LLMTriager, SourceReachabilityProvider | None]:
     """CLI 옵션에 따라 도달 가능성 증거를 주입한 판별기를 만든다.
 
     ``--source-root``를 주지 않으면 기존 규칙 기반 동작을 그대로 유지한다.
@@ -56,9 +59,25 @@ def _triager_for_args(args: argparse.Namespace) -> tuple[RuleBasedTriager, Sourc
     크래시 콜스택의 하네스 소스까지 연결할 때만 지정하면 된다.
     """
     provider = None
-    if args.source_root:
+    if getattr(args, "source_root", None):
         provider = SourceReachabilityProvider(args.source_root, args.harness_dir)
-    return RuleBasedTriager(context_provider=provider), provider
+
+    fallback = RuleBasedTriager(context_provider=provider)
+    if not getattr(args, "llm", False):
+        return fallback, provider
+
+    from logosfuzz.generate.llm import OpenAILLMClient
+
+    model = getattr(args, "model", "gpt-4o-mini")
+    return (
+        LLMTriager(
+            client=OpenAILLMClient(model=model),
+            model_name=model,
+            fallback=fallback,
+            context_provider=provider,
+        ),
+        provider,
+    )
 
 
 def _reachability_dict(provider, cluster: CrashCluster) -> dict | None:
@@ -98,7 +117,7 @@ def _run_triage(args: argparse.Namespace) -> int:
 
     by_id = {c.cluster_id: c for c in clusters}
     payload = {
-        "triage_model": RuleBasedTriager.model_name,
+        "triage_model": triager.model_name,
         "input": meta,
         "summary": summary,
         "results": [
@@ -142,7 +161,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
 
     payload = {
         "dedup": dedup.to_dict(),
-        "triage_model": RuleBasedTriager.model_name,
+        "triage_model": triager.model_name,
         "summary": summary,
         "findings": [
             {
@@ -188,6 +207,8 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--output", "-o", help="판별 결과 JSON 저장 경로")
     t.add_argument("--source-root", help="대상 C/C++ 소스 트리(도달 가능성 증거 수집)")
     t.add_argument("--harness-dir", help="크래시를 낸 하네스 소스 디렉터리(선택)")
+    t.add_argument("--llm", action="store_true", help="LLM 기반 판별 사용(기본: 규칙 기반)")
+    t.add_argument("--model", default="gpt-4o-mini", help="--llm일 때 사용할 모델")
     t.set_defaults(func=_run_triage)
 
     a = sub.add_parser("analyze", help="dedup→triage 파이프라인")
@@ -196,6 +217,8 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--output", "-o", help="통합 결과 JSON 저장 경로")
     a.add_argument("--source-root", help="대상 C/C++ 소스 트리(도달 가능성 증거 수집)")
     a.add_argument("--harness-dir", help="크래시를 낸 하네스 소스 디렉터리(선택)")
+    a.add_argument("--llm", action="store_true", help="LLM 기반 판별 사용(기본: 규칙 기반)")
+    a.add_argument("--model", default="gpt-4o-mini", help="--llm일 때 사용할 모델")
     a.set_defaults(func=_run_analyze)
     return p
 

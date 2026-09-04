@@ -37,16 +37,19 @@ class OpenAILLMClient(LLMClient):
 
     api_key를 명시하지 않으면 OPENAI_API_KEY 환경변수(.env 로드는 호출자 책임)를 사용한다.
     openai 패키지(>=1.0, `from openai import OpenAI` 스타일)가 필요하다.
+    openai 패키지는 호출 시점에 import하므로 테스트 클라이언트만 사용할 때는
+    해당 의존성이 없어도 모듈을 import할 수 있다.
     """
 
     def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.2,
                  api_key: Optional[str] = None, base_url: Optional[str] = None,
-                 max_retries: int = 2) -> None:
+                 max_retries: int = 2, max_tokens: int = 1500) -> None:
         self.model = model
         self.temperature = temperature
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self.base_url = base_url
         self.max_retries = max_retries
+        self.max_tokens = max_tokens
         self._client = None
 
     def _get_client(self):
@@ -62,7 +65,7 @@ class OpenAILLMClient(LLMClient):
                     "OPENAI_API_KEY가 설정되어 있지 않습니다. 환경변수로 설정하거나 "
                     "OpenAILLMClient(api_key=...)로 직접 전달하세요."
                 )
-            kwargs = {"api_key": self.api_key}
+            kwargs = {"api_key": self.api_key, "max_retries": self.max_retries}
             if self.base_url:
                 kwargs["base_url"] = self.base_url
             self._client = OpenAI(**kwargs)
@@ -77,6 +80,7 @@ class OpenAILLMClient(LLMClient):
         resp = client.chat.completions.create(
             model=self.model,
             temperature=self.temperature,
+            max_tokens=self.max_tokens,
             messages=messages,
         )
         return resp.choices[0].message.content or ""
