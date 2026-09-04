@@ -13,6 +13,7 @@ htmlcov/
 
 # Virtual environments
 .venv/
+.venv-*/
 venv/
 env/
 
@@ -52,6 +53,12 @@ crashes/
 corpus/
 harnesses/
 *.log
+crash-*
+
+# 파이프라인이 생성한 하네스와 컴파일 산출물 (실행할 때마다 새로 만들어짐)
+generated_harness*.c
+examples/**/buffer_overflow
+examples/**/fuzz_target
 
 # Generated reports and analysis output
 out/

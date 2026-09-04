@@ -31,32 +31,43 @@ class LLMClient(ABC):
 
 
 class OpenAILLMClient(LLMClient):
-    """
-    GPT-4o-mini 등 OpenAI 호환 모델 연동 자리(골격).
+    """GPT-4o-mini 등 OpenAI 호환 모델 연동.
 
-    실제 배포 시 openai 패키지로 채운다. 여기서는 의존성을 끌어오지 않기 위해
-    호출 시 명확한 안내와 함께 예외를 던진다.
+    ``openai`` 패키지는 호출 시점에 import한다. 이 모듈은 테스트에서
+    ScriptedLLMClient/FnLLMClient만으로도 쓰이므로, 모듈 import만으로
+    openai 의존성을 강제하지 않기 위해서다.
     """
 
     def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.2,
-                 api_key: Optional[str] = None) -> None:
+                 api_key: Optional[str] = None, max_tokens: int = 1500) -> None:
         self.model = model
         self.temperature = temperature
         self.api_key = api_key
+        self.max_tokens = max_tokens
+        self._client = None
 
-    def complete(self, prompt: str, *, system: str = "") -> str:  # pragma: no cover
-        # TODO(GEN-03): 아래 주석을 실제 호출로 교체
-        #   from openai import OpenAI
-        #   client = OpenAI(api_key=self.api_key)
-        #   resp = client.chat.completions.create(
-        #       model=self.model, temperature=self.temperature,
-        #       messages=[{"role": "system", "content": system},
-        #                 {"role": "user", "content": prompt}])
-        #   return resp.choices[0].message.content
-        raise NotImplementedError(
-            "OpenAILLMClient는 골격입니다. openai 클라이언트를 연결하거나 "
-            "ScriptedLLMClient/FnLLMClient를 사용하세요."
+    def _ensure_client(self):
+        if self._client is None:
+            import os
+
+            from openai import OpenAI
+
+            self._client = OpenAI(api_key=self.api_key or os.environ.get("OPENAI_API_KEY"))
+        return self._client
+
+    def complete(self, prompt: str, *, system: str = "") -> str:
+        client = self._ensure_client()
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        resp = client.chat.completions.create(
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            messages=messages,
         )
+        return resp.choices[0].message.content or ""
 
 
 class FnLLMClient(LLMClient):
