@@ -54,10 +54,16 @@ Executor = Callable[[list[str], Path, float, dict[str, str]], CommandResult]
 def _execute(argv: list[str], cwd: Path, timeout: float,
              env: dict[str, str]) -> CommandResult:
     started = time.monotonic()
+    # 일부 WSL 환경에서 ASAN이 크래시 심볼라이즈를 위해 띄우는 llvm-symbolizer가
+    # 응답 없이 멈춰, 회귀 실행 전체가 타임아웃까지 걸리는 문제가 있었다.
+    # 심볼라이즈 없이도 sanitizer/카테고리 판별에는 지장이 없으므로 기본으로 끈다
+    # (케이스가 env에서 ASAN_OPTIONS를 직접 지정하면 그 값이 우선한다).
+    merged_env = {**os.environ, **env}
+    merged_env.setdefault("ASAN_OPTIONS", "symbolize=0")
     try:
         completed = subprocess.run(
-            argv, cwd=cwd, env={**os.environ, **env}, capture_output=True,
-            text=True, timeout=timeout, errors="replace",
+            argv, cwd=cwd, env=merged_env, capture_output=True,
+            text=True, timeout=timeout, errors="replace", stdin=subprocess.DEVNULL,
         )
         return CommandResult(completed.returncode, False, completed.stdout,
                              completed.stderr, time.monotonic() - started)

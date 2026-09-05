@@ -59,6 +59,7 @@ crash-*
 generated_harness*.c
 examples/**/buffer_overflow
 examples/**/fuzz_target
+validation/**/bin/
 
 # Generated reports and analysis output
 out/
