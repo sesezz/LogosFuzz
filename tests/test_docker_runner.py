@@ -1,7 +1,10 @@
+import sys
+import time
+
 import pytest
 
 from logosfuzz.config import Engine, FuzzConfig, LogicGroup
-from logosfuzz.execute.docker_runner import DockerIsolationRunner, ProcResult
+from logosfuzz.execute.docker_runner import DockerIsolationRunner, ProcResult, _default_executor
 from logosfuzz.execute.errors import HarnessNotFoundError
 from logosfuzz.execute.stats import LiveStats, StatsMonitor
 
@@ -106,6 +109,39 @@ def test_run_group_missing_harness(tmp_path):
         runner.run_group(grp)
 
 
+def test_default_executor_separates_stdout_and_stderr():
+    """표준 출력/표준 오류를 합치지 않고 각각 모아야 한다.
+
+    사후에 "무엇이 출력됐는지" 재구성하려면 두 스트림이 뒤섞이면 안 된다.
+    """
+    argv = [sys.executable, "-c",
+            "import sys; print('out-1'); print('err-1', file=sys.stderr)"]
+    seen = []
+    result = _default_executor(argv, timeout=10, on_line=seen.append)
+
+    assert result.stdout == "out-1"
+    assert result.stderr == "err-1"
+    assert result.timed_out is False
+    assert set(seen) == {"out-1", "err-1"}  # 두 스트림 다 on_line 으로도 전달됨
+
+
+def test_default_executor_times_out_even_when_child_is_completely_silent():
+    """자식이 출력을 전혀 안 해도 데드라인이 정확한 시각에 발동해야 한다.
+
+    이전의 `for line in proc.stdout:` 블로킹 순회는 다음 줄이 올 때까지
+    데드라인 검사 자체가 실행되지 않아, 자식이 침묵하면 hard timeout까지
+    무한정 멈췄다(실측 확인: ASAN이 심볼라이저를 내부에서 fork하며 응답
+    없이 대기하는 경우 90초 넘게 멈춘 뒤에야 겨우 빠져나왔다).
+    """
+    argv = [sys.executable, "-c", "import time; time.sleep(30)"]
+    started = time.monotonic()
+    result = _default_executor(argv, timeout=0.3, on_line=lambda line: None)
+    elapsed = time.monotonic() - started
+
+    assert result.timed_out is True
+    assert elapsed < 5.0  # 30초 자식이지만 0.3초 데드라인 근처에서 끊겨야 함
+
+
 def test_run_group_streams_and_returns(tmp_path):
     cfg = _config(tmp_path)
     grp = _make_harness(cfg)
@@ -122,3 +158,25 @@ def test_run_group_streams_and_returns(tmp_path):
     assert result.stats.exec_per_sec == 512
     assert result.stats.coverage == 231
     assert result.timed_out is False
+
+
+def test_run_group_saves_stdout_and_stderr_logs(tmp_path):
+    """정상/실패 구분 없이 표준 출력·표준 오류가 그룹별 로그로 남아야 한다."""
+    cfg = _config(tmp_path)
+    grp = _make_harness(cfg)
+
+    def fake_executor(argv, timeout, on_line):
+        return ProcResult(exit_code=1, timed_out=False,
+                          stdout="normal output line",
+                          stderr="ERROR: AddressSanitizer: heap-use-after-free")
+
+    runner = DockerIsolationRunner(cfg, executor=fake_executor)
+    result = runner.run_group(grp, monitor=StatsMonitor(LiveStats(group=grp.name), live=False))
+
+    assert result.stdout_log is not None and result.stderr_log is not None
+    stdout_path = cfg.logs_dir / grp.name / "run.stdout.log"
+    stderr_path = cfg.logs_dir / grp.name / "run.stderr.log"
+    assert result.stdout_log == str(stdout_path)
+    assert result.stderr_log == str(stderr_path)
+    assert stdout_path.read_text(encoding="utf-8") == "normal output line"
+    assert "heap-use-after-free" in stderr_path.read_text(encoding="utf-8")

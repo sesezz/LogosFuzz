@@ -11,15 +11,21 @@
   - 하네스는 읽기 전용(:ro)으로, 출력만 쓰기 가능(/out)으로 마운트
 
 테스트 용이성을 위해 실제 프로세스 실행은 `executor` 콜러블로 주입한다.
-기본 executor는 subprocess.Popen으로 stdout을 라인 단위 스트리밍한다.
+기본 executor는 stdout/stderr를 각각 스레드로 읽어 큐에 모으고, 메인
+스레드는 `queue.get(timeout=...)`으로 소비한다 - 자식이 침묵해도(예: ASAN이
+크래시 시 심볼라이저를 내부에서 fork하며 응답 없이 대기) 데드라인이 정확히
+발동한다(실측으로 확인된 회귀: 기존의 `for line in proc.stdout` 블로킹
+방식은 출력이 없으면 하드 타임아웃까지 90초 넘게 멈췄다).
 """
 
 from __future__ import annotations
 
 import os
+import queue
 import shlex
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,11 +45,17 @@ from logosfuzz.execute.sanitizer import SanitizerFinding, SanitizerMonitor
 OnLine = Callable[[str], None]
 Executor = Callable[[list, float, OnLine], "ProcResult"]
 
+# 큐 소비 폴링 주기(초). 이 값 이상 자식이 침묵해도 이 주기마다 데드라인을
+# 재확인하므로, 무한정 블로킹되지 않는다.
+_POLL_INTERVAL_SEC = 0.5
+
 
 @dataclass
 class ProcResult:
     exit_code: int
     timed_out: bool
+    stdout: str = ""  # 표준 출력 전문(정상/컴파일 실패/타임아웃/크래시 모두 보존)
+    stderr: str = ""  # 표준 오류 전문
 
 
 @dataclass
@@ -58,6 +70,8 @@ class GroupResult:
     duration_sec: float
     sanitizer_findings: list[SanitizerFinding] = field(default_factory=list)
     coverage: object = None  # EXE-04-04 CoverageSummary(없으면 None); fuzz_session이 채움
+    stdout_log: Optional[str] = None  # 표준 출력 로그 파일 경로(저장 실패 시 None)
+    stderr_log: Optional[str] = None  # 표준 오류 로그 파일 경로
 
     @property
     def crashed(self) -> bool:
@@ -66,31 +80,95 @@ class GroupResult:
 
 
 def _default_executor(argv: list, timeout: float, on_line: OnLine) -> ProcResult:
-    """subprocess 기반 기본 실행기: stdout 라인 스트리밍 + 하드 타임아웃."""
+    """subprocess 기반 기본 실행기.
+
+    stdout/stderr를 각각 별도 스레드로 읽어 (스트림, 줄) 튜플을 큐에 넣고,
+    메인 스레드는 `queue.get(timeout=_POLL_INTERVAL_SEC)`으로 소비한다.
+    자식이 완전히 침묵해도(줄이 전혀 안 와도) 폴링 주기마다 데드라인을
+    재확인하므로 하드 타임아웃이 정확한 시각에 발동한다 - 이전의
+    `for line in proc.stdout:` 블로킹 순회는 다음 줄이 올 때까지 데드라인
+    검사 자체가 실행되지 않아, 자식이 조용해지면 무한정 멈췄다(실측 확인:
+    ASAN이 크래시 시 심볼라이저를 내부에서 fork하며 응답 없이 대기하는
+    경우 90초 넘게 하드 타임아웃까지 멈춘 뒤에야 겨우 빠져나왔다).
+    """
     proc = subprocess.Popen(
         argv,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
     )
+
+    lines: "queue.Queue[tuple[str, Optional[str]]]" = queue.Queue()
+
+    def _pump(stream, tag: str) -> None:
+        try:
+            for line in stream:
+                lines.put((tag, line.rstrip("\n")))
+        finally:
+            lines.put((tag, None))  # EOF 신호
+
+    assert proc.stdout is not None and proc.stderr is not None
+    readers = [
+        threading.Thread(target=_pump, args=(proc.stdout, "stdout"), daemon=True),
+        threading.Thread(target=_pump, args=(proc.stderr, "stderr"), daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
+
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
     deadline = time.monotonic() + timeout
     timed_out = False
-    try:
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            on_line(line.rstrip("\n"))
-            if time.monotonic() > deadline:
-                timed_out = True
-                proc.terminate()
-                break
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
+    open_streams = len(readers)
+
+    def _drain_once(block: bool) -> bool:
+        """큐에서 항목 하나를 꺼내 처리한다. 처리했으면 True."""
+        nonlocal open_streams
+        try:
+            tag, line = lines.get(timeout=_POLL_INTERVAL_SEC) if block else lines.get_nowait()
+        except queue.Empty:
+            return False
+        if line is None:
+            open_streams -= 1
+            return True
+        (stdout_lines if tag == "stdout" else stderr_lines).append(line)
+        on_line(line)
+        return True
+
+    while open_streams > 0 and time.monotonic() < deadline:
+        _drain_once(block=True)
+    if open_streams > 0:
         timed_out = True
-        proc.kill()
-        proc.wait()
-    return ProcResult(exit_code=proc.returncode if proc.returncode is not None else -1,
-                      timed_out=timed_out)
+
+    if timed_out:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    else:
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            proc.kill()
+            proc.wait()
+
+    # 프로세스가 끝난 뒤에도 큐에 남아있던 마지막 줄들을 마저 비운다(막
+    # 종료된 시점까지 나온 출력을 최대한 보존 - 특히 크래시 직전 ASAN 로그).
+    for reader in readers:
+        reader.join(timeout=2)
+    while _drain_once(block=False):
+        pass
+
+    return ProcResult(
+        exit_code=proc.returncode if proc.returncode is not None else -1,
+        timed_out=timed_out,
+        stdout="\n".join(stdout_lines),
+        stderr="\n".join(stderr_lines),
+    )
 
 
 class DockerIsolationRunner:
@@ -268,6 +346,7 @@ class DockerIsolationRunner:
         duration = time.monotonic() - start
         mon.finish()
         findings = sanitizer.finish()
+        stdout_log, stderr_log = self._write_run_logs(group, result)
 
         return GroupResult(
             group=group.name,
@@ -277,4 +356,26 @@ class DockerIsolationRunner:
             crashes=[],
             duration_sec=duration,
             sanitizer_findings=findings,
+            stdout_log=stdout_log,
+            stderr_log=stderr_log,
         )
+
+    def _write_run_logs(self, group: LogicGroup, result: "ProcResult"
+                        ) -> tuple[Optional[str], Optional[str]]:
+        """표준 출력/표준 오류 전문을 그룹별 로그 파일로 남긴다.
+
+        정상 종료든 타임아웃이든 크래시든 상관없이 항상 저장한다 - 사후에
+        "무엇이 출력됐는지" 볼 방법이 하나도 없으면 컴파일 실패나 실행 실패의
+        원인을 알 수 없다. 로그 저장 자체가 실패해도(디스크 문제 등) 퍼징
+        결과를 잃으면 안 되므로 예외를 삼키고 경로만 None 으로 둔다.
+        """
+        log_dir = self.config.logs_dir / group.name
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            stdout_path = log_dir / "run.stdout.log"
+            stderr_path = log_dir / "run.stderr.log"
+            stdout_path.write_text(result.stdout, encoding="utf-8")
+            stderr_path.write_text(result.stderr, encoding="utf-8")
+            return str(stdout_path), str(stderr_path)
+        except OSError:
+            return None, None

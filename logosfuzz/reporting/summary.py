@@ -128,6 +128,8 @@ def _normalise_group(group: Mapping[str, Any], *, stage: str) -> dict[str, Any]:
         "crashes": crashes,
         "sanitizer_findings": findings,
         "coverage_report": group.get("coverage_report"),
+        "stdout_log": group.get("stdout_log"),
+        "stderr_log": group.get("stderr_log"),
         "notes": str(group.get("notes") or ""),
     }
 

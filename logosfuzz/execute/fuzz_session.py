@@ -57,6 +57,8 @@ class SessionSummary:
                     "sanitizer_findings": [f.to_dict() for f in g.sanitizer_findings],
                     "coverage_report": g.coverage.to_dict()
                     if getattr(g, "coverage", None) is not None else None,
+                    "stdout_log": getattr(g, "stdout_log", None),
+                    "stderr_log": getattr(g, "stderr_log", None),
                 }
                 for g in self.groups
             ],

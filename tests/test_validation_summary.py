@@ -47,6 +47,31 @@ def _run_summary():
     }
 
 
+def test_build_summary_passes_through_stdout_and_stderr_log_paths():
+    """표준 출력/표준 오류 로그 경로는 화면이 쓸 수 있도록 그대로 보존된다.
+
+    docker_runner.run_group()이 채우는 선택 필드다 - 다연 스키마의 호환성
+    규칙("새 화면 기능은 선택 필드를 추가하는 방식")을 따른다.
+    """
+    run = _run_summary()
+    run["groups"][0]["stdout_log"] = "out/logs/dlt_fuzzer/run.stdout.log"
+    run["groups"][0]["stderr_log"] = "out/logs/dlt_fuzzer/run.stderr.log"
+
+    result = build_validation_summary(run)
+
+    group = result["run"]["groups"][0]
+    assert group["stdout_log"] == "out/logs/dlt_fuzzer/run.stdout.log"
+    assert group["stderr_log"] == "out/logs/dlt_fuzzer/run.stderr.log"
+
+
+def test_build_summary_defaults_log_paths_to_none_when_absent():
+    run = _run_summary()
+    result = build_validation_summary(run)
+    group = result["run"]["groups"][0]
+    assert group["stdout_log"] is None
+    assert group["stderr_log"] is None
+
+
 def test_build_summary_normalises_statuses_and_metrics():
     result = build_validation_summary(
         _run_summary(),
