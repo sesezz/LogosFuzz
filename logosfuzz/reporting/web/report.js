@@ -14,11 +14,11 @@ const SAMPLE = {
     "total_groups": 5,
     "total_crashes": 3,
     "groups": [
-      { "name": "lg_1", "status": "passed",  "exec_per_sec": 1796187, "coverage": 5,  "crash_count": 0, "timeout_count": 0, "compile_error_count": 0 },
-      { "name": "lg_2", "status": "passed",  "exec_per_sec": 2,       "coverage": 29, "crash_count": 0, "timeout_count": 0, "compile_error_count": 0 },
-      { "name": "lg_3", "status": "crashed", "exec_per_sec": 0,       "coverage": 9,  "crash_count": 1, "timeout_count": 0, "compile_error_count": 0 },
-      { "name": "lg_4", "status": "crashed", "exec_per_sec": 0,       "coverage": 9,  "crash_count": 1, "timeout_count": 0, "compile_error_count": 0 },
-      { "name": "lg_5", "status": "crashed", "exec_per_sec": 0,       "coverage": 3,  "crash_count": 1, "timeout_count": 0, "compile_error_count": 0 }
+      { "name": "lg_1", "status": "passed",  "exec_per_sec": 1796187, "coverage": 5,  "crash_count": 0, "timed_out": false, "compile_error_count": 0 },
+      { "name": "lg_2", "status": "passed",  "exec_per_sec": 2,       "coverage": 29, "crash_count": 0, "timed_out": false, "compile_error_count": 0 },
+      { "name": "lg_3", "status": "crashed", "exec_per_sec": 0,       "coverage": 9,  "crash_count": 1, "timed_out": false, "compile_error_count": 0 },
+      { "name": "lg_4", "status": "crashed", "exec_per_sec": 0,       "coverage": 9,  "crash_count": 1, "timed_out": false, "compile_error_count": 0 },
+      { "name": "lg_5", "status": "crashed", "exec_per_sec": 0,       "coverage": 3,  "crash_count": 1, "timed_out": false, "compile_error_count": 0 }
     ]
   },
   "analysis": {
@@ -179,7 +179,7 @@ function renderGroups(data) {
       <td>${fmtNum(g.exec_per_sec)}</td>
       <td>${g.coverage ?? "—"}</td>
       <td>${g.crash_count ?? 0}</td>
-      <td>${g.timeout_count ?? 0}</td>
+      <td>${g.timed_out ? 1 : 0}</td>
       <td>${g.compile_error_count ?? 0}</td>
     `;
     tbody.appendChild(tr);
@@ -302,6 +302,7 @@ function badgeHTML(status) {
     passed:        ["passed",        "통과"],
     crashed:       ["crashed",       "크래시"],
     timeout:       ["timeout",       "타임아웃"],
+    failed:        ["failed",        "실패"],
     compile_failed:["compile_failed","컴파일 실패"],
   };
   const [cls, label] = map[status] || ["", status || "—"];
