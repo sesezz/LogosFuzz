@@ -45,6 +45,26 @@
       "compile": ["clang", "-g", "-O0", "-fsanitize=address", "-o", "bin/asan-use-after-free",
                   "cases/asan_use_after_free.c"],
       "run": ["bin/asan-use-after-free"]
+    },
+    {
+      "name": "missing-binary",
+      "target": "(no source - 존재하지 않는 실행 파일)",
+      "expected_status": "execution_failed",
+      "run": ["bin/this-binary-does-not-exist"]
+    },
+    {
+      "name": "permission-denied",
+      "target": "not_executable.sh",
+      "expected_status": "execution_failed",
+      "run": ["cases/not_executable.sh"]
+    },
+    {
+      "name": "long-running-pass",
+      "target": "long_running.c",
+      "expected_status": "passed",
+      "timeout_sec": 6,
+      "compile": ["clang", "-g", "-O0", "-o", "bin/long-running-pass", "cases/long_running.c"],
+      "run": ["bin/long-running-pass"]
     }
   ]
 }
