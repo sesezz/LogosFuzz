@@ -405,6 +405,56 @@ main {
   font-weight: 600;
 }
 
+/* ── GEN 그룹별 수정 내역 ─────────────────────── */
+.gen-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.gen-group-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+
+.gen-group-card.has-issue { border-left: 3px solid var(--yellow); }
+
+.gen-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.gen-group-id {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gen-group-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-mute);
+  text-transform: uppercase;
+}
+
+.gen-group-attempts {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-mute);
+  margin-top: 4px;
+}
+
+.gen-group-error {
+  font-size: 12px;
+  color: var(--yellow);
+  margin-top: 6px;
+}
+
 /* ── 다운로드 ─────────────────────────────────── */
 .download-section {
   border-top: 1px solid var(--border);
