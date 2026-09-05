@@ -109,7 +109,19 @@ class FuzzConfig:
     no_new_privileges: bool = True
 
     # Sanitizer 환경 (상세 스트림 파싱은 EXE-04-02에서 확장)
-    asan_options: str = "abort_on_error=1:detect_leaks=1:symbolize=1"
+    #
+    # symbolize=0: ASAN이 크래시 시그널 핸들러 "안에서" llvm-symbolizer를
+    # fork/exec하면 WSL2에서 그 자식 프로세스가 응답 없이 멈춘다(실측 확인 -
+    # 컨테이너 밖 단독 llvm-symbolizer 호출은 즉시 응답하지만, ASAN이 크래시
+    # 시점에 내부적으로 호출하면 무한 대기 → 하드 타임아웃까지 감 →
+    # 크래시 산출물 저장 전에 프로세스가 죽어 crashes/ 가 비고, 상태가
+    # crashed 대신 timeout 으로 잘못 기록된다). 심볼라이즈를 끄면 즉시
+    # SIGABRT로 종료되고 크래시 산출물도 정상 저장된다(실측 확인).
+    #
+    # 대신 파일:줄 정보를 잃는다. 이건 크래시 발생 "이후" 별도 프로세스로
+    # (ASAN 시그널 핸들러 밖에서) `asan_symbolize`/`llvm-symbolizer`를 돌려
+    # 복원해야 한다 - ANA 단계의 후속 작업으로 남겨둔다.
+    asan_options: str = "abort_on_error=1:detect_leaks=1:symbolize=0"
     tsan_options: str = "halt_on_error=1:second_deadlock_stack=1"
 
     # 커버리지 계측 (EXE-04-04). 기본 NONE → 기존 동작 불변, 옵트인 시에만 활성.
