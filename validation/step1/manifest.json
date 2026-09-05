@@ -1,0 +1,50 @@
+{
+  "suite": "step1-ground-truth",
+  "cases": [
+    {
+      "name": "normal",
+      "target": "normal.c",
+      "expected_status": "passed",
+      "compile": ["clang", "-g", "-O0", "-o", "bin/normal", "cases/normal.c"],
+      "run": ["bin/normal"]
+    },
+    {
+      "name": "compile-error",
+      "target": "compile_error.c",
+      "expected_status": "compile_failed",
+      "compile": ["clang", "-g", "-O0", "-o", "bin/compile-error", "cases/compile_error.c"],
+      "run": ["bin/compile-error"]
+    },
+    {
+      "name": "timeout",
+      "target": "timeout.c",
+      "expected_status": "timeout",
+      "timeout_sec": 2,
+      "compile": ["clang", "-g", "-O0", "-o", "bin/timeout", "cases/timeout.c"],
+      "run": ["bin/timeout"]
+    },
+    {
+      "name": "sigsegv",
+      "target": "sigsegv.c",
+      "expected_status": "crashed",
+      "compile": ["clang", "-g", "-O0", "-o", "bin/sigsegv", "cases/sigsegv.c"],
+      "run": ["bin/sigsegv"]
+    },
+    {
+      "name": "asan-buffer-overflow",
+      "target": "../../examples/stage1/buffer_overflow.c",
+      "expected_status": "sanitizer_error",
+      "compile": ["clang", "-g", "-O0", "-fsanitize=address", "-o", "bin/asan-buffer-overflow",
+                  "../../examples/stage1/buffer_overflow.c"],
+      "run": ["bin/asan-buffer-overflow"]
+    },
+    {
+      "name": "asan-use-after-free",
+      "target": "asan_use_after_free.c",
+      "expected_status": "sanitizer_error",
+      "compile": ["clang", "-g", "-O0", "-fsanitize=address", "-o", "bin/asan-use-after-free",
+                  "cases/asan_use_after_free.c"],
+      "run": ["bin/asan-use-after-free"]
+    }
+  ]
+}

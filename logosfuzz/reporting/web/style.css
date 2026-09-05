@@ -285,6 +285,7 @@ main {
 .badge-passed  { color: var(--green);  border-color: var(--green);  background: rgba(63,185,80,.08); }
 .badge-crashed { color: var(--red);    border-color: var(--red);    background: rgba(248,81,73,.08); }
 .badge-timeout { color: var(--yellow); border-color: var(--yellow); background: rgba(210,153,34,.08); }
+.badge-failed { color: var(--purple); border-color: var(--purple); background: rgba(188,140,255,.08); }
 .badge-compile_failed { color: var(--purple); border-color: var(--purple); background: rgba(188,140,255,.08); }
 
 /* ── 파인딩 카드 ──────────────────────────────── */

@@ -97,6 +97,17 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--environment", default="", help="실행 환경(local|ec2)")
     s.add_argument("--target", default="", help="검증 대상 이름")
     s.add_argument("--commit", dest="commit_sha", default="", help="검증한 커밋 SHA")
+
+    r = sub.add_parser(
+        "regression",
+        help="매니페스트 기반 컴파일/실행 회귀 스위트 실행",
+    )
+    r.add_argument("--manifest", required=True, type=Path,
+                   help="회귀 케이스 매니페스트 JSON 경로 (cases: [{name, run, expected_status, ...}])")
+    r.add_argument("--output", "-o", type=Path, default=Path("out"),
+                   help="regression-summary.json과 케이스별 로그를 저장할 디렉토리")
+    r.add_argument("--failed-only", action="store_true",
+                   help="직전 실행에서 expected_status와 불일치했던 케이스만 재실행")
     return p
 
 
@@ -142,6 +153,22 @@ def main(argv: list | None = None) -> int:
         # ANA 파트로 위임(설계서 기능 흐름도의 analyze 명령)
         from logosfuzz.analyze.cli import _run_analyze
         return _run_analyze(args)
+
+    if args.command == "regression":
+        from logosfuzz.execute.regression import RegressionRunner
+        try:
+            summary = RegressionRunner(args.output).run_manifest(
+                args.manifest, failed_only=args.failed_only
+            )
+        except (OSError, ValueError) as e:
+            print(f"[REGRESSION 오류] {e}", file=sys.stderr)
+            return 1
+        print(
+            f"[REGRESSION] {summary['suite']} | 총 {summary['total']}건 | "
+            f"일치 {summary['matched']} | 불일치 {summary['failed']}"
+        )
+        print(f"  -> {args.output / 'regression-summary.json'}")
+        return 0 if summary["failed"] == 0 else 1
 
     if args.command != "fuzz":
         return 2
