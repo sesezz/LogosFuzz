@@ -208,11 +208,21 @@ class DockerIsolationRunner:
             argv = ["afl-fuzz", "-i", str(group.corpus_dir or "/tmp/seed"),
                     "-o", str(self.config.output_dir / "afl"), "-V", str(t),
                     "--", harness, "@@"]
-        # 호스트 실행에서는 env 프리픽스로 커버리지 환경변수를 주입한다
-        # (기본 executor 시그니처를 바꾸지 않기 위함).
-        pairs = self._coverage_env_pairs(group, in_docker=False)
-        if pairs:
-            argv = ["env", *[f"{k}={v}" for k, v in pairs.items()], *argv]
+        # 호스트 실행에서는 env 프리픽스로 환경변수를 주입한다(기본 executor
+        # 시그니처를 바꾸지 않기 위함). Docker 경로(build_run_argv)는
+        # `-e ASAN_OPTIONS=...`로 넘기지만, 이 로컬 경로는 그동안 ASAN_OPTIONS/
+        # TSAN_OPTIONS를 전혀 넘기지 않았다 - subprocess.Popen이 env= 없이
+        # 호출되면 부모 셸 환경을 그대로 물려받으므로, 셸에 ASAN_OPTIONS가
+        # 없으면 ASAN이 자체 기본값(symbolize=1 포함)을 쓴다. 그 결과
+        # config.asan_options를 symbolize=0으로 바꿔도 --no-docker 실행에는
+        # 전혀 반영되지 않았다(실측 확인: 설정을 바꿔도 여전히 하드 타임아웃까지
+        # 멈춤). 커버리지 환경변수와 같은 프리픽스에 합쳐 넣는다.
+        pairs = {
+            "ASAN_OPTIONS": self.config.asan_options,
+            "TSAN_OPTIONS": self.config.tsan_options,
+            **self._coverage_env_pairs(group, in_docker=False),
+        }
+        argv = ["env", *[f"{k}={v}" for k, v in pairs.items()], *argv]
         return argv
 
     # ---- 그룹 1개 실행 ------------------------------------------------
