@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-09-05T00:00:00+00:00",
+  "metadata": {
+    "project": "sample-compile-failed",
+    "environment": "local",
+    "target": "broken_harness",
+    "commit": "0000000"
+  },
+  "run": {
+    "engine": "libfuzzer",
+    "timeout_sec": 20,
+    "started_at": null,
+    "finished_at": null,
+    "total_groups": 1,
+    "total_crashes": 0,
+    "groups": [
+      {
+        "stage": "exe_ana",
+        "target": "broken_harness",
+        "harness_name": "broken_harness",
+        "status": "failed",
+        "exit_code": 1,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.42,
+        "execs": 0,
+        "exec_per_sec": 0.0,
+        "coverage": 0,
+        "crash_count": 0,
+        "sanitizer_count": 0,
+        "compile_error_count": 1,
+        "crashes": [],
+        "sanitizer_findings": [],
+        "coverage_report": null,
+        "notes": "clang: error: expected ';' after expression"
+      }
+    ]
+  },
+  "analysis": {
+    "status": "not_run",
+    "triage_model": "",
+    "summary": { "true_positive": 0, "false_positive": 0, "needs_review": 0 },
+    "findings": []
+  },
+  "gen": {
+    "status": "not_run",
+    "total_groups": 0,
+    "validated_groups": 0,
+    "failed_groups": 0,
+    "groups": []
+  },
+  "selection": { "status": "not_run", "targets": [] },
+  "metrics": {
+    "groups": 1,
+    "passed_groups": 0,
+    "failed_groups": 1,
+    "timed_out_groups": 0,
+    "crashed_groups": 0,
+    "crashes": 0,
+    "sanitizer_findings": 0,
+    "true_positive": 0,
+    "false_positive": 0,
+    "needs_review": 0
+  }
+}
