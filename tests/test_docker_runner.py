@@ -36,6 +36,37 @@ def test_build_run_argv_isolation_flags(tmp_path):
     assert "-max_total_time=60" in joined    # libFuzzer 기본 엔진
 
 
+def test_build_run_argv_maps_container_to_host_user(tmp_path):
+    """/out 바인드 마운트에 크래시 artifact 를 쓸 수 있어야 한다.
+
+    이미지 기본 사용자(uid 1000 fuzzer)로 컨테이너를 돌리면, 호스트 사용자의
+    uid 가 다를 때(실측 확인: uid 1003) /out 에 쓰기 권한이 없어 ASAN 이
+    결함을 잡아도 크래시 artifact 가 조용히 사라진다(total_crashes=0 으로
+    잘못 보고됨). --user 로 호스트 uid:gid 를 그대로 넘겨 이를 막는다.
+    """
+    import os
+
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    argv = runner.build_run_argv(grp)
+
+    if hasattr(os, "getuid"):
+        assert "--user" in argv
+        idx = argv.index("--user")
+        assert argv[idx + 1] == f"{os.getuid()}:{os.getgid()}"
+    else:  # pragma: no cover - Windows 등 uid 개념이 없는 플랫폼
+        assert "--user" not in argv
+
+
+def test_build_run_argv_can_keep_the_image_default_user(tmp_path):
+    cfg = _config(tmp_path, run_as_host_user=False)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    argv = runner.build_run_argv(grp)
+    assert "--user" not in argv
+
+
 def test_local_argv_injects_asan_and_tsan_options(tmp_path):
     """--no-docker 경로도 config.asan_options/tsan_options 를 실제로 넘겨야 한다.
 

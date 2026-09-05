@@ -107,6 +107,12 @@ class FuzzConfig:
     pids_limit: int = 512
     drop_all_caps: bool = True     # --cap-drop ALL
     no_new_privileges: bool = True
+    # 컨테이너를 호스트의 실행 사용자(uid:gid)로 돌린다. 이미지 기본 사용자
+    # (uid 1000 fuzzer)로 두면, 호스트 사용자의 uid가 다를 때(실측 확인:
+    # uid 1003) /out 바인드 마운트에 컨테이너가 쓰기 권한이 없어 크래시
+    # artifact가 조용히 저장되지 않는다 - ASAN은 결함을 잡지만
+    # crashes/ 가 빈 채로 남고 total_crashes=0 으로 보고된다.
+    run_as_host_user: bool = True
 
     # Sanitizer 환경 (상세 스트림 파싱은 EXE-04-02에서 확장)
     #

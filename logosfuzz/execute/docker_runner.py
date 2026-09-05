@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import subprocess
@@ -154,6 +155,14 @@ class DockerIsolationRunner:
             f"afl-fuzz -i {indir} -o /out/afl -V {t} -- {shlex.quote(harness)} @@"
         )
 
+    def _host_user(self) -> str | None:
+        """호스트 uid:gid. Windows 등 uid 개념이 없는 플랫폼이면 None."""
+        getuid = getattr(os, "getuid", None)
+        getgid = getattr(os, "getgid", None)
+        if getuid is None or getgid is None:
+            return None
+        return f"{getuid()}:{getgid()}"
+
     def build_run_argv(self, group: LogicGroup) -> list:
         c = self.config
         argv = [
@@ -168,6 +177,13 @@ class DockerIsolationRunner:
             argv += ["--cap-drop", "ALL"]
         if c.no_new_privileges:
             argv += ["--security-opt", "no-new-privileges"]
+        if c.run_as_host_user:
+            user = self._host_user()
+            if user:
+                # 이미지 기본 사용자(uid 1000)로 두면 호스트 uid 가 다를 때
+                # /out 바인드 마운트에 쓰기 권한이 없어 크래시 artifact 가
+                # 조용히 사라진다(실측 확인).
+                argv += ["--user", user]
         argv += [
             "-v", f"{c.harness_dir.resolve()}:/harness:ro",
             "-v", f"{c.output_dir.resolve()}:/out",
