@@ -376,6 +376,30 @@ def test_is_test_path_recognises_score_ut_ct_convention():
     assert not is_test_path("src/console/dlt_receive.c")
 
 
+def test_project_root_named_fuzz_is_not_a_test_directory():
+    """프로젝트 이름이 Fuzz여도 제품 소스 전체를 테스트로 오인하지 않는다."""
+    root = "C:/workspace/Fuzz"
+    assert not is_test_path(f"{root}/src/shared/dlt_common.c", root=root)
+    assert is_test_path(f"{root}/src/tests/dlt_test.c", root=root)
+
+
+def test_build_does_not_mark_everything_as_test_under_a_fuzz_named_root(tmp_path):
+    """`build()` 가 실제로 루트 기준 판별을 쓰는지 확인한다.
+
+    `fuzz` 는 _TEST_DIR_SEGMENTS 에 들어 있어서, 루트를 넘기지 않으면 이 트리의
+    제품 코드가 전부 is_test=True 로 뒤집힌다.
+    """
+    root = tmp_path / "Fuzz"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "lib.c").write_text(
+        "int lib_open(const char *path) { return path ? 0 : -1; }\n", encoding="utf-8"
+    )
+
+    kb = KnowledgeBase.build(paths=[str(root)])
+
+    assert kb.api("lib_open")["is_test"] is False
+
+
 def test_linkage_survives_save_and_load(tmp_path):
     (tmp_path / "linkage.c").write_text(LINKAGE_SOURCE, encoding="utf-8")
     path = tmp_path / "kb.json"

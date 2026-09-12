@@ -124,18 +124,29 @@ class FileInfo:
         return asdict(self)
 
 
-def is_test_path(path: str) -> bool:
+def is_test_path(path: str, root: Optional[str] = None) -> bool:
     """이 파일이 테스트/예제 코드인가.
 
     디렉토리 세그먼트와 파일 이름으로 판단한다. 정확한 분류는 빌드 시스템만 알
     수 있지만, 이것만으로도 gtest 픽스처가 퍼징 대상으로 올라오는 것은 막는다.
+
+    ``root``가 주어지면 프로젝트 루트 기준 상대 경로로 판별한다. 저장소 자체의
+    이름이 ``fuzz``인 경우처럼 사용자 홈/프로젝트 이름이 테스트 디렉터리 표지와
+    우연히 겹쳐 제품 코드를 전부 테스트로 오인하는 문제를 피하기 위해서다.
 
     >>> is_test_path("score/datarouter/test/ut/ut_logging/x.cpp")
     True
     >>> is_test_path("score/mw/log/detail/common/dlt_format.cpp")
     False
     """
-    parts = [p.lower() for p in str(path).replace("\\", "/").split("/") if p]
+    candidate = str(path)
+    if root:
+        try:
+            candidate = os.path.relpath(os.path.abspath(path), os.path.abspath(root))
+        except (OSError, ValueError):
+            # 드라이브가 다른 Windows 경로 등은 원래 절대 경로 판별로 폴백한다.
+            candidate = str(path)
+    parts = [p.lower() for p in candidate.replace("\\", "/").split("/") if p]
     if not parts:
         return False
     if any(segment in _TEST_DIR_SEGMENTS for segment in parts[:-1]):
@@ -281,13 +292,22 @@ class KnowledgeBase:
             facts.extend(extract_from_text(text, path=source))
 
         _merge_header_docs(facts, header_docs)
-        documents = cls._assemble(facts, file_infos)
+        # 테스트 판별 기준이 되는 프로젝트 루트. 호출자가 넘긴 경로가 그대로
+        # 루트다(파일을 넘겼으면 그 부모). 이게 없으면 절대 경로 전체로 판별해서
+        # 홈 디렉터리나 저장소 이름이 표지와 겹칠 때 제품 코드가 통째로 테스트로
+        # 분류된다.
+        test_roots = []
+        for entry in paths or []:
+            entry_path = Path(entry).resolve()
+            test_roots.append(str(entry_path if entry_path.is_dir() else entry_path.parent))
+        documents = cls._assemble(facts, file_infos, test_roots=test_roots)
         files = {path: info.to_dict() for path, info in file_infos.items()}
         return cls(documents=documents, files=files, use_dense=use_dense)
 
     @staticmethod
     def _assemble(facts: Sequence[FunctionFacts],
-                  file_infos: Dict[str, FileInfo]) -> List[dict]:
+                  file_infos: Dict[str, FileInfo],
+                  test_roots: Optional[Sequence[str]] = None) -> List[dict]:
         """FunctionFacts 를 api_id·호출그래프·헤더 정보가 붙은 문서로 만든다."""
         # api_id 는 (파일, 줄) 정렬 기준으로 결정적으로 매긴다. 같은 입력이면
         # 항상 같은 ID 가 나와야 B/D 가 저장해 둔 ID 로 다시 조인할 수 있다.
@@ -343,7 +363,10 @@ class KnowledgeBase:
             document["is_static"] = (
                 document.get("signature", "").lstrip().startswith("static")
             )
-            document["is_test"] = is_test_path(document["file"])
+            document["is_test"] = any(
+                is_test_path(document["file"], root=root)
+                for root in (test_roots or [])
+            ) if test_roots else is_test_path(document["file"])
             document["called_by"] = sorted(set(callers.get(document["function"], [])))
             info = file_infos.get(document["file"])
             document["includes"] = list(info.includes) if info else []
