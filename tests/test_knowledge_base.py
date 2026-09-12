@@ -121,7 +121,7 @@ def test_header_declaration_docs_extracts_prototype_docs():
 
 
 def test_build_requires_a_source():
-    with pytest.raises(ValueError, match="either paths or compile_db"):
+    with pytest.raises(ValueError, match="paths must be provided"):
         KnowledgeBase.build()
 
 
@@ -234,34 +234,18 @@ def test_defines_type_returns_empty_for_unknown(kb):
     assert kb.defines_type("nope_t") == []
 
 
-# -- compile_commands 연동 --------------------------------------------------
+# -- 컴파일 플래그 수급 -----------------------------------------------------
 
 
-def test_compile_flags_come_from_the_compile_database(tree, tmp_path):
-    db = tmp_path / "compile_commands.json"
-    db.write_text(json.dumps([{
-        "directory": str(tree),
-        "command": "gcc -Iinclude -DDEBUG=1 -std=c11 -c lib.c -o lib.o",
-        "file": "lib.c",
-    }]), encoding="utf-8")
+def test_compile_flags_are_empty_until_bazel_supplies_them(tree):
+    """compile_commands.json 수급을 걷어낸 뒤의 상태를 못박아 둔다.
 
-    kb = KnowledgeBase.build(paths=[str(tree)], compile_db=str(db))
-    flags = kb.api("lib_open")["compile_flags"]
+    `compile_flags` 필드 자체는 유지한다 — 2주차 `extract/bazel_query.py` 가
+    Bazel 타깃에서 받은 값으로 채운다. 그때 이 테스트가 깨져야 한다.
+    """
+    kb = KnowledgeBase.build(paths=[str(tree)])
 
-    assert "-Iinclude" in flags
-    assert "-DDEBUG=1" in flags
-    assert "-std=c11" in flags
-
-
-def test_build_from_compile_db_alone(tree, tmp_path):
-    db = tmp_path / "compile_commands.json"
-    db.write_text(json.dumps([{
-        "directory": str(tree), "command": "gcc -c lib.c", "file": "lib.c",
-    }]), encoding="utf-8")
-
-    kb = KnowledgeBase.build(compile_db=str(db))
-
-    assert {d["function"] for d in kb.documents} == {"lib_open", "lib_read", "lib_close"}
+    assert kb.api("lib_open")["compile_flags"] == []
 
 
 # -- 검색 / 통계 / 저장 -----------------------------------------------------
