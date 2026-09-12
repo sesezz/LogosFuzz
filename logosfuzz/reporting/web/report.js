@@ -272,9 +272,16 @@ function renderGenGroups(groups, container) {
   }
 
   container.innerHTML = groups.map(g => {
-    const attempts = `생성 ${g.generation_attempts ?? 1}회`
-      + (g.repair_attempts ? ` · 자가치유 ${g.repair_attempts}회` : "");
-    const hasIssue = !!g.failed_step || (g.repair_attempts ?? 0) > 0;
+    // 숫자 필드도 innerHTML 로 들어가므로 문자열을 그대로 흘리면 안 된다.
+    // 이 파일의 다른 렌더러(fmtNum)와 같이 Number() 로 강제 변환해서,
+    // 손상된 JSON 의 문자열이 마크업으로 해석되지 않게 한다.
+    const generated = genNum(g.generation_attempts, 1);
+    const repaired = genNum(g.repair_attempts, 0);
+    const rounds = genNum(g.rounds, 1);
+
+    const attempts = `생성 ${generated}회`
+      + (repaired ? ` · 자가치유 ${repaired}회` : "");
+    const hasIssue = !!g.failed_step || repaired > 0;
     const errorLine = g.failed_step
       ? `<div class="gen-group-error">실패 단계: ${esc(g.failed_step)}${g.reason ? ` — ${esc(g.reason)}` : ""}</div>`
       : "";
@@ -285,11 +292,21 @@ function renderGenGroups(groups, container) {
           <span class="gen-group-id">${esc(g.group_id || "—")}</span>
           <span class="gen-group-status">${esc(g.status || "—")}</span>
         </div>
-        <div class="gen-group-attempts">${attempts} · ${g.rounds ?? 1}라운드</div>
+        <div class="gen-group-attempts">${attempts} · ${rounds}라운드</div>
         ${errorLine}
       </div>
     `;
   }).join("");
+}
+
+/** 숫자로 못 읽히는 값(누락·문자열·NaN)만 기본값으로 떨어뜨린다.
+ *
+ *  진짜 0 은 0 으로 남긴다. `summary.py` 의 `_int()` 가 필드 누락을 0 으로
+ *  기록하므로, 0 을 1 로 바꾸면 JSON 에 없는 수치를 지어내는 셈이 된다.
+ */
+function genNum(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 /* ── 다운로드 ────────────────────────────────── */
