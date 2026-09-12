@@ -60,7 +60,14 @@ const SAMPLE = {
   },
   "gen": {
     "status": "completed", "model": "gpt-4o-mini",
-    "total_groups": 5, "validated_groups": 5, "failed_groups": 0
+    "total_groups": 5, "validated_groups": 5, "failed_groups": 0,
+    "groups": [
+      { "group_id": "lg_1", "status": "validated", "rounds": 1,
+        "generation_attempts": 1, "repair_attempts": 0, "failed_step": null, "reason": "" },
+      { "group_id": "lg_5", "status": "validated", "rounds": 2,
+        "generation_attempts": 2, "repair_attempts": 1,
+        "failed_step": "compile", "reason": "첫 시도에서 헤더 누락으로 컴파일 실패, LLM 자가치유로 재생성 성공" }
+    ]
   },
   "metrics": {
     "groups": 5, "passed_groups": 2, "failed_groups": 0,
@@ -232,9 +239,11 @@ function renderFindings(data) {
 function renderGen(data) {
   const gen = data.gen || {};
   const container = document.getElementById("gen-summary");
+  const groupsContainer = document.getElementById("gen-groups");
 
   if (!gen.status || gen.status === "not_run") {
     container.innerHTML = `<span class="empty-msg">GEN 단계 미실행</span>`;
+    groupsContainer.innerHTML = "";
     return;
   }
 
@@ -252,6 +261,35 @@ function renderGen(data) {
       <span class="gen-val">${esc(String(i.val))}</span>
     </div>
   `).join("");
+
+  renderGenGroups(gen.groups || [], groupsContainer);
+}
+
+function renderGenGroups(groups, container) {
+  if (!groups.length) {
+    container.innerHTML = "";
+    return;
+  }
+
+  container.innerHTML = groups.map(g => {
+    const attempts = `생성 ${g.generation_attempts ?? 1}회`
+      + (g.repair_attempts ? ` · 자가치유 ${g.repair_attempts}회` : "");
+    const hasIssue = !!g.failed_step || (g.repair_attempts ?? 0) > 0;
+    const errorLine = g.failed_step
+      ? `<div class="gen-group-error">실패 단계: ${esc(g.failed_step)}${g.reason ? ` — ${esc(g.reason)}` : ""}</div>`
+      : "";
+
+    return `
+      <div class="gen-group-card ${hasIssue ? "has-issue" : ""}">
+        <div class="gen-group-header">
+          <span class="gen-group-id">${esc(g.group_id || "—")}</span>
+          <span class="gen-group-status">${esc(g.status || "—")}</span>
+        </div>
+        <div class="gen-group-attempts">${attempts} · ${g.rounds ?? 1}라운드</div>
+        ${errorLine}
+      </div>
+    `;
+  }).join("");
 }
 
 /* ── 다운로드 ────────────────────────────────── */
