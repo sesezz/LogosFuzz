@@ -74,3 +74,9 @@ vector_db/
 # Local toolchain binaries
 Bear64.exe
 *.pid
+
+# 분석 대상으로 받아온 업스트림 소스 (sparse clone, 커밋하지 않는다)
+# 재현: git clone --depth 1 --filter=blob:none --sparse \
+#         https://github.com/eclipse-score/baselibs.git third_party/score-baselibs
+#       git -C third_party/score-baselibs sparse-checkout set score
+third_party/

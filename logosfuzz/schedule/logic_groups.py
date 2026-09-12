@@ -563,7 +563,6 @@ def parse_args(argv=None):
 
     build_parser = subparsers.add_parser("build", help="지식베이스에서 그룹 추출")
     build_parser.add_argument("--paths", nargs="*", default=[])
-    build_parser.add_argument("--compile-db")
     build_parser.add_argument("--kb", help="이미 만들어 둔 지식베이스 JSON")
     build_parser.add_argument("--output", "-o", required=True)
     build_parser.add_argument("--no-call-links", action="store_true",
@@ -585,15 +584,15 @@ def parse_args(argv=None):
 def _load_kb(args) -> KnowledgeBase:
     if args.kb:
         return KnowledgeBase.load(args.kb)
-    return KnowledgeBase.build(paths=args.paths or None, compile_db=args.compile_db)
+    return KnowledgeBase.build(paths=args.paths or None)
 
 
 def main(argv=None):
     args = parse_args(argv)
 
     if args.command == "build":
-        if not (args.kb or args.paths or args.compile_db):
-            raise SystemExit("--kb / --paths / --compile-db 중 하나는 필요합니다")
+        if not (args.kb or args.paths):
+            raise SystemExit("--kb / --paths 중 하나는 필요합니다")
         kb = _load_kb(args)
         groups = build_groups(
             kb,

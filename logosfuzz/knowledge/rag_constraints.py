@@ -1,15 +1,17 @@
 """EXT-01-02: RAG 제약조건 지식베이스 구축/검색.
 
 파이프라인:
-  1. `compile_commands.json`(EXT-01-03) 또는 경로 목록에서 소스를 모은다.
+  1. 경로 목록에서 소스를 모은다.
   2. `logosfuzz.extract.constraint_extractor`로 함수별 제약조건을 추출한다.
   3. 함수 하나를 문서 하나로 만들어 `logosfuzz.knowledge.rag_index`에 색인한다.
   4. 하네스 생성기(GEN-03-01)가 질의하면 프롬프트에 넣을 컨텍스트를 돌려준다.
 
+`compile_commands.json` 수급(구 EXT-01-03)은 걷어냈다. S-CORE 는 Bazel 로 빌드하고
+strict deps·visibility 를 강제하므로 정답은 `bazel query` 만 안다. 대체 경로는
+2주차 `extract/bazel_query.py` 에서 붙는다.
+
 사용법:
   python -m logosfuzz.knowledge.rag_constraints build --paths examples --output build/kb.json
-  python -m logosfuzz.knowledge.rag_constraints build --compile-db build/compile_commands.json \
-      --output build/kb.json
   python -m logosfuzz.knowledge.rag_constraints query --kb build/kb.json "buffer length check" --top-k 3
   python -m logosfuzz.knowledge.rag_constraints context --kb build/kb.json --function parse_header
 """
@@ -42,24 +44,6 @@ KIND_PRIORITY = {
     "risky_call": 7,
     "nullable": 8,
 }
-
-
-def _sources_from_compile_db(compile_db: str) -> List[str]:
-    """compile_commands.json에서 소스 경로를 뽑아 실제 존재하는 것만 남긴다."""
-    from logosfuzz.extract.compile_commands import load_compile_commands
-    from logosfuzz.extract.compile_db_analyzer import normalize_path
-
-    sources: List[str] = []
-    for entry in load_compile_commands(compile_db):
-        file_path = entry.get("file")
-        if not file_path:
-            continue
-        if entry.get("directory") and not os.path.isabs(file_path):
-            file_path = os.path.join(entry["directory"], file_path)
-        file_path = normalize_path(file_path)
-        if os.path.exists(file_path):
-            sources.append(file_path)
-    return sources
 
 
 def build_document(facts: FunctionFacts) -> dict:
@@ -123,10 +107,6 @@ class ConstraintKB:
         facts = extract_from_paths(paths)
         documents = [build_document(f) for f in facts]
         return cls(documents=documents, use_dense=use_dense)
-
-    @classmethod
-    def from_compile_db(cls, compile_db: str, use_dense: bool = False) -> "ConstraintKB":
-        return cls.from_paths(_sources_from_compile_db(compile_db), use_dense=use_dense)
 
     # -- 조회 --------------------------------------------------------------
     def search(self, query: str, top_k: int = 5,
@@ -217,15 +197,13 @@ class ConstraintKB:
         return cls(documents=payload["documents"], index=index, use_dense=use_dense)
 
 
-def build_kb(paths: Optional[Sequence[str]] = None, compile_db: Optional[str] = None,
+def build_kb(paths: Optional[Sequence[str]] = None,
              output_path: Optional[str] = None, use_dense: bool = False) -> ConstraintKB:
-    """경로 또는 compile_commands.json으로부터 지식베이스를 만든다."""
-    if not paths and not compile_db:
-        raise ValueError("either paths or compile_db must be provided")
+    """경로 목록으로부터 지식베이스를 만든다."""
+    if not paths:
+        raise ValueError("paths must be provided")
 
-    sources: List[str] = list(iter_source_files(paths or []))
-    if compile_db:
-        sources.extend(_sources_from_compile_db(compile_db))
+    sources: List[str] = list(iter_source_files(paths))
 
     kb = ConstraintKB.from_paths(sorted(set(sources)), use_dense=use_dense)
     if output_path:
@@ -241,7 +219,6 @@ def parse_args(argv=None):
 
     build_parser = subparsers.add_parser("build", help="Build the knowledge base")
     build_parser.add_argument("--paths", nargs="*", default=[], help="Source files or directories")
-    build_parser.add_argument("--compile-db", help="Path to compile_commands.json")
     build_parser.add_argument("--output", "-o", required=True, help="Knowledge base JSON path")
     build_parser.add_argument("--dense", action="store_true",
                               help="Use the optional sentence-transformers backend")
@@ -273,7 +250,6 @@ def main(argv=None):
     if args.command == "build":
         kb = build_kb(
             paths=args.paths,
-            compile_db=args.compile_db,
             output_path=args.output,
             use_dense=args.dense,
         )

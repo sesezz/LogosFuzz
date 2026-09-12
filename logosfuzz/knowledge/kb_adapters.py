@@ -281,7 +281,7 @@ def suggest_fixes(kb: KnowledgeBase, compiler_output: str) -> List[dict]:
                 0.8)
         elif include_dirs:
             add("missing_header", header, "add_include_path",
-                f"try the include paths recorded in compile_commands.json: "
+                f"try the include paths recorded in the knowledge base: "
                 f"{' '.join(include_dirs)}",
                 0.5)
 

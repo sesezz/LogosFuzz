@@ -3,8 +3,11 @@
 지금까지 A파트가 만든 세 가지를 하나의 아티팩트로 합친다.
 
   EXT-01-01 AST 분석        -> 함수/포함 헤더/타입 정의
-  EXT-01-03 bear 빌드 통합  -> 파일별 컴파일 플래그(-I/-D/-std)
   EXT-01-02 RAG 제약조건    -> 함수별 제약조건 + BM25 검색
+
+파일별 컴파일 플래그(`FileInfo.flags`)를 채우던 EXT-01-03(bear/compile_commands.json)
+은 1주차에 제거했다. S-CORE 는 Bazel 로 빌드하므로 플래그·include 경로의 정답은
+`bazel query` 만 안다. 필드는 남겨 두고, 2주차 `extract/bazel_query.py` 가 채운다.
 
 여기에 통합 단계에서만 얻을 수 있는 정보를 더한다.
 
@@ -225,27 +228,6 @@ def scan_file(path: str, text: Optional[str] = None) -> FileInfo:
     )
 
 
-def _compile_db_entries(compile_db: str) -> Dict[str, dict]:
-    """compile_commands.json 을 파일 경로 -> {flags, directory} 로 정리한다."""
-    from logosfuzz.extract.compile_commands import load_compile_commands
-    from logosfuzz.extract.compile_db_analyzer import extract_clang_args, normalize_path
-
-    entries: Dict[str, dict] = {}
-    for entry in load_compile_commands(compile_db):
-        file_path = entry.get("file")
-        if not file_path:
-            continue
-        directory = entry.get("directory", "")
-        if directory and not os.path.isabs(file_path):
-            file_path = os.path.join(directory, file_path)
-        file_path = normalize_path(file_path)
-        entries[file_path] = {
-            "flags": extract_clang_args(entry.get("command", "")),
-            "directory": directory,
-        }
-    return entries
-
-
 class KnowledgeBase:
     """A파트 통합 지식베이스."""
 
@@ -274,16 +256,11 @@ class KnowledgeBase:
     # -- 구축 --------------------------------------------------------------
     @classmethod
     def build(cls, paths: Optional[Sequence[str]] = None,
-              compile_db: Optional[str] = None,
               use_dense: bool = False) -> "KnowledgeBase":
-        if not paths and not compile_db:
-            raise ValueError("either paths or compile_db must be provided")
+        if not paths:
+            raise ValueError("paths must be provided")
 
-        build_info = _compile_db_entries(compile_db) if compile_db else {}
-
-        sources: List[str] = list(iter_source_files(paths or []))
-        sources.extend(p for p in build_info if os.path.exists(p))
-        sources = sorted(set(sources))
+        sources: List[str] = sorted(set(iter_source_files(paths)))
 
         file_infos: Dict[str, FileInfo] = {}
         facts: List[FunctionFacts] = []
@@ -293,11 +270,10 @@ class KnowledgeBase:
                 text = _read(source)
             except OSError:
                 continue
+            # FileInfo.flags / directory 는 비어 있다. compile_commands.json 수급을
+            # 걷어냈고, Bazel 타깃에서 받아오는 경로는 2주차 extract/bazel_query.py 에서
+            # 붙인다. 그때까지 compile_flags 는 빈 리스트로 나간다.
             info = scan_file(source, text)
-            entry = build_info.get(source)
-            if entry:
-                info.flags = entry["flags"]
-                info.directory = entry["directory"]
             file_infos[source] = info
             if source.endswith(HEADER_SUFFIXES):
                 for name, doc in header_declaration_docs(text).items():
@@ -531,7 +507,6 @@ def parse_args(argv=None):
 
     build_parser = subparsers.add_parser("build", help="Build the unified knowledge base")
     build_parser.add_argument("--paths", nargs="*", default=[])
-    build_parser.add_argument("--compile-db", help="Path to compile_commands.json")
     build_parser.add_argument("--output", "-o", required=True)
     build_parser.add_argument("--dense", action="store_true")
 
@@ -549,9 +524,7 @@ def main(argv=None):
     args = parse_args(argv)
 
     if args.command == "build":
-        kb = KnowledgeBase.build(
-            paths=args.paths, compile_db=args.compile_db, use_dense=args.dense
-        )
+        kb = KnowledgeBase.build(paths=args.paths, use_dense=args.dense)
         kb.save(args.output)
         print(json.dumps({"output": args.output, **kb.stats()}, indent=2, ensure_ascii=False))
         return

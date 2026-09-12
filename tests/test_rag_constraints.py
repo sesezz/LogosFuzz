@@ -191,43 +191,19 @@ def test_build_kb_writes_output(source_tree, tmp_path):
 
 
 def test_build_kb_requires_a_source():
-    with pytest.raises(ValueError, match="either paths or compile_db"):
+    with pytest.raises(ValueError, match="paths must be provided"):
         build_kb()
 
 
-def test_build_kb_from_compile_db(tmp_path):
+def test_build_kb_from_paths(tmp_path):
     (tmp_path / "record.c").write_text(SOURCE, encoding="utf-8")
-    compile_commands = [
-        {"directory": str(tmp_path), "command": "gcc -c record.c -o record.o", "file": "record.c"}
-    ]
-    db_path = tmp_path / "compile_commands.json"
-    db_path.write_text(json.dumps(compile_commands), encoding="utf-8")
 
-    kb = build_kb(compile_db=str(db_path))
+    kb = build_kb(paths=[str(tmp_path)])
 
     assert {d["function"] for d in kb.documents} == {"parse_record", "clone_record"}
 
 
-def test_build_kb_skips_missing_compile_db_entries(tmp_path):
-    compile_commands = [
-        {"directory": str(tmp_path), "command": "gcc -c gone.c", "file": "gone.c"}
-    ]
-    db_path = tmp_path / "compile_commands.json"
-    db_path.write_text(json.dumps(compile_commands), encoding="utf-8")
-
-    kb = build_kb(compile_db=str(db_path))
-
-    assert kb.documents == []
-    assert kb.stats()["coverage"] == 0.0
-
-
-def test_build_kb_deduplicates_overlapping_sources(source_tree, tmp_path):
-    compile_commands = [
-        {"directory": str(source_tree), "command": "gcc -c record.c", "file": "record.c"}
-    ]
-    db_path = tmp_path / "compile_commands.json"
-    db_path.write_text(json.dumps(compile_commands), encoding="utf-8")
-
-    kb = build_kb(paths=[str(source_tree)], compile_db=str(db_path))
+def test_build_kb_deduplicates_overlapping_sources(source_tree):
+    kb = build_kb(paths=[str(source_tree), str(source_tree)])
 
     assert kb.stats()["functions"] == 2

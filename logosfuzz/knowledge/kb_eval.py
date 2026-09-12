@@ -473,16 +473,16 @@ def evaluate_retrieval(kb: KnowledgeBase, queries: Sequence[dict],
 
 
 def evaluate(paths: Sequence[str], labels: Optional[str] = None,
-             compile_db: Optional[str] = None, queries_path: Optional[str] = None,
+             queries_path: Optional[str] = None,
              prefer: str = "auto", top_k: int = 5) -> dict:
-    kb = KnowledgeBase.build(paths=list(paths) or None, compile_db=compile_db)
+    kb = KnowledgeBase.build(paths=list(paths) or None)
     truth = resolve_ground_truth(paths, labels=labels, prefer=prefer)
 
     queries = load_queries(queries_path) if queries_path else build_auto_queries(kb)
 
     return {
         "version": EVAL_VERSION,
-        "target": list(paths) or [compile_db or ""],
+        "target": list(paths),
         "ground_truth": {
             "source": truth.source,
             "apis": len(truth.apis),
@@ -562,7 +562,6 @@ def parse_args(argv=None):
 
     run_parser = subparsers.add_parser("run", help="평가 실행")
     run_parser.add_argument("--paths", nargs="*", default=[])
-    run_parser.add_argument("--compile-db")
     run_parser.add_argument("--labels", help="clang 을 쓸 수 없을 때 사용할 라벨 JSON")
     run_parser.add_argument("--queries", help="RAG 질의 JSON (없으면 자동 생성)")
     run_parser.add_argument("--prefer", choices=["auto", "clang", "labels"],
@@ -578,12 +577,12 @@ def main(argv=None):
     args = parse_args(argv)
     if args.command != "run":
         return
-    if not args.paths and not args.compile_db:
-        raise SystemExit("--paths 또는 --compile-db 가 필요합니다")
+    if not args.paths:
+        raise SystemExit("--paths 가 필요합니다")
 
     try:
         result = evaluate(
-            args.paths, labels=args.labels, compile_db=args.compile_db,
+            args.paths, labels=args.labels,
             queries_path=args.queries, prefer=args.prefer, top_k=args.top_k,
         )
     except GroundTruthUnavailable as exc:

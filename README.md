@@ -24,89 +24,46 @@ tests/          패키지 공통 테스트 (일부 테스트는 각 서브패키
 docker/         퍼징 실행용 컨테이너 이미지
 ```
 
-## EXT-01-03 bear 빌드 통합
+## 빌드 정보 수급: bear → Bazel (EXT-01-03 폐기)
 
-이 저장소는 `bear`를 사용해 컴파일 명령 데이터베이스를 생성하는 초기 통합을 제공합니다.
+`bear` 기반 `compile_commands.json` 수급은 **제거했다**. 대상이 S-CORE 로 바뀌었고,
+S-CORE 는 Bazel 로 빌드하며 strict deps·visibility 를 강제한다. 이 환경에서
+`deps`·include 경로의 정답을 아는 것은 `bazel query` 뿐이며, `bear` 로 가로챈
+컴파일 명령은 그 정보를 담지 못한다.
 
-### Bear 설치
+삭제한 것:
 
-- Windows (PowerShell):
-  ```powershell
-  scoop install bear
-  # 또는
-  choco install bear
-  ```
-- WSL / Linux:
-  ```bash
-  sudo apt update
-  sudo apt install bear build-essential clang
-  ```
+| 모듈 | 대체 |
+| --- | --- |
+| `logosfuzz/extract/bear_integration.py` | 없음 (Bazel 이 빌드를 소유) |
+| `logosfuzz/extract/compile_commands.py` | 2주차 `extract/bazel_query.py` |
+| `logosfuzz/extract/compile_db_analyzer.py` | 2주차 `extract/bazel_query.py` |
+| `examples/run_bear_example.py` | 없음 |
 
-> Windows에서는 `bear`를 직접 설치하기보다 WSL 환경에서 사용하는 것이 더 안정적입니다.
->
-> 이 저장소의 분석 도구는 `compile_commands.json`에 WSL 경로(`/mnt/c/...`)가 포함된 경우에도 Windows 경로로 변환하여 사용할 수 있습니다.
-
-### 사용 방법
-
-WSL에서 `bear`를 실행한 다음 Windows에서 분석을 수행하려면:
-
-```bash
-wsl bash -lc "cd /mnt/c/Users/Lenovo/Fuzz && python3 -m logosfuzz.extract.bear_integration --build 'gcc -c build/sample.c -o build/sample.o' --output build/compile_commands.json --cwd ."
-python -m logosfuzz.extract.compile_db_analyzer --compile-db build/compile_commands.json --output build/compile_analysis.json
-```
-
-또는 Windows에서 `bear`가 직접 설치되어 있다면:
-
-```bash
-python -m logosfuzz.extract.bear_integration --build "gcc -c build/sample.c -o build/sample.o" --output build/compile_commands.json --cwd .
-```
-
-`run_bear_build(build_command, output_path=None, cwd=None)` 함수를 직접 호출하면, `bear` 실행 후 `compile_commands.json` 파일을 생성할 수 있습니다.
-
-### 예시
-
-```python
-from logosfuzz.extract.bear_integration import run_bear_build
-
-result = run_bear_build("gcc -c build/sample.c -o build/sample.o", output_path="build/compile_commands.json", cwd=".")
-print(result["status"])
-```
-
-### compile_commands 로드
-
-생성된 `compile_commands.json`을 읽으려면:
-
-```python
-from logosfuzz.extract.compile_commands import load_compile_commands
-
-entries = load_compile_commands("build/compile_commands.json")
-print(entries)
-```
-
-### compile_commands 기반 AST 분석
-
-`compile_commands.json`에 기록된 컴파일 플래그를 활용하여 각 소스 파일을 분석하려면:
-
-```bash
-python -m logosfuzz.extract.compile_db_analyzer --compile-db build/compile_commands.json --output build/compile_analysis.json
-```
-
-또는 파이썬에서 직접:
-
-```python
-from logosfuzz.extract.compile_db_analyzer import analyze_compile_commands
-
-results = analyze_compile_commands("build/compile_commands.json", output_path="build/compile_analysis.json")
-print(results)
-```
+`KnowledgeBase.build()` / `rag_constraints.build_kb()` / `kb_eval.evaluate()` /
+`logic_groups` 의 `--compile-db` 옵션도 함께 없앴다. `FileInfo.flags` 와 문서의
+`compile_flags` 필드는 **남겨 뒀다** — 2주차에 Bazel 타깃에서 받은 값으로 채우기
+위해서다. 그때까지는 빈 리스트로 나간다.
 
 ### 예제 스크립트
 
 - `examples/build_sample.sh`: 단순 빌드 샘플 생성
-- `examples/run_bear_example.py`: `bear`를 사용하여 `compile_commands.json` 생성
 - `examples/parser_sample.c`: 제약조건 추출 예시 소스
 
-> `bear` 실행 파일이 PATH에 없으면 `FileNotFoundError`가 발생합니다.
+## EXT-01-01 `//score/json` C++ 파싱 실패 케이스
+
+현행 `logosfuzz/extract/ast_analyzer.py` 는 C 전용이다. `//score/json` 106개 파일에
+그대로 돌린 결과와 실패 분류는
+[docs/EXT-01-01-SCORE-JSON-CPP-FAILURES.md](docs/EXT-01-01-SCORE-JSON-CPP-FAILURES.md) 에 있다.
+재현:
+
+```bash
+# 대상 소스 받기 (third_party/ 는 커밋하지 않는다)
+git clone --depth 1 --filter=blob:none --sparse     https://github.com/eclipse-score/baselibs.git third_party/score-baselibs
+git -C third_party/score-baselibs sparse-checkout set score
+
+python -m scripts.score_json_ast_survey     --output report/score-json-ast-survey.json     --markdown docs/EXT-01-01-SCORE-JSON-CPP-FAILURES.md
+```
 
 ## EXT-01-02 RAG 제약조건 추출
 
@@ -115,9 +72,8 @@ C/C++ 소스에서 함수별 API 제약조건(NULL 검사, 버퍼·길이 쌍, �
 프롬프트 컨텍스트를 얻습니다. 자세한 내용은 [docs/EXT-01-02.md](docs/EXT-01-02.md) 참고.
 
 ```bash
-# 지식베이스 구축 (경로 또는 compile_commands.json 기반)
+# 지식베이스 구축 (경로 기반)
 python -m logosfuzz.knowledge.rag_constraints build --paths examples --output build/kb.json
-python -m logosfuzz.knowledge.rag_constraints build --compile-db build/compile_commands.json --output build/kb.json
 
 # 검색 (한국어 질의 지원)
 python -m logosfuzz.knowledge.rag_constraints query --kb build/kb.json "버퍼 길이 제약" --top-k 3
@@ -145,7 +101,7 @@ print(kb.search("메모리 해제 책임", top_k=5))
 
 ## EXT-01-04 KB 통합 (B/D 지원)
 
-EXT-01-01(AST) · EXT-01-02(제약조건) · EXT-01-03(빌드 정보)을 하나의 지식베이스로 합치고,
+EXT-01-01(AST) · EXT-01-02(제약조건)을 하나의 지식베이스로 합치고,
 B/D 파트가 바로 쓸 수 있는 형태로 내보냅니다. 자세한 내용은
 [docs/EXT-01-04.md](docs/EXT-01-04.md) 참고.
 
