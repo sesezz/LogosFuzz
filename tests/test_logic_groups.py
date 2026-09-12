@@ -319,7 +319,7 @@ def test_to_group_map_matches_sch_02_02_input_shape(kb):
 
 
 def test_priority_comes_from_synergy_when_available(kb):
-    pytest.importorskip("sch_02_02_synergy_scheduler")
+    pytest.importorskip("logosfuzz.schedule.sch_02_02_synergy_scheduler")
     groups = build_groups(kb, with_priority=True)
 
     assert any(g.priority > 0 for g in groups)
