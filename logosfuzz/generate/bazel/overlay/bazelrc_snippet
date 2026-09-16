@@ -23,4 +23,9 @@ build:fuzz --platform_suffix=fuzz
 
 # clang 과 gcc 의 경고 차이 흡수. build:clang-tidy 가 이미 같은 예외를 달고 있다.
 build:fuzz --copt=-Wno-error=deprecated-declarations
+
+# 엔진을 libFuzzer 로 교체. 기본값이 //fuzzing/engines:replay 라서
+# 이 줄이 없으면 파일 재생만 하고 퍼징을 하지 않는다.
+# (probe 실측: "Launching probe_bin as a Replay fuzz test...")
+build:fuzz --@rules_fuzzing//fuzzing:cc_engine=@rules_fuzzing//fuzzing/engines:libfuzzer
 # <<< logosfuzz overlay: fuzz config <<<
