@@ -1,0 +1,24 @@
+Starting local Bazel server (9.2.0) and connecting to it...
+Computing main repo mapping: 
+Computing main repo mapping: 
+Computing main repo mapping: 
+Computing main repo mapping: 
+Computing main repo mapping: 
+Computing main repo mapping: 
+
+
+
+
+
+ERROR: <WORKSPACE>/harness/BUILD.bazel:3:10: in cc_binary rule //harness:json_fuzzer: Visibility error:
+target '//score/internal:helper' is not visible from
+target '//harness:json_fuzzer'
+Recommendation: modify the visibility declaration if you think the dependency is legitimate. For more info see https://bazel.build/concepts/visibility
+ERROR: <WORKSPACE>/harness/BUILD.bazel:3:10: Analysis of target '//harness:json_fuzzer' (config: <CONFIG>) failed
+INFO: Analyzed target //harness:json_fuzzer (<N> packages loaded, <N> targets configured).
+WARNING: errors encountered while analyzing target '//harness:json_fuzzer', it will not be built.
+INFO: Found 0 targets...
+ERROR: command succeeded, but not all targets were analyzed
+INFO: Elapsed time: <T>s, Critical Path: <T>s
+INFO: 1 process: 1 internal.
+ERROR: Build did NOT complete successfully

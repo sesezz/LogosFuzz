@@ -1,0 +1,29 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: <SEED>
+INFO: Loaded 1 modules   (31 inline 8-bit counters): 31 [<ADDR>, <ADDR>), 
+INFO: Loaded 1 PC tables (31 PCs): 31 [<ADDR>,<ADDR>), 
+<WORKSPACE>/bazel-bin/harness/json_fuzzer: Running 1 inputs 1 time(s) each.
+Running: <HOME>/.cache/logosfuzz-selfheal/seeds/lsan_memory_leak.bin
+
+=================================================================
+==<PID>==ERROR: LeakSanitizer: detected memory leaks
+
+Direct leak of 64 byte(s) in 1 object(s) allocated from:
+    #0 <ADDR> in malloc (<OUTPUT_BASE>/execroot/_main/bazel-out/k8-fastbuild/bin/harness/json_fuzzer+<ADDR>) (BuildId: <BUILDID>)
+    #1 <ADDR> in score::json::Dispatch(unsigned char const*, unsigned long) /proc/self/cwd/score/json/json.cc:114:47
+    #2 <ADDR> in LLVMFuzzerTestOneInput /proc/self/cwd/harness/json_fuzzer.cc:10:3
+    #3 <ADDR> in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) crtstuff.c
+    #4 <ADDR> in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) crtstuff.c
+    #5 <ADDR> in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) crtstuff.c
+    #6 <ADDR> in main (<OUTPUT_BASE>/execroot/_main/bazel-out/k8-fastbuild/bin/harness/json_fuzzer+<ADDR>) (BuildId: <BUILDID>)
+    #7 <ADDR>  (/lib/x86_64-linux-gnu/libc.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #8 <ADDR> in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #9 <ADDR> in _start (<OUTPUT_BASE>/execroot/_main/bazel-out/k8-fastbuild/bin/harness/json_fuzzer+<ADDR>) (BuildId: <BUILDID>)
+
+SUMMARY: AddressSanitizer: 64 byte(s) leaked in 1 allocation(s).
+
+INFO: a leak has been found in the initial corpus.
+
+INFO: to ignore leaks on libFuzzer side use -detect_leaks=0.
+
+[exit code] 77

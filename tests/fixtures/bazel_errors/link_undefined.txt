@@ -1,0 +1,21 @@
+Starting local Bazel server (9.2.0) and connecting to it...
+Computing main repo mapping: 
+
+
+
+
+
+INFO: Analyzed target //harness:json_fuzzer (<N> packages loaded, <N> targets configured).
+ERROR: <WORKSPACE>/harness/BUILD.bazel:3:10: Linking harness/json_fuzzer failed: (Exit 1): clang failed: error executing CppLink command (from cc_binary rule target //harness:json_fuzzer) /usr/lib/llvm-18/bin/clang @bazel-out/k8-fastbuild/bin/harness/json_fuzzer-0.params
+
+Use --sandbox_debug to see verbose messages from the sandbox and retain the sandbox build root for debugging
+ld.lld: error: undefined symbol: score::json::ParseStrict(unsigned char const*, unsigned long)
+>>> referenced by json_fuzzer.cc
+>>>               bazel-out/k8-fastbuild/bin/harness/_objs/json_fuzzer/json_fuzzer.pic.o:(LLVMFuzzerTestOneInput)
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+INFO: Found 1 target...
+Target //harness:json_fuzzer failed to build
+Use --verbose_failures to see the command lines of failed build steps.
+INFO: Elapsed time: <T>s, Critical Path: <T>s
+INFO: 3 processes: 9 action cache hit, 2 internal, 1 linux-sandbox.
+ERROR: Build did NOT complete successfully

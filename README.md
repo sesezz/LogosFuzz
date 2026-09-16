@@ -147,6 +147,33 @@ api_reference(kb, "uds_read_did")                                  # api_id/시�
 constraints_for_triage(kb, "uds_read_did", min_confidence=0.7)     # 신뢰도 높은 제약조건
 ```
 
+## GEN-03-02 자가치유 에러 코퍼스 (D 파트)
+
+2주차 `generate/bazel_errors.py` 분류기를 추측으로 짜지 않기 위해, **실제로 빌드를
+깨뜨려서** Bazel 에러와 sanitizer 출력 원문을 모아 뒀다. 대응표와 분석은
+[docs/GEN-03-02-ERROR-CORPUS.md](docs/GEN-03-02-ERROR-CORPUS.md) 에 있다.
+
+| 경로 | 내용 |
+| --- | --- |
+| `tests/fixtures/bazel_repro/` | 고의 파손용 최소 Bazel 워크스페이스 (+ `breaks/` 오버레이 10종) |
+| `tests/fixtures/bazel_errors/` | deps·visibility·구문 오류 등 Bazel 에러 원문 |
+| `tests/fixtures/sanitizer_logs/` | UBSan/ASan/LSan 출력 원문 (설정 2종 × 케이스 11종) |
+| `scripts/collect_selfheal_corpus.sh` | 수집기 (리눅스 전용) |
+| `docker/Dockerfile.selfheal` | 수집 환경 이미지 (bazelisk + clang 18 / Ubuntu 24.04) |
+
+재수집(툴체인을 바꿨을 때만 필요하다 — 코퍼스는 커밋되어 있다):
+
+```bash
+bash scripts/collect_selfheal_corpus.sh --out-root .
+```
+
+```bash
+docker build -f docker/Dockerfile.selfheal -t logosfuzz-selfheal . && docker run --rm -v "$PWD":/repo logosfuzz-selfheal
+```
+
+`tests/test_selfheal_corpus.py` 가 코퍼스와 문서 대응표의 일치를 지킨다. Bazel 없이
+도는 순수 픽스처 테스트라 CI 에서 툴체인이 필요 없다.
+
 ## 커밋 메시지 규칙
 
 - `feat`: 기능 추가

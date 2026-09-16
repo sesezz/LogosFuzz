@@ -1,0 +1,19 @@
+Starting local Bazel server (9.2.0) and connecting to it...
+Computing main repo mapping: 
+Computing main repo mapping: 
+Computing main repo mapping: 
+Computing main repo mapping: 
+Computing main repo mapping: 
+Computing main repo mapping: 
+
+
+
+
+
+INFO: Analyzed target //harness:json_fuzzer (<N> packages loaded, <N> targets configured).
+INFO: Found 1 target...
+Target //harness:json_fuzzer up-to-date:
+  bazel-bin/harness/json_fuzzer
+INFO: Elapsed time: <T>s, Critical Path: <T>s
+INFO: 5 processes: 8 action cache hit, 2 internal, 3 linux-sandbox.
+INFO: Build completed successfully, 5 total actions

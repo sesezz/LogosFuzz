@@ -1,0 +1,15 @@
+Starting local Bazel server (9.2.0) and connecting to it...
+Computing main repo mapping: 
+
+
+ERROR: <WORKSPACE>/harness/BUILD.bazel:7:1: syntax error at 'newline': expected expression
+WARNING: Target pattern parsing failed.
+ERROR: Skipping '//harness:json_fuzzer': no such target '//harness:json_fuzzer': target 'json_fuzzer' not declared in package 'harness' defined by <WORKSPACE>/harness/BUILD.bazel
+
+
+
+INFO: Found 0 targets...
+ERROR: command succeeded, but there were errors parsing the target pattern
+INFO: Elapsed time: <T>s, Critical Path: <T>s
+INFO: 1 process: 1 internal.
+ERROR: Build did NOT complete successfully
