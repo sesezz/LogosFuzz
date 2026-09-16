@@ -1,14 +1,3 @@
-Starting local Bazel server (9.2.0) and connecting to it...
-Computing main repo mapping: 
-Computing main repo mapping: 
-Computing main repo mapping: 
-Computing main repo mapping: 
-Computing main repo mapping: 
-Computing main repo mapping: 
-
-
-
-
 
 ERROR: <WORKSPACE>/harness/BUILD.bazel:3:10: in cc_binary rule //harness:json_fuzzer: Visibility error:
 target '//score/internal:helper' is not visible from

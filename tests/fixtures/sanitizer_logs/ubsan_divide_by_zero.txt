@@ -3,7 +3,7 @@ INFO: Seed: <SEED>
 INFO: Loaded 1 modules   (31 inline 8-bit counters): 31 [<ADDR>, <ADDR>), 
 INFO: Loaded 1 PC tables (31 PCs): 31 [<ADDR>,<ADDR>), 
 <WORKSPACE>/bazel-bin/harness/json_fuzzer: Running 1 inputs 1 time(s) each.
-Running: <HOME>/.cache/logosfuzz-selfheal/seeds/ubsan_divide_by_zero.bin
+Running: <SCRATCH>/seeds/ubsan_divide_by_zero.bin
 score/json/json.cc:61:35: runtime error: division by zero
     #0 <ADDR> in score::json::Dispatch(unsigned char const*, unsigned long) /proc/self/cwd/score/json/json.cc:61:35
     #1 <ADDR> in LLVMFuzzerTestOneInput /proc/self/cwd/harness/json_fuzzer.cc:10:3
@@ -16,7 +16,7 @@ score/json/json.cc:61:35: runtime error: division by zero
     #8 <ADDR> in _start (<OUTPUT_BASE>/execroot/_main/bazel-out/k8-fastbuild/bin/harness/json_fuzzer+<ADDR>) (BuildId: <BUILDID>)
 
 SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior score/json/json.cc:61:35 
-Executed <HOME>/.cache/logosfuzz-selfheal/seeds/ubsan_divide_by_zero.bin in <T> ms
+Executed <SCRATCH>/seeds/ubsan_divide_by_zero.bin in <T> ms
 ***
 *** NOTE: fuzzing was not performed, you have only
 ***       executed the target code on a fixed set of inputs.

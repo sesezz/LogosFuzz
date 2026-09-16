@@ -1,13 +1,3 @@
-Starting local Bazel server (9.2.0) and connecting to it...
-Computing main repo mapping: 
-Computing main repo mapping: 
-Computing main repo mapping: 
-Computing main repo mapping: 
-Computing main repo mapping: 
-Computing main repo mapping: 
-Computing main repo mapping: 
-
-
 ERROR: Traceback (most recent call last):
 	File "<WORKSPACE>/harness/BUILD.bazel", line 1, column 10, in <toplevel>
 		cc_binary(
@@ -19,8 +9,6 @@ Error in fail:
          
 WARNING: Target pattern parsing failed.
 ERROR: Skipping '//harness:json_fuzzer': no such target '//harness:json_fuzzer': target 'json_fuzzer' not declared in package 'harness' defined by <WORKSPACE>/harness/BUILD.bazel
-
-
 
 INFO: Found 0 targets...
 ERROR: command succeeded, but there were errors parsing the target pattern

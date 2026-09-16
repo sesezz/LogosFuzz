@@ -45,6 +45,36 @@ PID, 주소, 소요 시간, Bazel config 해시, libFuzzer seed)만 `<WORKSPACE>
 > 배워야 하는 건 대상 코드가 아니라 **Bazel 이 뱉는 문장**이고, 그 문장은
 > 워크스페이스 크기와 무관하기 때문이다.
 
+### 컨테이너 검증 (1주차 완료 기준)
+
+같은 수집기를 `docker/Dockerfile.selfheal` 컨테이너 안에서 돌려 WSL 결과와 대조했다.
+**픽스처 33개가 바이트 단위로 동일**하다(Bazel 11 + sanitizer 22). 즉 이 코퍼스는
+WSL 에서만 나오는 값이 아니라 컨테이너에서 재현되는 값이다.
+
+```bash
+docker run --rm -v "$PWD":/repo logosfuzz-selfheal bash -lc \
+  'bash /repo/scripts/collect_selfheal_corpus.sh --fixture /repo/tests/fixtures/bazel_repro --out-root /verify --scratch /scratch && diff -r /repo/tests/fixtures/bazel_errors /verify/tests/fixtures/bazel_errors'
+```
+
+검증하면서 걸린 것 둘 — C(임세은)의 `docker/Dockerfile` 교체 때 같은 데서 막힐 것이라 적어 둔다.
+
+**`libclang-rt-18-dev` 를 빼면 링크에서 죽는다.** `clang llvm lld` 만 설치하면
+컴파일까지는 되는데 링크에서 이렇게 끝난다:
+
+```
+ld.lld: error: cannot open .../libclang_rt.fuzzer-x86_64.a: No such file or directory
+ld.lld: error: cannot open .../libclang_rt.ubsan_standalone-x86_64.a: No such file or directory
+```
+
+`clang` 메타패키지는 compiler-rt 런타임 아카이브를 끌어오지 않는다. `-fsanitize=`
+`fuzzer` / `address` / `undefined` 를 쓰려면 반드시 따로 넣어야 한다.
+
+**비특권 컨테이너는 `linux-sandbox` 를 못 쓴다.** Bazel 이 `processwrapper-sandbox`
+로 알아서 내려가는데, 그 때문에 clang 명령줄 인자가 하나 줄어 로그의
+`(remaining 30 arguments skipped)` 가 `29` 로 바뀐다. **에러 문장 자체는 그대로다.**
+이런 환경 잡음(샌드박스 전략, 액션 수, 빈 줄 개수)은 전부 정규화 대상에 넣었다 —
+그래서 위의 33/33 일치가 나온다.
+
 ---
 
 ## 1. Bazel 에러 대응표
@@ -229,3 +259,6 @@ target` 의 레이블 주체 판별, `file not found` → deps 경로가 핵심�
 **B 송서원 (2주차 `build_file_generator.py`)** — 발견 A. 생성하는 BUILD 파일에
 `load("@rules_cc//cc:defs.bzl", ...)` 가 **반드시** 들어가야 한다. Bazel 9 에는
 네이티브 `cc_binary`/`cc_library` 가 없다.
+
+**C 임세은 (1주차 `docker/Dockerfile` 교체)** — 위 "컨테이너 검증" 절.
+`libclang-rt-18-dev` 를 빼면 `-fsanitize=fuzzer` 링크가 깨진다.

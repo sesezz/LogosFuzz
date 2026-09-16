@@ -3,8 +3,8 @@ INFO: Seed: <SEED>
 INFO: Loaded 1 modules   (28 inline 8-bit counters): 28 [<ADDR>, <ADDR>), 
 INFO: Loaded 1 PC tables (28 PCs): 28 [<ADDR>,<ADDR>), 
 <WORKSPACE>/bazel-bin/harness/json_fuzzer: Running 1 inputs 1 time(s) each.
-Running: <HOME>/.cache/logosfuzz-selfheal/seeds/clean_no_diagnostic.bin
-Executed <HOME>/.cache/logosfuzz-selfheal/seeds/clean_no_diagnostic.bin in <T> ms
+Running: <SCRATCH>/seeds/clean_no_diagnostic.bin
+Executed <SCRATCH>/seeds/clean_no_diagnostic.bin in <T> ms
 ***
 *** NOTE: fuzzing was not performed, you have only
 ***       executed the target code on a fixed set of inputs.

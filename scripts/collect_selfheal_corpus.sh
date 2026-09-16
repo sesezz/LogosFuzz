@@ -86,9 +86,14 @@ echo
 normalize() {
     local output_base
     output_base="$(cd "${WORK}" 2>/dev/null && bazel info output_base 2>/dev/null)" || output_base=""
+    # 치환 순서가 중요하다. WORK 는 SCRATCH 아래에 있고 SCRATCH 는 (WSL 기본값에서)
+    # HOME 아래에 있으므로, 좁은 경로부터 먼저 바꿔야 한다. HOME 을 먼저 바꾸면
+    # 뒤의 절대경로 패턴이 더 이상 일치하지 않는다.
     sed -e "s|${WORK}|<WORKSPACE>|g" \
         -e "${output_base:+s|${output_base}|<OUTPUT_BASE>|g}" \
+        -e "s|${SCRATCH}|<SCRATCH>|g" \
         -e "s|${HOME}|<HOME>|g" \
+        -e "s/^ [0-9a-f][0-9a-f]\( \{1,2\}[0-9a-f][0-9a-f]\)\{4,\} *$/ <MEMDUMP>/" \
         -e "s/Elapsed time: [0-9.]*s/Elapsed time: <T>s/g" \
         -e "s/, Critical Path: [0-9.]*s/, Critical Path: <T>s/g" \
         -e "s/^\(INFO: Invocation ID: \).*/\1<UUID>/" \
@@ -100,9 +105,31 @@ normalize() {
         -e "s/ in [0-9]\+ ms/ in <T> ms/g" \
         -e "s/(config: [0-9a-f]\+)/(config: <CONFIG>)/g" \
         -e "s/([0-9a-f]\{32,\})/(<CONFIG>)/g" \
-        -e "s/\(Loading:\|Analyzing:\|\[[0-9,]* \/ [0-9,]*\]\).*//" \
-        -e "s/([0-9]* packages loaded, [0-9]* targets configured)/(<N> packages loaded, <N> targets configured)/g"
+        -e "s/([0-9]* packages loaded, [0-9]* targets configured)/(<N> packages loaded, <N> targets configured)/g" \
+        -e "s/(remaining [0-9]* arguments skipped)/(remaining <N> arguments skipped)/g" \
+        -e "s/^INFO: [0-9,]* processes:.*/INFO: <N> processes: <STRATEGY>/" \
+        -e "s/^\(INFO: Build completed successfully,\) [0-9,]* total actions$/\1 <N> total actions/" \
+        -e "/^Extracting Bazel installation\.\.\.$/d" \
+        -e "/^Starting local Bazel server/d" \
+        -e "/^Computing main repo mapping:/d" \
+        -e "/^Loading:/d" \
+        -e "/^Analyzing:/d" \
+        -e "/^ *currently loading: /d" \
+        -e "/^\[[0-9,]* \/ [0-9,]*\]/d" \
+    | cat -s
 }
+# 마지막의 `cat -s` 는 연속된 빈 줄을 하나로 압축한다. Bazel 이 진행률을 몇 번
+# 갱신했느냐에 따라 빈 줄 개수가 달라지는데(WSL 1줄 vs 컨테이너 5줄) 정보가 없는
+# 값이다. 단일 빈 줄은 그대로 두므로 sanitizer 로그의 스택/SUMMARY 구분선은 살아남는다.
+#
+# 진행률·서버기동 줄은 빈 줄로 바꾸지 않고 **삭제**한다. 빈 줄로 남기면 환경마다
+# 진행률 줄 개수가 달라 빈 줄 수까지 달라지고, WSL 과 컨테이너 출력이 내용은
+# 같은데 diff 는 깨지는 상태가 된다.
+#
+# 샌드박스 전략(linux-sandbox / processwrapper-sandbox)과 clang 인자 개수도
+# 정규화 대상이다. 비특권 컨테이너에서는 linux-sandbox 를 못 써서 Bazel 이
+# processwrapper-sandbox 로 내려가고, 그 때문에 clang 명령줄 인자가 하나 줄어
+# `(remaining 30 arguments skipped)` 이 `29` 로 바뀐다. 에러 문장과는 무관하다.
 
 reset_workspace() {
     rm -rf "${WORK}"
@@ -162,11 +189,17 @@ collect_bazel_errors() {
   "normalization": [
     "워크스페이스 절대경로 -> <WORKSPACE>",
     "bazel output_base -> <OUTPUT_BASE>",
+    "scratch 디렉터리 -> <SCRATCH>",
     "사용자 홈 -> <HOME>",
+    "UBSan 'pointer points here' 메모리 덤프 줄 -> <MEMDUMP> (초기화되지 않은 스택 값이라 실행마다 다르다)",
     "Elapsed time / Critical Path 초 -> <T>",
     "Invocation ID -> <UUID>",
     "PID -> <PID>",
-    "진행률 라인(Loading: / Analyzing: / [n / m]) 제거",
+    "연속된 빈 줄 -> 1줄로 압축(cat -s)",
+    "진행률·서버기동 라인(Extracting / Starting local Bazel server / Computing main repo mapping: / Loading: / Analyzing: / currently loading: / [n / m]) 삭제",
+    "샌드박스 전략 포함 INFO 프로세스 요약 -> <N> processes: <STRATEGY> (비특권 컨테이너는 linux-sandbox 대신 processwrapper-sandbox 를 쓴다)",
+    "clang 생략 인자 개수(remaining N arguments skipped) -> <N> (샌드박스 전략에 따라 달라진다)",
+    "총 액션 수(Build completed successfully, N total actions) -> <N>",
     "packages loaded / targets configured 개수 -> <N>",
     "libFuzzer Seed -> <SEED>",
     "16진 주소(0x....) -> <ADDR>",
@@ -270,8 +303,12 @@ collect_sanitizer_logs() {
   "normalization": [
     "워크스페이스 절대경로 -> <WORKSPACE>",
     "bazel output_base -> <OUTPUT_BASE>",
+    "scratch 디렉터리 -> <SCRATCH>",
     "사용자 홈 -> <HOME>",
+    "UBSan 'pointer points here' 메모리 덤프 줄 -> <MEMDUMP> (초기화되지 않은 스택 값이라 실행마다 다르다)",
     "PID -> <PID>",
+    "진행률·서버기동 라인 삭제",
+    "연속된 빈 줄 -> 1줄로 압축(cat -s)",
     "libFuzzer Seed -> <SEED>",
     "16진 주소(0x....) -> <ADDR>",
     "BuildId -> <BUILDID>",

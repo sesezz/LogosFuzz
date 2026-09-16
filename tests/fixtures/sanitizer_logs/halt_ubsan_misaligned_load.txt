@@ -3,10 +3,10 @@ INFO: Seed: <SEED>
 INFO: Loaded 1 modules   (28 inline 8-bit counters): 28 [<ADDR>, <ADDR>), 
 INFO: Loaded 1 PC tables (28 PCs): 28 [<ADDR>,<ADDR>), 
 <WORKSPACE>/bazel-bin/harness/json_fuzzer: Running 1 inputs 1 time(s) each.
-Running: <HOME>/.cache/logosfuzz-selfheal/seeds/ubsan_misaligned_load.bin
+Running: <SCRATCH>/seeds/ubsan_misaligned_load.bin
 score/json/json.cc:79:33: runtime error: load of misaligned address <ADDR> for type 'const uint32_t' (aka 'const unsigned int'), which requires 4 byte alignment
 <ADDR>: note: pointer points here
- 00 00  05 01 00 00 00 00 00 00  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  00 80 2f 09 37 75
+ <MEMDUMP>
               ^ 
     #0 <ADDR> in score::json::Dispatch(unsigned char const*, unsigned long) /proc/self/cwd/score/json/json.cc:79:33
     #1 <ADDR> in LLVMFuzzerTestOneInput /proc/self/cwd/harness/json_fuzzer.cc:10:3

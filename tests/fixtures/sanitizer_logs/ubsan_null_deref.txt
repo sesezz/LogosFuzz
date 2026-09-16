@@ -3,7 +3,7 @@ INFO: Seed: <SEED>
 INFO: Loaded 1 modules   (31 inline 8-bit counters): 31 [<ADDR>, <ADDR>), 
 INFO: Loaded 1 PC tables (31 PCs): 31 [<ADDR>,<ADDR>), 
 <WORKSPACE>/bazel-bin/harness/json_fuzzer: Running 1 inputs 1 time(s) each.
-Running: <HOME>/.cache/logosfuzz-selfheal/seeds/ubsan_null_deref.bin
+Running: <SCRATCH>/seeds/ubsan_null_deref.bin
 score/json/json.cc:55:41: runtime error: member access within null pointer of type 'Header'
     #0 <ADDR> in score::json::Dispatch(unsigned char const*, unsigned long) /proc/self/cwd/score/json/json.cc:55:41
     #1 <ADDR> in LLVMFuzzerTestOneInput /proc/self/cwd/harness/json_fuzzer.cc:10:3

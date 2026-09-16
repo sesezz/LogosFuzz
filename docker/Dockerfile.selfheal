@@ -14,10 +14,16 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Seoul
 
+#   libclang-rt-18-dev 가 없으면 컴파일은 되는데 **링크에서** 죽는다:
+#     ld.lld: error: cannot open .../libclang_rt.fuzzer-x86_64.a: No such file or directory
+#     ld.lld: error: cannot open .../libclang_rt.ubsan_standalone-x86_64.a: No such file or directory
+#   clang 메타패키지는 compiler-rt 런타임 아카이브를 끌어오지 않는다. -fsanitize=
+#   fuzzer / address / undefined 를 쓰려면 반드시 따로 넣어야 한다.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         clang \
         llvm \
         lld \
+        libclang-rt-18-dev \
         python3 \
         curl \
         ca-certificates \

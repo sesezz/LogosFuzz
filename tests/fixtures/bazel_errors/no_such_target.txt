@@ -1,9 +1,3 @@
-Starting local Bazel server (9.2.0) and connecting to it...
-Computing main repo mapping: 
-
-
-
-
 
 ERROR: <WORKSPACE>/score/json/BUILD.bazel: no such target '//score/json:jsonn': target 'jsonn' not declared in package 'score/json' defined by <WORKSPACE>/score/json/BUILD.bazel (did you mean json?)
 ERROR: <WORKSPACE>/harness/BUILD.bazel:3:10: no such target '//score/json:jsonn': target 'jsonn' not declared in package 'score/json' defined by <WORKSPACE>/score/json/BUILD.bazel (did you mean json?) and referenced by '//harness:json_fuzzer'
