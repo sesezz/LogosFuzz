@@ -11,3 +11,8 @@ build --@rules_fuzzing//fuzzing:cc_engine_sanitizer=asan
 # baselibs 가 크래시 시 쓰는 것과 같은 종료코드. 크래시 감지 로직이
 # 이 값을 보도록 맞춰두기 위해 probe 에서도 동일하게 쓴다.
 build --action_env=ASAN_OPTIONS=exitcode=55:halt_on_error=1
+
+# 엔진을 libFuzzer 로 교체.
+# 기본값이 //fuzzing/engines:replay 라서 이 줄이 없으면 파일 재생만 하고
+# 퍼징을 하지 않는다. (실측: "Launching probe_bin as a Replay fuzz test...")
+build --@rules_fuzzing//fuzzing:cc_engine=@rules_fuzzing//fuzzing/engines:libfuzzer
