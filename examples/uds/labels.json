@@ -1,0 +1,41 @@
+{
+  "_comment": "EXT/SCH 평가용 정답셋(ground truth). libclang 을 쓸 수 없는 환경에서 src.kb_eval 이 이 파일로 폴백한다. '함수 정의'만 적는다 (선언만 있는 것은 제외).",
+  "apis": [
+    {
+      "name": "uds_open",
+      "file": "examples/uds/uds.c",
+      "return_type": "int",
+      "params": ["ctx", "path"]
+    },
+    {
+      "name": "uds_session_start",
+      "file": "examples/uds/uds.c",
+      "return_type": "int",
+      "params": ["ctx", "level"]
+    },
+    {
+      "name": "uds_read_did",
+      "file": "examples/uds/uds.c",
+      "return_type": "int",
+      "params": ["ctx", "did", "out", "len"]
+    },
+    {
+      "name": "uds_close",
+      "file": "examples/uds/uds.c",
+      "return_type": "void",
+      "params": ["ctx"]
+    },
+    {
+      "name": "read_vin",
+      "file": "examples/uds/client.c",
+      "return_type": "int",
+      "params": ["path", "out"]
+    },
+    {
+      "name": "main",
+      "file": "examples/uds/client.c",
+      "return_type": "int",
+      "params": []
+    }
+  ]
+}

@@ -1,0 +1,155 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-08-28T18:42:29+00:00",
+  "metadata": {
+    "project": "LogosFuzz",
+    "environment": "ec2",
+    "target": "generated_score_fuzzer",
+    "instance": "i-038dfe547828f0756",
+    "region": "us-west-2",
+    "source_report": "validation-summary-ec2-final.json"
+  },
+  "run": {
+    "engine": "libfuzzer",
+    "timeout_sec": 300,
+    "started_at": 1787924353.251123,
+    "finished_at": 1787924654.6711402,
+    "total_groups": 1,
+    "total_crashes": 0,
+    "groups": [
+      {
+        "stage": "exe_ana",
+        "target": "score_generated_fuzzer",
+        "harness_name": "score_generated_fuzzer",
+        "status": "passed",
+        "exit_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 301.42,
+        "execs": 0,
+        "exec_per_sec": 32025.0,
+        "coverage": 216,
+        "crash_count": 0,
+        "sanitizer_count": 0,
+        "compile_error_count": 0,
+        "crashes": [],
+        "sanitizer_findings": [],
+        "coverage_report": null,
+        "notes": ""
+      }
+    ]
+  },
+  "analysis": {
+    "status": "completed",
+    "triage_model": "logosfuzz-rule-triage/v1",
+    "summary": {
+      "true_positive": 0,
+      "false_positive": 0,
+      "needs_review": 0
+    },
+    "findings": []
+  },
+  "gen": {
+    "status": "completed",
+    "gate_status": "completed",
+    "model": "gpt-4o",
+    "total_groups": 2,
+    "validated_groups": 2,
+    "failed_groups": 0,
+    "failed_group_ids": [],
+    "started_at": 1787942504.9714615,
+    "finished_at": 1787942505.0793195,
+    "groups": [
+      {
+        "group_id": "dlt",
+        "status": "validated",
+        "rounds": 1,
+        "generation_attempts": 1,
+        "repair_attempts": 0,
+        "failed_step": null,
+        "reason": "",
+        "log_path": "/home/ubuntu/runs/logosfuzz/gen-gate-ec2/logs/gen_validation/dlt.json",
+        "source": "/home/ubuntu/runs/logosfuzz/gen/dlt_generated.c",
+        "binary": "/home/ubuntu/runs/logosfuzz/gen/dlt_generated_fuzzer"
+      },
+      {
+        "group_id": "score",
+        "status": "validated",
+        "rounds": 1,
+        "generation_attempts": 2,
+        "repair_attempts": 1,
+        "failed_step": null,
+        "reason": "",
+        "log_path": "/home/ubuntu/runs/logosfuzz/gen-gate-ec2/logs/gen_validation/score.json",
+        "source": "/home/ubuntu/runs/logosfuzz/gen/score_generated.cpp",
+        "binary": "/home/ubuntu/runs/logosfuzz/gen/score_generated_fuzzer"
+      }
+    ]
+  },
+  "selection": {
+    "status": "completed",
+    "targets": [
+      {
+        "target": "dlt_path_scan",
+        "kb": "dlt-kb.json",
+        "groups": "dlt-groups.json",
+        "apis": 230,
+        "groups_count": 21,
+        "constraint_coverage": 0.8739,
+        "notes": ""
+      },
+      {
+        "target": "dlt_compile_db",
+        "kb": "dlt-compile-kb.json",
+        "groups": "dlt-compile-groups.json",
+        "apis": 914,
+        "groups_count": 76,
+        "constraint_coverage": 0.8063,
+        "notes": ""
+      },
+      {
+        "target": "score_logging",
+        "kb": "score-log-kb.json",
+        "groups": null,
+        "apis": 179,
+        "groups_count": 0,
+        "constraint_coverage": 0.2849,
+        "notes": ""
+      },
+      {
+        "target": "score_broad",
+        "kb": "score-kb.json",
+        "groups": "score-groups.json",
+        "apis": 3080,
+        "groups_count": 682,
+        "constraint_coverage": 0.1104,
+        "notes": ""
+      },
+      {
+        "target": "score_common",
+        "kb": "score-common-kb.json",
+        "groups": "score-common-groups.json",
+        "apis": 17,
+        "groups_count": 6,
+        "constraint_coverage": 0.0,
+        "notes": ""
+      }
+    ],
+    "known_issues": [
+      "score_common은 제약 조건 커버리지 0.0으로 기록되어 후속 대상 선정 개선이 필요하다.",
+      "score_broad는 대상 그룹이 682개로 넓어 우선순위 필터가 필요하다."
+    ]
+  },
+  "metrics": {
+    "groups": 1,
+    "passed_groups": 1,
+    "failed_groups": 0,
+    "timed_out_groups": 0,
+    "crashed_groups": 0,
+    "crashes": 0,
+    "sanitizer_findings": 0,
+    "true_positive": 0,
+    "false_positive": 0,
+    "needs_review": 0
+  }
+}

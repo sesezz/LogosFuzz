@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-09-05T00:00:00+00:00",
+  "metadata": {
+    "project": "sample-timeout",
+    "environment": "local",
+    "target": "slow_harness",
+    "commit": "0000000"
+  },
+  "run": {
+    "engine": "libfuzzer",
+    "timeout_sec": 20,
+    "started_at": null,
+    "finished_at": null,
+    "total_groups": 1,
+    "total_crashes": 0,
+    "groups": [
+      {
+        "stage": "exe_ana",
+        "target": "slow_harness",
+        "harness_name": "slow_harness",
+        "status": "timeout",
+        "exit_code": null,
+        "timed_out": true,
+        "crashed": false,
+        "duration_sec": 20.01,
+        "execs": 812345,
+        "exec_per_sec": 40597.0,
+        "coverage": 12,
+        "crash_count": 0,
+        "sanitizer_count": 0,
+        "compile_error_count": 0,
+        "crashes": [],
+        "sanitizer_findings": [],
+        "coverage_report": null,
+        "notes": "지정된 timeout_sec(20초) 초과로 강제 종료됨"
+      }
+    ]
+  },
+  "analysis": {
+    "status": "not_run",
+    "triage_model": "",
+    "summary": { "true_positive": 0, "false_positive": 0, "needs_review": 0 },
+    "findings": []
+  },
+  "gen": {
+    "status": "not_run",
+    "total_groups": 0,
+    "validated_groups": 0,
+    "failed_groups": 0,
+    "groups": []
+  },
+  "selection": { "status": "not_run", "targets": [] },
+  "metrics": {
+    "groups": 1,
+    "passed_groups": 0,
+    "failed_groups": 0,
+    "timed_out_groups": 1,
+    "crashed_groups": 0,
+    "crashes": 0,
+    "sanitizer_findings": 0,
+    "true_positive": 0,
+    "false_positive": 0,
+    "needs_review": 0
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "crash_report": {
+    "crash_id": "CR-000124",
+    "run_id": "RUN-2026-0008",
+    "asan_log": "==31401==ERROR: AddressSanitizer: heap-use-after-free on address 0x603000000090 at pc 0x0000005a2c11 bp 0x7ffe1a2b3c20 sp 0x7ffe1a2b3c18\nWRITE of size 8 at 0x603000000090 thread T0\n    #0 0x5a2c10 in score_channel_close /src/score/src/mw/com/channel.c:158:9\n    #1 0x5a1fa2 in LLVMFuzzerTestOneInput /src/harness/score_channel_harness.c:29:5\n\n0x603000000090 is located 0 bytes inside of 32-byte region [0x603000000090,0x6030000000b0)\nfreed by thread T0 here:\n    #0 0x4a9e40 in free /src/llvm/compiler-rt/lib/asan/asan_malloc_linux.cpp:52:3\n    #1 0x5a2b30 in score_channel_destroy /src/score/src/mw/com/channel.c:140:5\n    #2 0x5a1f80 in LLVMFuzzerTestOneInput /src/harness/score_channel_harness.c:25:5\n\npreviously allocated by thread T0 here:\n    #0 0x4a9d2f in malloc /src/llvm/compiler-rt/lib/asan/asan_malloc_linux.cpp:69:3\n    #1 0x5a2a10 in score_channel_create /src/score/src/mw/com/channel.c:88:12\n\nSUMMARY: AddressSanitizer: heap-use-after-free /src/score/src/mw/com/channel.c:158:9 in score_channel_close\n"
+  },
+  "api_metadata": {
+    "api_id": "API-0107",
+    "lib_id": "eclipse-score",
+    "lib_version": "0.4.2",
+    "func_signature": "void score_channel_close(ScoreChannel *ch)",
+    "repository_url": "https://github.com/eclipse-score/score"
+  },
+  "harness": {
+    "harness_id": "H-0142",
+    "code_path": "harness/score_channel_harness.c",
+    "gen_model": "gpt-4o-mini"
+  },
+  "triage_result": {
+    "verdict": "true_positive",
+    "confidence": 0.88,
+    "rationale": "harness가 score_channel_destroy 호출 후 동일 채널 핸들로 score_channel_close 를 다시 호출하는 API 순서 위반 시나리오지만, 실제 소비자 코드(예: 콜백 해제 경로)에서도 동일한 이중 정리(double-teardown) 패턴이 발견되어 실제 도달 가능한 결함으로 판단.",
+    "triage_model": "deepseek-r1"
+  },
+  "poc_input_path": "corpus/crashes/id_000031_channel_close_after_destroy"
+}

@@ -1,0 +1,7 @@
+# >>> logosfuzz overlay: rules_fuzzing >>>
+# dev_dependency = True 인 이유:
+# baselibs 를 bazel_dep 으로 쓰는 하위 저장소(score 본체 등)가 rules_fuzzing 과
+# 그 전이 의존(abseil-cpp, rules_java, rules_shell, 파이썬 툴체인 7종)을
+# 상속하지 않게 한다. 퍼징은 개발 시점 관심사이므로 dev 로 충분하다.
+bazel_dep(name = "rules_fuzzing", version = "0.8.0", dev_dependency = True)
+# <<< logosfuzz overlay: rules_fuzzing <<<

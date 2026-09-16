@@ -1,0 +1,82 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Test / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+.venv-*/
+venv/
+env/
+
+# Build output
+build/
+dist/
+*.o
+*.out
+a.out
+
+# Secrets and local config
+.env
+.env.local
+*.key
+config/secrets.yaml
+
+# IDE / editor
+.vscode/
+.idea/
+*.code-workspace
+
+# Claude Code local state
+.claude/settings.local.json
+.claude/worktrees/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+~$*
+
+# ---- LogosFuzz artifacts ----
+
+# Fuzzing results
+crashes/
+corpus/
+harnesses/
+*.log
+crash-*
+
+# 파이프라인이 생성한 하네스와 컴파일 산출물 (실행할 때마다 새로 만들어짐)
+generated_harness*.c
+examples/**/buffer_overflow
+examples/**/fuzz_target
+validation/**/bin/
+
+# Generated reports and analysis output
+out/
+output/
+ana_05_02_cve_reporting/output/
+
+# Knowledge base / vector store caches
+vector_db/
+*.faiss
+*.index
+
+# Local toolchain binaries
+Bear64.exe
+*.pid
+
+# 분석 대상으로 받아온 업스트림 소스 (sparse clone, 커밋하지 않는다)
+# 재현: git clone --depth 1 --filter=blob:none --sparse \
+#         https://github.com/eclipse-score/baselibs.git third_party/score-baselibs
+#       git -C third_party/score-baselibs sparse-checkout set score
+third_party/

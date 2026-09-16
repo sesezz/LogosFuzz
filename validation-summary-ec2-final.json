@@ -1,0 +1,342 @@
+{
+  "instance": "i-038dfe547828f0756",
+  "region": "us-west-2",
+  "repo": "~/LogosFuzz-validation",
+  "tests": {
+    "passed": 395,
+    "skipped": 4
+  },
+  "ext_sch": {
+    "dlt_path_scan": {
+      "kb": "dlt-kb.json",
+      "groups": "dlt-groups.json",
+      "apis": 230,
+      "groups_count": 21,
+      "constraint_coverage": 0.8739
+    },
+    "dlt_compile_db": {
+      "kb": "dlt-compile-kb.json",
+      "groups": "dlt-compile-groups.json",
+      "apis": 914,
+      "groups_count": 76,
+      "constraint_coverage": 0.8063
+    },
+    "score_logging": {
+      "kb": "score-log-kb.json",
+      "apis": 179,
+      "constraint_coverage": 0.2849
+    },
+    "score_broad": {
+      "kb": "score-kb.json",
+      "groups": "score-groups.json",
+      "apis": 3080,
+      "groups_count": 682,
+      "constraint_coverage": 0.1104
+    },
+    "score_common": {
+      "kb": "score-common-kb.json",
+      "groups": "score-common-groups.json",
+      "apis": 17,
+      "groups_count": 6,
+      "constraint_coverage": 0.0
+    }
+  },
+  "exe_ana": {
+    "dlt_300s": {
+      "engine": "libfuzzer",
+      "timeout_sec": 300,
+      "started_at": 1787922025.618592,
+      "finished_at": 1787922328.5833085,
+      "total_groups": 1,
+      "total_crashes": 0,
+      "groups": [
+        {
+          "group": "dlt_message_read_fuzzer",
+          "exit_code": 0,
+          "timed_out": false,
+          "crashed": false,
+          "duration_sec": 302.96,
+          "exec_per_sec": 518668.0,
+          "coverage": 2,
+          "crashes": [],
+          "sanitizer_findings": [],
+          "coverage_report": null
+        }
+      ]
+    },
+    "dlt_300s_ana": {
+      "dedup": {
+        "stats": {
+          "total_records": 0,
+          "unique_clusters": 0,
+          "duplicates_removed": 0,
+          "dedup_ratio": 0.0
+        },
+        "depth": 3,
+        "clusters": []
+      },
+      "triage_model": "logosfuzz-rule-triage/v1",
+      "summary": {
+        "true_positive": 0,
+        "false_positive": 0,
+        "needs_review": 0
+      },
+      "findings": []
+    },
+    "score_300s": {
+      "engine": "libfuzzer",
+      "timeout_sec": 300,
+      "started_at": 1787922487.5922987,
+      "finished_at": 1787922788.9306338,
+      "total_groups": 1,
+      "total_crashes": 0,
+      "groups": [
+        {
+          "group": "score_dlt_format_fuzzer",
+          "exit_code": 0,
+          "timed_out": false,
+          "crashed": false,
+          "duration_sec": 301.34,
+          "exec_per_sec": 116788.0,
+          "coverage": 181,
+          "crashes": [],
+          "sanitizer_findings": [],
+          "coverage_report": null
+        }
+      ]
+    },
+    "score_300s_ana": {
+      "dedup": {
+        "stats": {
+          "total_records": 0,
+          "unique_clusters": 0,
+          "duplicates_removed": 0,
+          "dedup_ratio": 0.0
+        },
+        "depth": 3,
+        "clusters": []
+      },
+      "triage_model": "logosfuzz-rule-triage/v1",
+      "summary": {
+        "true_positive": 0,
+        "false_positive": 0,
+        "needs_review": 0
+      },
+      "findings": []
+    },
+    "generated_dlt_300s": {
+      "engine": "libfuzzer",
+      "timeout_sec": 300,
+      "started_at": 1787923341.9789515,
+      "finished_at": 1787923644.5490742,
+      "total_groups": 1,
+      "total_crashes": 0,
+      "groups": [
+        {
+          "group": "dlt_generated_fuzzer",
+          "exit_code": 0,
+          "timed_out": false,
+          "crashed": false,
+          "duration_sec": 302.57,
+          "exec_per_sec": 373855.0,
+          "coverage": 2,
+          "crashes": [],
+          "sanitizer_findings": [],
+          "coverage_report": null
+        }
+      ]
+    },
+    "generated_dlt_300s_ana": {
+      "dedup": {
+        "stats": {
+          "total_records": 0,
+          "unique_clusters": 0,
+          "duplicates_removed": 0,
+          "dedup_ratio": 0.0
+        },
+        "depth": 3,
+        "clusters": []
+      },
+      "triage_model": "logosfuzz-rule-triage/v1",
+      "summary": {
+        "true_positive": 0,
+        "false_positive": 0,
+        "needs_review": 0
+      },
+      "findings": []
+    },
+    "generated_score_initial_harness_bug": {
+      "engine": "libfuzzer",
+      "timeout_sec": 300,
+      "started_at": 1787923665.2969701,
+      "finished_at": 1787923665.6121316,
+      "total_groups": 1,
+      "total_crashes": 1,
+      "groups": [
+        {
+          "group": "score_generated_fuzzer",
+          "exit_code": 1,
+          "timed_out": false,
+          "crashed": true,
+          "duration_sec": 0.31,
+          "exec_per_sec": 0.0,
+          "coverage": 163,
+          "crashes": [
+            "/home/ubuntu/runs/logosfuzz/gen-score-exe-300/crashes/score_generated_fuzzer/crash-a6698e7c96089c1ccfb304b83dde062f8e75cf27"
+          ],
+          "sanitizer_findings": [
+            {
+              "sanitizer": "ASAN",
+              "category": "buffer-overflow",
+              "error_reason": "heap-buffer-overflow on address 0x603000001700 at pc 0x5fd01e5d5a91 bp 0x7ffc3510abb0 sp 0x7ffc3510aba8",
+              "traceback": [
+                {
+                  "file": "/work/gen/score_generated.cpp",
+                  "line": 64
+                }
+              ],
+              "raw_log": [
+                "==1==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x603000001700 at pc 0x5fd01e5d5a91 bp 0x7ffc3510abb0 sp 0x7ffc3510aba8",
+                "READ of size 4 at 0x603000001700 thread T0",
+                "    #0 0x5fd01e5d5a90 in LLVMFuzzerTestOneInput /work/gen/score_generated.cpp:64:28",
+                "    #1 0x5fd01e4fb443 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/harness/score_generated_fuzzer+0x47443) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #2 0x5fd01e4fab99 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool, bool*) (/harness/score_generated_fuzzer+0x46b99) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #3 0x5fd01e4fc389 in fuzzer::Fuzzer::MutateAndTestOne() (/harness/score_generated_fuzzer+0x48389) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #4 0x5fd01e4fcf05 in fuzzer::Fuzzer::Loop(std::vector<fuzzer::SizedFile, std::allocator<fuzzer::SizedFile> >&) (/harness/score_generated_fuzzer+0x48f05) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #5 0x5fd01e4eb042 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/harness/score_generated_fuzzer+0x37042) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #6 0x5fd01e514d32 in main (/harness/score_generated_fuzzer+0x60d32) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #7 0x71603c64cd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 22ca0a83a4004122e30a69b597be96e134068616)",
+                "    #8 0x71603c64ce3f in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29e3f) (BuildId: 22ca0a83a4004122e30a69b597be96e134068616)",
+                "    #9 0x5fd01e4dfa84 in _start (/harness/score_generated_fuzzer+0x2ba84) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "",
+                "0x603000001701 is located 0 bytes to the right of 17-byte region [0x6030000016f0,0x603000001701)",
+                "allocated by thread T0 here:",
+                "    #0 0x5fd01e5d297d in operator new[](unsigned long) (/harness/score_generated_fuzzer+0x11e97d) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #1 0x5fd01e4fb352 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/harness/score_generated_fuzzer+0x47352) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #2 0x5fd01e4fab99 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool, bool*) (/harness/score_generated_fuzzer+0x46b99) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #3 0x5fd01e4fc389 in fuzzer::Fuzzer::MutateAndTestOne() (/harness/score_generated_fuzzer+0x48389) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #4 0x5fd01e4fcf05 in fuzzer::Fuzzer::Loop(std::vector<fuzzer::SizedFile, std::allocator<fuzzer::SizedFile> >&) (/harness/score_generated_fuzzer+0x48f05) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #5 0x5fd01e4eb042 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/harness/score_generated_fuzzer+0x37042) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #6 0x5fd01e514d32 in main (/harness/score_generated_fuzzer+0x60d32) (BuildId: 64a4ee867966fe1a118c05a7584d555c7cdc9645)",
+                "    #7 0x71603c64cd8f  (/lib/x86_64-linux-gnu/libc.so.6+0x29d8f) (BuildId: 22ca0a83a4004122e30a69b597be96e134068616)",
+                "",
+                "SUMMARY: AddressSanitizer: heap-buffer-overflow /work/gen/score_generated.cpp:64:28 in LLVMFuzzerTestOneInput",
+                "Shadow bytes around the buggy address:",
+                "  0x0c067fff8290: fd fd fd fd fa fa fd fd fd fd fa fa fd fd fd fd",
+                "  0x0c067fff82a0: fa fa fd fd fd fd fa fa 00 00 00 04 fa fa 00 00",
+                "  0x0c067fff82b0: 00 fa fa fa 00 00 00 fa fa fa 00 00 00 fa fa fa",
+                "  0x0c067fff82c0: fd fd fd fd fa fa fd fd fd fd fa fa fd fd fd fd",
+                "  0x0c067fff82d0: fa fa fd fd fd fd fa fa fd fd fd fd fa fa 00 00",
+                "=>0x0c067fff82e0:[01]fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa",
+                "  0x0c067fff82f0: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa",
+                "  0x0c067fff8300: fa fa fd fd fd fd fa fa fd fd fd fd fa fa fa fa",
+                "  0x0c067fff8310: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa",
+                "  0x0c067fff8320: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa",
+                "  0x0c067fff8330: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa",
+                "Shadow byte legend (one shadow byte represents 8 application bytes):",
+                "  Addressable:           00",
+                "  Partially addressable: 01 02 03 04 05 06 07 ",
+                "  Heap left redzone:       fa",
+                "  Freed heap region:       fd",
+                "  Stack left redzone:      f1",
+                "  Stack mid redzone:       f2",
+                "  Stack right redzone:     f3",
+                "  Stack after return:      f5",
+                "  Stack use after scope:   f8",
+                "  Global redzone:          f9",
+                "  Global init order:       f6",
+                "  Poisoned by user:        f7",
+                "  Container overflow:      fc",
+                "  Array cookie:            ac",
+                "  Intra object redzone:    bb",
+                "  ASan internal:           fe",
+                "  Left alloca redzone:     ca",
+                "  Right alloca redzone:    cb",
+                "==1==ABORTING",
+                "MS: 3 CMP-ChangeBit-InsertByte- DE: \"\\030\\000\\000\\000\\000\\000\\000\\000\"-; base unit: 2fd78f1af151b831ae53a71a908ae77cc5be6820",
+                "0xe1,0xbc,0xbd,0xb9,0xbd,0x18,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0xbd,0x7e,0xbd,0x2,",
+                "\\341\\274\\275\\271\\275\\030\\000\\000\\000\\000\\000\\000\\000\\275~\\275\\002",
+                "artifact_prefix='/out/crashes/'; Test unit written to /out/crashes/crash-a6698e7c96089c1ccfb304b83dde062f8e75cf27",
+                "Base64: 4by9ub0YAAAAAAAAAL1+vQI=",
+                "stat::number_of_executed_units: 1400",
+                "stat::average_exec_per_sec:     0",
+                "stat::new_units_added:          6",
+                "stat::slowest_unit_time_sec:    0",
+                "stat::peak_rss_mb:              34",
+                "AddressSanitizer:DEADLYSIGNAL",
+                "AddressSanitizer: nested bug in the same thread, aborting."
+              ],
+              "signature": "buffer-overflow_score_generated_cpp_64"
+            }
+          ],
+          "coverage_report": null
+        }
+      ]
+    },
+    "generated_score_300s_fixed": {
+      "engine": "libfuzzer",
+      "timeout_sec": 300,
+      "started_at": 1787924353.251123,
+      "finished_at": 1787924654.6711402,
+      "total_groups": 1,
+      "total_crashes": 0,
+      "groups": [
+        {
+          "group": "score_generated_fuzzer",
+          "exit_code": 0,
+          "timed_out": false,
+          "crashed": false,
+          "duration_sec": 301.42,
+          "exec_per_sec": 32025.0,
+          "coverage": 216,
+          "crashes": [],
+          "sanitizer_findings": [],
+          "coverage_report": null
+        }
+      ]
+    },
+    "generated_score_300s_fixed_ana": {
+      "dedup": {
+        "stats": {
+          "total_records": 0,
+          "unique_clusters": 0,
+          "duplicates_removed": 0,
+          "dedup_ratio": 0.0
+        },
+        "depth": 3,
+        "clusters": []
+      },
+      "triage_model": "logosfuzz-rule-triage/v1",
+      "summary": {
+        "true_positive": 0,
+        "false_positive": 0,
+        "needs_review": 0
+      },
+      "findings": []
+    }
+  },
+  "gen": {
+    "demo": "passed 2/2",
+    "real": {
+      "status": "completed",
+      "model": "gpt-4o",
+      "dlt": {
+        "generation_attempts": 1,
+        "source": "/home/ubuntu/runs/logosfuzz/gen/dlt_generated.c",
+        "binary": "/home/ubuntu/runs/logosfuzz/gen/dlt_generated_fuzzer"
+      },
+      "score": {
+        "generation_attempts": 2,
+        "repair_attempts": 1,
+        "source": "/home/ubuntu/runs/logosfuzz/gen/score_generated.cpp",
+        "binary": "/home/ubuntu/runs/logosfuzz/gen/score_generated_fuzzer",
+        "repair_note": "Initial generated source had a harness-side float read overflow; repaired with size guards and memcpy before final EXE."
+      }
+    }
+  },
+  "notes": [
+    "All generated harnesses were compiled with clang/clang++ and ASAN/UBSAN/libFuzzer inside logosfuzz-exec:latest.",
+    "The initial SCORE generated harness finding was at the harness source line, not in SCORE target code; it was repaired before the final run.",
+    "Final generated DLT and SCORE EXE runs completed with zero sanitizer findings; ANA reported zero defects."
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "crash_report": {
+    "crash_id": "CR-000123",
+    "run_id": "RUN-2026-0007",
+    "asan_log": "==31337==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000050 at pc 0x0000004d6a1a bp 0x7ffd6b3a1a10 sp 0x7ffd6b3a1a08\nREAD of size 4 at 0x602000000050 thread T0\n    #0 0x4d6a19 in dlt_message_read /src/dlt-daemon/src/shared/dlt_common.c:842:12\n    #1 0x4d5b02 in LLVMFuzzerTestOneInput /src/harness/dlt_message_read_harness.c:41:5\n    #2 0x51f2b3 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/libFuzzer/FuzzerLoop.cpp:611:15\n\n0x602000000050 is located 0 bytes to the right of 4-byte region [0x602000000040,0x602000000050)\nallocated by thread T0 here:\n    #0 0x4a9d2f in malloc /src/llvm/compiler-rt/lib/asan/asan_malloc_linux.cpp:69:3\n    #1 0x4d69a0 in dlt_message_read /src/dlt-daemon/src/shared/dlt_common.c:820:20\n\nSUMMARY: AddressSanitizer: heap-buffer-overflow /src/dlt-daemon/src/shared/dlt_common.c:842:12 in dlt_message_read\n"
+  },
+  "api_metadata": {
+    "api_id": "API-0042",
+    "lib_id": "dlt-daemon",
+    "lib_version": "2.18.10",
+    "func_signature": "int dlt_message_read(DltMessage *msg, uint8_t *buffer, unsigned int length, int resync, int verbose)",
+    "repository_url": "https://github.com/COVESA/dlt-daemon"
+  },
+  "harness": {
+    "harness_id": "H-0099",
+    "code_path": "harness/dlt_message_read_harness.c",
+    "gen_model": "gpt-4o-mini"
+  },
+  "triage_result": {
+    "verdict": "true_positive",
+    "confidence": 0.93,
+    "rationale": "스택트레이스가 dlt_message_read 내부의 헤더 길이 필드(length)를 검증 없이 그대로 사용해 4바이트 초과 읽기가 발생함을 보여준다. 할당 크기(4바이트)와 읽기 시도 위치가 정확히 경계 바로 다음이며, 재실행 시 100% 재현되어 정탐으로 판단.",
+    "triage_model": "deepseek-r1"
+  },
+  "poc_input_path": "corpus/crashes/id_000012_dlt_header"
+}
