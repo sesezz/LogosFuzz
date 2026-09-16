@@ -1,0 +1,9 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+# //score/json 에만 공개한다 — //harness 가 이걸 deps 에 넣으면 visibility 에러.
+cc_library(
+    name = "helper",
+    srcs = ["helper.cc"],
+    hdrs = ["helper.h"],
+    visibility = ["//score/json:__pkg__"],
+)

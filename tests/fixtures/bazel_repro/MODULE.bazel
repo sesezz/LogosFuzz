@@ -1,0 +1,18 @@
+# GEN-03-02 자가치유 에러 코퍼스 수집용 최소 Bazel 워크스페이스.
+#
+# 실제 대상(S-CORE baselibs)은 무겁고 네트워크·sparse clone 이 필요하다. 분류기가
+# 배워야 하는 것은 "Bazel 이 뱉는 에러 문장"이지 대상 코드가 아니므로, 같은 에러를
+# 내는 최소 구조만 재현한다. 패키지 구성은 S-CORE 모양을 따른다:
+#
+#   //score/json      : 하네스가 부르는 공개 라이브러리
+#   //score/internal  : private visibility 헬퍼 (visibility 에러 유발용)
+#   //harness         : cc_fuzz_test 자리의 libFuzzer 바이너리
+#
+# 사용법은 scripts/collect_selfheal_corpus.sh 참고.
+
+module(
+    name = "logosfuzz_bazel_repro",
+    version = "0.0.1",
+)
+
+bazel_dep(name = "rules_cc", version = "0.2.17")
