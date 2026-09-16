@@ -102,12 +102,13 @@ bazel build --config=fuzz //score/json/fuzz:json_parser_fuzz_test_bin
 | `score::json::JsonParser::FromBuffer` 시그니처 | ✅ baselibs 원문 확인 |
 | `score::Result` = `expected` (`has_value()`/`value()`) | ✅ 원문 확인 |
 | `cc_fuzz_test` 생성 타깃 (`_bin`/`_run`/`_corpus`/`_dict`) | ✅ rules_fuzzing 0.8.0 원문 확인 |
-| **`bazel build --config=fuzz` 실제 빌드** | ❌ **미검증** |
-| **`bazel build --config=bl-x86_64-linux` 회귀** | ❌ **미검증** |
-| `MODULE.bazel.lock` 재생성 | ❌ 미수행 |
+| **`bazel build --config=fuzz` 실제 빌드** | ✅ 7분 12초 / 159 actions |
+| **`bazel build --config=bl-x86_64-linux` 회귀** | ✅ 성공 (오버레이 후에도 무손상) |
+| 퍼저 실행 | ✅ 200만 회 / 521초 / 약 3,840 exec/s / 크래시 0건 |
+| 계측 침투 깊이 | ✅ 자동 사전에 JSON 문법 학습 (true/false/UTF-8 BOM) |
 
-작성 환경의 egress 정책이 `bcr.bazel.build` / `releases.bazel.build` 를
-차단해 Bazel 을 실행하지 못했다. 아래는 **실행해 봐야 알 수 있는** 항목이다.
+WSL2 + clang 18 / Bazel 8.6.0 환경에서 전 항목 검증 완료.
+1주차 게이트(빌드·실행·계측) 통과. 컨테이너 내 실행은 C 파트 Dockerfile 완료 후 재확인 필요.
 
 ## 알려진 리스크 (첫 실행 시 여기부터 의심)
 
