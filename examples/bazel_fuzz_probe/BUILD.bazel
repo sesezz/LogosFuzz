@@ -1,0 +1,11 @@
+load("@rules_fuzzing//fuzzing:cc_defs.bzl", "cc_fuzz_test")
+
+# cc_fuzz_test 하나가 아래 타깃들을 생성한다 (rules_fuzzing 0.8.0 확인):
+#   :probe          cc_test  (시드 코퍼스 회귀용)
+#   :probe_bin      계측된 퍼저 바이너리  <- EXE 계층이 직접 실행할 대상
+#   :probe_run      런처 (bazel run 전용)
+#   :probe_corpus   :probe_dict
+cc_fuzz_test(
+    name = "probe",
+    srcs = ["probe.cc"],
+)

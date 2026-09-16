@@ -1,0 +1,11 @@
+# rules_fuzzing 배선 검증용 최소 모듈.
+#
+# S-CORE(baselibs) 오버레이 작업 전에 "rules_fuzzing 0.8.0 이 Bazel 8.6 에서
+# 실제로 libFuzzer 를 돌리는가" 만 독립적으로 확인하기 위한 것이다.
+# baselibs 툴체인/registry/lockfile 과 무관하게 수 분 안에 끝나야 한다.
+module(
+    name = "fuzz_probe",
+    version = "0.0.1",
+)
+
+bazel_dep(name = "rules_fuzzing", version = "0.8.0")

@@ -1,0 +1,13 @@
+# libFuzzer 는 clang 전용이다. GCC 에는 -fsanitize=fuzzer 가 없다
+# (g++ 13.3 실측: "unrecognized argument to '-fsanitize=' option: 'fuzzer'").
+# Ubuntu 기본 호스트 컴파일러가 gcc 이므로 명시적으로 clang 을 지정한다.
+build --repo_env=CC=clang
+build --repo_env=CXX=clang++
+
+# 퍼징 엔진 배선: 대상 코드에 커버리지 계측(libfuzzer) + ASan.
+build --@rules_fuzzing//fuzzing:cc_engine_instrumentation=libfuzzer
+build --@rules_fuzzing//fuzzing:cc_engine_sanitizer=asan
+
+# baselibs 가 크래시 시 쓰는 것과 같은 종료코드. 크래시 감지 로직이
+# 이 값을 보도록 맞춰두기 위해 probe 에서도 동일하게 쓴다.
+build --action_env=ASAN_OPTIONS=exitcode=55:halt_on_error=1
