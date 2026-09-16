@@ -1,0 +1,48 @@
+# *******************************************************************************
+# Copyright (c) 2025 Contributors to the Eclipse Foundation
+#
+# See the NOTICE file(s) distributed with this work for additional
+# information regarding copyright ownership.
+#
+# This program and the accompanying materials are made available under the
+# terms of the Apache License Version 2.0 which is available at
+# https://www.apache.org/licenses/LICENSE-2.0
+#
+# SPDX-License-Identifier: Apache-2.0
+# *******************************************************************************
+load("@rules_fuzzing//fuzzing:cc_defs.bzl", "cc_fuzz_test")
+
+# 이 패키지가 score/json/ **아래**에 있는 이유 (중요):
+#
+# 퍼징 대상인 JsonParser 의 선언 헤더 json_parser.h 는 :parser_interface 의
+# hdrs 이고, 그 타깃의 visibility 는 아래와 같다.
+#
+#     visibility = ["@score_baselibs//score/json:__subpackages__"]
+#
+# 즉 //fuzz/json 같은 트리 밖 패키지에서는 직접 의존할 수 없다. :json 이
+# public 이라 전이 헤더로 끌어 쓸 수는 있지만, layering_check 가 켜진
+# 툴체인에서는 "직접 의존이 아닌 헤더 include" 가 에러가 된다.
+#
+# 이 패키지를 score/json/fuzz 에 두면 __subpackages__ 에 포함되므로
+# :parser_interface 를 직접 의존할 수 있고 그 문제가 원천적으로 사라진다.
+# 대신 오버레이가 score 소스 트리 안에 파일을 놓는다는 tradeoff 가 있다.
+
+# cc_fuzz_test 하나가 아래 타깃들을 생성한다 (rules_fuzzing 0.8.0 확인):
+#   :json_parser_fuzz_test          cc_test (시드 코퍼스 회귀용)
+#   :json_parser_fuzz_test_bin      계측된 퍼저 바이너리 <- EXE 계층이 직접 실행
+#   :json_parser_fuzz_test_run      런처 (bazel run 전용)
+#   :json_parser_fuzz_test_corpus   :json_parser_fuzz_test_dict
+#
+# tags = ["manual"] 인 이유: //... 전체 빌드에 딸려 들어가면
+# --config=bl-x86_64-linux(GCC) 회귀 빌드가 libFuzzer 링크에서 깨진다.
+cc_fuzz_test(
+    name = "json_parser_fuzz_test",
+    srcs = ["json_parser_fuzz.cc"],
+    tags = ["manual"],
+    deps = [
+        # 구현 링크 (visibility = public)
+        "@score_baselibs//score/json",
+        # JsonParser / IJsonParser 선언 헤더 (subpackages 가시성)
+        "@score_baselibs//score/json:parser_interface",
+    ],
+)

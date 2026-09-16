@@ -1,0 +1,26 @@
+# >>> logosfuzz overlay: fuzz config >>>
+#
+# ⚠️ --config=bl-x86_64-linux 와 절대 병용하지 말 것.
+#
+# 이유는 tools/coverage/coverage.bazelrc 의 경고와 정확히 같다:
+#   "it registers the GCC toolchain after this file's flags,
+#    the last --extra_toolchains wins resolution"
+# bl-x86_64-linux 를 뒤에 붙이면 GCC 가 이겨서 clang 이 밀려나고,
+# GCC 에는 -fsanitize=fuzzer 가 없으므로 링크 단계에서 죽는다.
+# (g++ 13.3 실측: "unrecognized argument to '-fsanitize=' option: 'fuzzer'")
+#
+# build: 로 정의하는 이유:
+#   run/test 는 build 를 상속하므로 bazel build/run/test 모두에서 쓸 수 있다.
+#   기존 asan_ubsan_lsan 은 test: 로만 정의되어 있어 bazel run 에서 못 쓴다.
+
+build:fuzz --platforms=@score_bazel_platforms//:x86_64-linux-gcc_12.2.0-posix
+build:fuzz --extra_toolchains=@llvm_toolchain//:cc-toolchain-x86_64-linux
+build:fuzz --@rules_fuzzing//fuzzing:cc_engine_instrumentation=libfuzzer
+build:fuzz --@rules_fuzzing//fuzzing:cc_engine_sanitizer=asan
+
+# GCC 빌드 캐시와 섞이지 않게 분리 (asan_ubsan_lsan 이 쓰는 기법과 동일)
+build:fuzz --platform_suffix=fuzz
+
+# clang 과 gcc 의 경고 차이 흡수. build:clang-tidy 가 이미 같은 예외를 달고 있다.
+build:fuzz --copt=-Wno-error=deprecated-declarations
+# <<< logosfuzz overlay: fuzz config <<<
