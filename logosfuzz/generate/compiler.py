@@ -16,9 +16,19 @@ import tempfile
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from .models import CompileResult, HarnessDraft
+
+# link_fuzzer(하네스가 libFuzzer 링크까지 요구하는지)를 받아 "-fsanitize=..."
+# 인자 목록(0개 이상)을 돌려주는 콜백. 지금 이 인터페이스를 구현하는 것은
+# SubprocessCompiler 자신(_default_sanitize_flags)뿐이지만, 실제 형태는 B가
+# 만들 예정인 BuildAdapter가 될 것으로 보인다(2주차 계획 "BuildAdapter 추상화"
+# 참조). 그 어댑터가 아직 저장소에 없어(2026-09-17 기준 확인) 정확한 타입을
+# 맞출 수 없으므로, 여기서는 어댑터를 직접 참조하지 않고 이 콜백 시그니처만
+# 계약으로 고정해둔다 - 어댑터가 생기면 이 시그니처를 만족하는 메서드를 하나
+# 넘기기만 하면 된다.
+SanitizeFlagsProvider = Callable[[bool], List[str]]
 
 
 # C 에서 **경고에 그치지만 하네스를 실행 불가로 만드는** 진단들.
@@ -78,6 +88,7 @@ class SubprocessCompiler(Compiler):
         timeout_sec: int = 120,
         workdir: Optional[str] = None,
         strict_warnings: bool = True,          # 실행 불가를 만드는 C 경고를 에러로
+        sanitize_flags_provider: Optional[SanitizeFlagsProvider] = None,
     ) -> None:
         self.cc = cc
         self.std = std
@@ -89,9 +100,20 @@ class SubprocessCompiler(Compiler):
         self.timeout_sec = timeout_sec
         self.workdir = workdir
         self.strict_warnings = strict_warnings
+        # None(기본값)이면 아래 _default_sanitize_flags로 지금까지의 동작을
+        # 그대로 유지한다 - 기존 직접 주입 로직은 지우지 않는다. 어댑터가
+        # 생기면 이 자리에 그 메서드를 넘기면 된다.
+        self._sanitize_flags = sanitize_flags_provider or self._default_sanitize_flags
 
     def available(self) -> bool:
         return shutil.which(self.cc) is not None
+
+    def _default_sanitize_flags(self, link_fuzzer: bool) -> List[str]:
+        """지금까지의 기본 동작: self.sanitizers를 그대로 -fsanitize=로 넘긴다."""
+        san = self.sanitizers
+        if link_fuzzer:
+            san = f"fuzzer,{san}" if san else "fuzzer"
+        return [f"-fsanitize={san}"] if san else []
 
     def _build_argv(self, src_path: Path, out_path: Path,
                     language: str = "c") -> List[str]:
@@ -101,13 +123,9 @@ class SubprocessCompiler(Compiler):
         # C++ 에서는 이 진단들이 이미 에러라 붙이지 않는다(미지원 플래그 경고만 난다).
         if self.strict_warnings and language not in _CPP_LANGUAGES:
             argv += list(STRICT_C_WARNINGS)
-        san = self.sanitizers
-        if self.link_fuzzer:
-            san = f"fuzzer,{san}" if san else "fuzzer"
-        else:
+        if not self.link_fuzzer:
             argv.append("-c")  # 컴파일만(링크 안 함)
-        if san:
-            argv.append(f"-fsanitize={san}")
+        argv += self._sanitize_flags(self.link_fuzzer)
         argv += [f"-I{d}" for d in self.include_dirs]
         argv += [f"-D{d}" for d in self.defines]
         argv += self.extra_flags
