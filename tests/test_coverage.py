@@ -12,6 +12,7 @@ from logosfuzz.execute.coverage import (
     CmdResult,
     CoverageCollector,
     CoverageMetric,
+    bazel_binary_relpath,
     instrumentation_flags,
     parse_llvm_cov_export,
     profile_env,
@@ -118,6 +119,44 @@ def test_build_export_argv_docker(tmp_path):
     assert "llvm-cov export -format=text" in joined
     assert "-instr-profile=/out/coverage/grpA.profdata" in joined
     assert "/harness/grpA" in joined
+
+
+# --- Bazel 라벨 -> bazel-bin 상대경로 (EXE-04-01 대응) --------------------
+def test_bazel_binary_relpath_with_target_name():
+    assert bazel_binary_relpath("//score/json:json_fuzz_test") == \
+        __import__("pathlib").Path("score/json/json_fuzz_test")
+
+
+def test_bazel_binary_relpath_without_colon_uses_last_segment():
+    assert bazel_binary_relpath("//score/json") == \
+        __import__("pathlib").Path("score/json/json")
+
+
+def test_bazel_binary_relpath_strips_external_repo_prefix():
+    assert bazel_binary_relpath("@rules_fuzzing//fuzzing:cc_fuzz_test") == \
+        __import__("pathlib").Path("fuzzing/cc_fuzz_test")
+
+
+def test_export_argv_host_uses_bazel_bin_when_target_registered(tmp_path):
+    cfg = _cfg(tmp_path, coverage=CoverageMode.LLVM_COV, use_docker=False,
+               coverage_in_docker=False)
+    col = CoverageCollector(
+        cfg,
+        bazel_targets={"grpA": "//score/json:json_fuzz_test"},
+        bazel_bin_root=tmp_path / "bazel-bin",
+    )
+    export = col.build_export_argv(_group())
+    harness_arg = export[4]
+    assert "bazel-bin" in harness_arg
+    assert harness_arg.replace("\\", "/").endswith("score/json/json_fuzz_test")
+
+
+def test_export_argv_host_falls_back_without_bazel_target(tmp_path):
+    cfg = _cfg(tmp_path, coverage=CoverageMode.LLVM_COV, use_docker=False,
+               coverage_in_docker=False)
+    col = CoverageCollector(cfg)  # bazel_targets 미지정 - 기존 동작과 동일해야 함
+    export = col.build_export_argv(_group())
+    assert str(cfg.harness_dir.resolve()) in export[4]
 
 
 def test_build_argv_host(tmp_path):
