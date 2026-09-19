@@ -245,9 +245,20 @@ SUMMARY 줄은 `AddressSanitizer: 64 byte(s) leaked in 1 allocation(s).` 라 도
 
 ## 3. 다음 주차로 넘기는 것
 
-**D 본인 (2주차)** — `generate/bazel_errors.py` 분류기와 `errors.py` 결과 타입은
-위 대응표 10행 + 발견 A/B/C 규칙을 그대로 구현한다. 블록 단위 파싱, `no such
-target` 의 레이블 주체 판별, `file not found` → deps 경로가 핵심이다.
+**D 본인 (2주차)** — **완료.** `generate/bazel_errors.py` 분류기와 `errors.py`
+결과 타입이 위 대응표 10행 + 발견 A/B/C 규칙을 그대로 구현한다. 블록 단위 파싱,
+`no such target` 의 레이블 주체 판별, `file not found` → deps 경로가 핵심이다.
+검증은 `tests/test_bazel_errors.py` 가 이 코퍼스를 물려서 한다 — 케이스마다
+근본 원인이 **정확히 하나**만 나오는지까지 본다.
+
+구현하면서 코퍼스에서 추가로 걸러야 했던 잡음 둘:
+
+- Bazel 은 같은 deps 문제를 **두 번** 보고한다. 한 번은 대상 패키지 기준으로 위치
+  없이, 한 번은 참조한 BUILD 위치와 `referenced by` 를 붙여서. 둘 다 세면 한 결함이
+  두 건으로 보인다 → 분류기가 중복을 묶는다.
+- 앞선 에러의 *결과*를 알리는 줄(`Analysis of target ... failed`,
+  `N input file(s) do not exist`)이 `ERROR:` 로 찍힌다. 이걸 남기면 `UNKNOWN`
+  근본 원인이 되어 처방에 "로그 보고 알아서 고쳐라"가 섞인다 → 버린다.
 
 **C 임세은 (3주차 `sanitizer.py` UBSan 파서 / 4주차 `signature.py`)** — 발견 E/F/G.
 진단은 전부 수집하고 시그니처는 첫 진단으로, UBSan 종류는 `runtime error:` 줄에서,

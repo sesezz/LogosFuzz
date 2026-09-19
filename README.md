@@ -174,6 +174,47 @@ docker build -f docker/Dockerfile.selfheal -t logosfuzz-selfheal . && docker run
 `tests/test_selfheal_corpus.py` 가 코퍼스와 문서 대응표의 일치를 지킨다. Bazel 없이
 도는 순수 픽스처 테스트라 CI 에서 툴체인이 필요 없다.
 
+### 에러 분류기 `generate/bazel_errors.py`
+
+위 코퍼스를 정답지로 만든 분류기다. 빌드 로그 원문을 받아 "무엇이 잘못됐고 무엇을
+고쳐야 하는지"를 구조화해 돌려준다. 3주차에 `selfheal.py` 가 이 결과를 리페어
+프롬프트에 주입한다.
+
+```python
+from logosfuzz.generate.bazel_errors import classify, prompt_hint
+
+report = classify(build_log, requested_target="//harness:json_fuzzer")
+
+report.primary.kind      # BazelErrorKind.NOT_VISIBLE
+report.primary.action    # FixAction.EXPAND_VISIBILITY
+report.primary.detail    # {"label": "//score/internal:helper", "from": "//harness:json_fuzzer"}
+report.needs_human       # 순환 의존처럼 LLM 재시도로 못 고치는 경우 True
+print(prompt_hint(report))   # LLM 프롬프트에 넣을 텍스트
+```
+
+결과 타입(`BazelErrorKind` / `FixAction` / `BazelDiagnostic` / `BazelErrorReport`)은
+`generate/errors.py` 에 있다. 분류기를 쓰지 않는 모듈이 결과 타입만 가져다 쓸 수 있게
+분리해 뒀다.
+
+| 분류 | 처방 | 판별 신호 |
+| --- | --- | --- |
+| `missing_load` | `add_load` | `This rule has been removed from Bazel` |
+| `build_syntax_error` | `fix_build_syntax` | `syntax error at` |
+| `not_visible` | `expand_visibility` | `is not visible from` (ERROR 줄 **다음** 줄) |
+| `no_such_package` | `fix_dep_label` | `no such package '<경로>'` |
+| `no_such_target` | `fix_dep_label` | `no such target` + 레이블이 **의존 대상** |
+| `target_not_defined` | `define_target` | `no such target` + 레이블이 **하네스 자신** |
+| `missing_dep` | `add_deps` | clang 의 `fatal error: '<헤더>' file not found` |
+| `missing_srcs_file` | `add_srcs_file` | `missing input file` |
+| `dep_cycle` | `escalate` | `cycle in dependency graph` |
+| `undefined_symbol` | `resolve_symbol` | `undefined symbol:` |
+
+주의할 점 셋은 전부 1주차 코퍼스에서 나왔다 —
+`no such target` 은 단독 분류 키로 쓸 수 없고(BUILD 파싱 실패도 같은 문장을 낸다),
+deps 누락의 입구는 `no such target` 이 아니라 clang 의 `file not found` 이며,
+visibility 문구는 `ERROR:` 줄에 없다. 근거는
+[docs/GEN-03-02-ERROR-CORPUS.md](docs/GEN-03-02-ERROR-CORPUS.md) 의 발견 A·B·C 다.
+
 ## 커밋 메시지 규칙
 
 - `feat`: 기능 추가
