@@ -16,6 +16,10 @@ from collections import Counter
 
 logger = logging.getLogger(__name__)
 
+CXX_SUFFIXES = {".cc", ".cp", ".cpp", ".cxx", ".c++", ".hpp", ".hh", ".hxx"}
+C_HEADER_SUFFIXES = {".h"}
+ANALYZABLE_SUFFIXES = CXX_SUFFIXES | C_HEADER_SUFFIXES | {".c"}
+
 try:
     from clang import cindex
     HAVE_CLANG = True
@@ -44,6 +48,57 @@ def _resolve_libclang():
     except Exception:
         pass
 
+
+def clang_args_for_path(path, clang_args=None):
+    """Return language-correct clang arguments for a source/header path.
+
+    S-CORE headers are C++ headers even when they use the conventional ``.h``
+    suffix.  An explicit ``-x`` or ``-std`` supplied by the caller always wins;
+    otherwise we add a safe project default.
+    """
+    args = list(clang_args or [])
+    suffix = os.path.splitext(str(path))[1].lower()
+    is_cxx = suffix in CXX_SUFFIXES or suffix in C_HEADER_SUFFIXES
+
+    has_language = any(
+        arg == "-x" or str(arg).startswith("-x") for arg in args
+    )
+    has_standard = any(str(arg).startswith("-std=") for arg in args)
+    defaults = []
+    if not has_language:
+        defaults.extend(["-x", "c++" if is_cxx else "c"])
+    if not has_standard:
+        defaults.append("-std=c++17" if is_cxx else "-std=c11")
+    return defaults + args
+
+
+def qualified_name(cursor):
+    """Build a namespace/class-qualified spelling for a clang cursor."""
+    parts = []
+    current = cursor
+    scope_kinds = {
+        "NAMESPACE", "CLASS_DECL", "CLASS_TEMPLATE", "STRUCT_DECL",
+        "UNION_DECL", "ENUM_DECL", "FUNCTION_DECL", "FUNCTION_TEMPLATE",
+        "CXX_METHOD", "CONSTRUCTOR", "DESTRUCTOR", "CONVERSION_FUNCTION",
+    }
+    if getattr(getattr(cursor, "kind", None), "name", "") not in scope_kinds:
+        return ""
+    while current is not None:
+        kind = getattr(getattr(current, "kind", None), "name", "")
+        spelling = getattr(current, "spelling", "") or ""
+        if spelling and kind in scope_kinds:
+            parts.append(spelling)
+        current = getattr(current, "semantic_parent", None)
+        if getattr(getattr(current, "kind", None), "name", "") == "TRANSLATION_UNIT":
+            break
+    return "::".join(reversed(parts))
+
+
+def _is_callable_cursor(node):
+    return node.kind.name in {
+        "FUNCTION_DECL", "CXX_METHOD", "CONSTRUCTOR", "FUNCTION_TEMPLATE",
+    }
+
     try:
         import clang.native
         native_dir = os.path.dirname(clang.native.__file__)
@@ -59,8 +114,7 @@ def _resolve_libclang():
 def analyze_with_clang(path, clang_args=None):
     _resolve_libclang()
 
-    if clang_args is None:
-        clang_args = ["-std=c11"]
+    clang_args = clang_args_for_path(path, clang_args)
 
     # clang 내장 resource dir(stddef.h 등)은 호출자가 clang_args를 넘겼든
     # 아니든 항상 붙여야 한다. 이게 빠지면 libclang이 size_t 같은 표준
@@ -101,6 +155,33 @@ def analyze_with_clang(path, clang_args=None):
         return result
 
     nodes = []
+    try:
+        source_text = open(path, 'r', encoding='utf-8', errors='ignore').read()
+    except OSError:
+        source_text = ""
+
+    def is_definition(node):
+        try:
+            defined = bool(node.is_definition())
+        except Exception:
+            defined = False
+        if defined or node.kind.name != "FUNCTION_TEMPLATE":
+            return defined
+        if any(child.kind.name == "COMPOUND_STMT" for child in node.get_children()):
+            return True
+        try:
+            if any(token.spelling == "{" for token in node.get_tokens()):
+                return True
+        except Exception:
+            pass
+        if source_text:
+            try:
+                head = source_text[:node.extent.end.offset].rstrip()
+                tail = source_text[node.extent.end.offset:].lstrip()
+                return head.endswith("{") or tail.startswith("{")
+            except Exception:
+                pass
+        return False
 
     def walk(node):
         loc = None
@@ -110,9 +191,19 @@ def analyze_with_clang(path, clang_args=None):
             loc = None
         entry = {'kind': node.kind.name, 'spelling': node.spelling or '', 'location': loc}
 
-        if node.kind == cindex.CursorKind.FUNCTION_DECL:
+        qname = qualified_name(node)
+        if qname:
+            entry['qualified_name'] = qname
+
+        if node.kind.name in {"NAMESPACE", "CLASS_DECL", "CLASS_TEMPLATE", "STRUCT_DECL"}:
+            entry['scope_kind'] = node.kind.name
+
+        if _is_callable_cursor(node):
             try:
-                entry['return_type'] = node.result_type.spelling
+                entry['return_type'] = (
+                    None if node.kind.name == "CONSTRUCTOR"
+                    else node.result_type.spelling
+                )
             except Exception:
                 entry['return_type'] = None
             try:
@@ -134,10 +225,25 @@ def analyze_with_clang(path, clang_args=None):
                 entry['is_static'] = (node.storage_class == cindex.StorageClass.STATIC)
             except Exception:
                 entry['is_static'] = False
-            try:
-                entry['is_definition'] = node.is_definition()
-            except Exception:
-                entry['is_definition'] = False
+            entry['is_definition'] = is_definition(node)
+            entry['callable_kind'] = node.kind.name
+            entry['is_method'] = node.kind.name in {"CXX_METHOD", "CONSTRUCTOR"}
+            entry['is_template'] = node.kind.name == "FUNCTION_TEMPLATE"
+            entry['template_parameters'] = [
+                child.spelling or ""
+                for child in node.get_children()
+                if child.kind.name in {
+                    "TEMPLATE_TYPE_PARAMETER",
+                    "TEMPLATE_NON_TYPE_PARAMETER",
+                    "TEMPLATE_TEMPLATE_PARAMETER",
+                }
+            ]
+            parent = getattr(node, "semantic_parent", None)
+            if parent is not None and parent.kind.name in {
+                "CLASS_DECL", "CLASS_TEMPLATE", "STRUCT_DECL",
+            }:
+                entry['class_name'] = qualified_name(parent)
+                entry['is_method'] = True
 
         nodes.append(entry)
         for c in node.get_children():
@@ -145,7 +251,21 @@ def analyze_with_clang(path, clang_args=None):
 
     walk(tu.cursor)
     counts = dict(Counter(n['kind'] for n in nodes))
-    return {'file': path, 'counts': counts, 'nodes': nodes}
+    diagnostics = [
+        {
+            'severity': int(diagnostic.severity),
+            'spelling': diagnostic.spelling,
+            'location': str(diagnostic.location),
+        }
+        for diagnostic in tu.diagnostics
+    ]
+    return {
+        'file': path,
+        'clang_args': list(clang_args),
+        'counts': counts,
+        'nodes': nodes,
+        'diagnostics': diagnostics,
+    }
 
 
 def analyze_simple(path):
@@ -164,21 +284,76 @@ def analyze_file(path, clang_args=None):
         return analyze_simple(path)
 
 
-def main(argv=None):
-    p = argparse.ArgumentParser()
-    p.add_argument('paths', nargs='+', help='Files or directories to analyze')
-    p.add_argument('--output', '-o', help='Output JSON file (defaults to stdout)')
-    args = p.parse_args(argv)
+def _analysis_files(paths):
+    files = []
+    for path in paths or []:
+        if os.path.isdir(path):
+            for root, _, names in os.walk(path):
+                files.extend(
+                    os.path.join(root, name)
+                    for name in names
+                    if os.path.splitext(name)[1].lower() in ANALYZABLE_SUFFIXES
+                )
+        elif os.path.splitext(path)[1].lower() in ANALYZABLE_SUFFIXES:
+            files.append(path)
+    return sorted(dict.fromkeys(files))
+
+
+def analyze_paths(paths, clang_args=None, bazel_graph=None):
+    """Analyze paths, applying Bazel compile context when it is available."""
+    candidates = list(paths or [])
+    if bazel_graph is not None:
+        candidates.extend(
+            path
+            for target in bazel_graph.targets.values()
+            for path in target.sources + target.headers
+            if os.path.exists(path)
+        )
 
     results = []
-    for pth in args.paths:
-        if os.path.isdir(pth):
-            for root, _, files in os.walk(pth):
-                for f in files:
-                    if f.endswith(('.c', '.cpp', '.cc', '.h', '.hpp')):
-                        results.append(analyze_file(os.path.join(root, f)))
-        else:
-            results.append(analyze_file(pth))
+    for path in _analysis_files(candidates):
+        context = bazel_graph.compile_context(path) if bazel_graph is not None else {}
+        combined_args = list(clang_args or [])
+        combined_args.extend(
+            flag for flag in context.get("compile_flags", [])
+            if flag not in combined_args
+        )
+        result = analyze_file(path, clang_args=combined_args)
+        if context:
+            result["build_system"] = context["build_system"]
+            result["build_target"] = context["build_target"]
+            result["build_deps"] = context["build_deps"]
+        results.append(result)
+    return results
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser()
+    p.add_argument('paths', nargs='*', help='Files or directories to analyze')
+    p.add_argument('--output', '-o', help='Output JSON file (defaults to stdout)')
+    p.add_argument('--clang-arg', action='append', default=[],
+                   help='Additional clang argument (repeatable)')
+    p.add_argument('--bazel-workspace')
+    p.add_argument('--bazel-target', action='append', default=[])
+    p.add_argument('--bazel', help='bazel/bazelisk executable')
+    args = p.parse_args(argv)
+
+    bazel_graph = None
+    if args.bazel_workspace or args.bazel_target:
+        if not (args.bazel_workspace and args.bazel_target):
+            p.error('--bazel-workspace and --bazel-target must be used together')
+        from logosfuzz.extract.bazel_query import query_bazel
+        bazel_graph = query_bazel(
+            args.bazel_workspace, args.bazel_target, bazel=args.bazel
+        )
+    if not args.paths and bazel_graph is None:
+        p.error('provide paths or a Bazel workspace/target')
+
+    results = analyze_paths(
+        args.paths,
+        clang_args=args.clang_arg,
+        bazel_graph=bazel_graph,
+    )
 
     out = json.dumps(results, indent=2, ensure_ascii=False)
     if args.output:

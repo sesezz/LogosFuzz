@@ -6,7 +6,7 @@
 
 ```
 logosfuzz/
-  extract/      EXT-01 : 소스/컴파일 DB 파싱, AST·제약조건 추출
+  extract/      EXT-01 : Bazel 그래프, C/C++ AST·제약조건 추출
   knowledge/    EXT-01-04 : 통합 지식베이스 + RAG 색인/검색, KB 어댑터·평가
   schedule/     SCH-02 : Logic Group 추출, 시너지 우선순위, 자원 할당
   generate/     GEN-03 : 하네스 생성·컴파일 자가치유·검증, Mock 주입
@@ -36,14 +36,36 @@ S-CORE 는 Bazel 로 빌드하며 strict deps·visibility 를 강제한다. 이 
 | 모듈 | 대체 |
 | --- | --- |
 | `logosfuzz/extract/bear_integration.py` | 없음 (Bazel 이 빌드를 소유) |
-| `logosfuzz/extract/compile_commands.py` | 2주차 `extract/bazel_query.py` |
-| `logosfuzz/extract/compile_db_analyzer.py` | 2주차 `extract/bazel_query.py` |
+| `logosfuzz/extract/compile_commands.py` | `extract/bazel_query.py` |
+| `logosfuzz/extract/compile_db_analyzer.py` | `extract/bazel_query.py` |
 | `examples/run_bear_example.py` | 없음 |
 
 `KnowledgeBase.build()` / `rag_constraints.build_kb()` / `kb_eval.evaluate()` /
-`logic_groups` 의 `--compile-db` 옵션도 함께 없앴다. `FileInfo.flags` 와 문서의
-`compile_flags` 필드는 **남겨 뒀다** — 2주차에 Bazel 타깃에서 받은 값으로 채우기
-위해서다. 그때까지는 빈 리스트로 나간다.
+`logic_groups` 의 `--compile-db` 옵션도 함께 없앴다. 이제
+`logosfuzz.extract.bazel_query`가 Bazel 타깃의 deps·include·copts를 추출하고,
+`KnowledgeBase.build()`가 파일/API별 `build_system`, `build_target`, `build_deps`,
+`compile_flags`와 최상위 `build_units` 스키마에 기록한다.
+
+```bash
+# Bazel 타깃 의존 그래프(JSON)
+python -m logosfuzz.extract.bazel_query \
+  --workspace third_party/score-baselibs \
+  --target //score/json:json \
+  --output build/score-json-graph.json
+
+# 같은 그래프에서 받은 -I/-D 플래그로 C++ AST 분석
+python -m logosfuzz.extract.ast_analyzer \
+  --bazel-workspace third_party/score-baselibs \
+  --bazel-target //score/json:json \
+  --output build/score-json-ast.json
+
+# 빌드 단위 메타데이터가 포함된 통합 KB
+python -m logosfuzz.knowledge.knowledge_base build \
+  --paths third_party/score-baselibs/score/json \
+  --bazel-workspace third_party/score-baselibs \
+  --bazel-target //score/json:json \
+  --output build/score-json-kb.json
+```
 
 ### 예제 스크립트
 
@@ -52,9 +74,10 @@ S-CORE 는 Bazel 로 빌드하며 strict deps·visibility 를 강제한다. 이 
 
 ## EXT-01-01 `//score/json` C++ 파싱 실패 케이스
 
-현행 `logosfuzz/extract/ast_analyzer.py` 는 C 전용이다. `//score/json` 106개 파일에
-그대로 돌린 결과와 실패 분류는
+1주차 당시 C 전용 분석기를 `//score/json` 106개 파일에 돌린 실패 분류는
 [docs/EXT-01-01-SCORE-JSON-CPP-FAILURES.md](docs/EXT-01-01-SCORE-JSON-CPP-FAILURES.md) 에 있다.
+2주차 구현은 확장자로 C/C++17을 자동 선택하고, 클래스·네임스페이스·메서드·생성자·
+함수 템플릿과 완전 한정 이름을 보존한다.
 재현:
 
 ```bash

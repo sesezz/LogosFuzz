@@ -7,6 +7,7 @@ from logosfuzz.knowledge.kb_eval import (
     GroundTruth,
     GroundTruthUnavailable,
     build_auto_queries,
+    clang_ground_truth,
     evaluate,
     evaluate_coverage,
     evaluate_extraction,
@@ -172,6 +173,35 @@ def test_resolve_without_labels_raises_when_nothing_works(tmp_path):
 
     with pytest.raises(GroundTruthUnavailable):
         resolve_ground_truth([str(tmp_path)], labels=None)
+
+
+def test_clang_ground_truth_counts_cpp_methods_constructors_and_templates(tmp_path):
+    source = tmp_path / "api.cpp"
+    source.write_text(
+        """
+namespace score {
+template <typename T> T Identity(T value) { return value; }
+class Parser {
+public:
+    Parser(int mode) : mode_(mode) {}
+    int Parse(int value) { return value + mode_; }
+private:
+    int mode_;
+};
+}
+""",
+        encoding="utf-8",
+    )
+    try:
+        truth = clang_ground_truth([str(tmp_path)])
+    except GroundTruthUnavailable as exc:
+        pytest.skip(str(exc))
+
+    assert "score::Identity" in truth.names()
+    assert "score::Parser::Parser" in truth.names()
+    assert "score::Parser::Parse" in truth.names()
+    assert truth.apis["score::Parser::Parse"]["kind"] == "CXX_METHOD"
+    assert "-std=c++17" in truth.note
 
 
 # -- 추출 정확도 (평가기가 오류를 실제로 잡아내는가) -------------------------
