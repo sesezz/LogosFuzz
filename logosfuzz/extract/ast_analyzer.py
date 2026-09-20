@@ -48,6 +48,17 @@ def _resolve_libclang():
     except Exception:
         pass
 
+    try:
+        import clang.native
+        native_dir = os.path.dirname(clang.native.__file__)
+        for lib_name in ("libclang.dll", "libclang.so", "libclang.dylib"):
+            candidate = os.path.join(native_dir, lib_name)
+            if os.path.exists(candidate):
+                cindex.Config.set_library_file(candidate)
+                return
+    except Exception:
+        pass
+
 
 def clang_args_for_path(path, clang_args=None):
     """Return language-correct clang arguments for a source/header path.
@@ -98,17 +109,6 @@ def _is_callable_cursor(node):
     return node.kind.name in {
         "FUNCTION_DECL", "CXX_METHOD", "CONSTRUCTOR", "FUNCTION_TEMPLATE",
     }
-
-    try:
-        import clang.native
-        native_dir = os.path.dirname(clang.native.__file__)
-        for lib_name in ("libclang.dll", "libclang.so", "libclang.dylib"):
-            candidate = os.path.join(native_dir, lib_name)
-            if os.path.exists(candidate):
-                cindex.Config.set_library_file(candidate)
-                return
-    except Exception:
-        pass
 
 
 def analyze_with_clang(path, clang_args=None):
