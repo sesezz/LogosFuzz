@@ -6,8 +6,8 @@
   EXT-01-02 RAG 제약조건    -> 함수별 제약조건 + BM25 검색
 
 파일별 컴파일 플래그(`FileInfo.flags`)를 채우던 EXT-01-03(bear/compile_commands.json)
-은 1주차에 제거했다. S-CORE 는 Bazel 로 빌드하므로 플래그·include 경로의 정답은
-`bazel query` 만 안다. 필드는 남겨 두고, 2주차 `extract/bazel_query.py` 가 채운다.
+은 1주차에 제거했다. S-CORE 는 Bazel 로 빌드하므로 2주차
+`extract/bazel_query.py`가 타깃·deps·include 경로를 공급한다.
 
 여기에 통합 단계에서만 얻을 수 있는 정보를 더한다.
 
@@ -35,6 +35,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
+from logosfuzz.extract.bazel_query import BazelGraph, query_bazel
 from logosfuzz.extract.constraint_extractor import (
     FunctionFacts,
     destructure_macro_declaration,
@@ -47,7 +48,8 @@ from logosfuzz.extract.constraint_extractor import (
 from logosfuzz.knowledge.rag_constraints import build_document
 from logosfuzz.knowledge.rag_index import BM25Index, DenseIndex, HybridRetriever
 
-KB_VERSION = 1
+KB_VERSION = 2
+SUPPORTED_KB_VERSIONS = {1, KB_VERSION}
 
 HEADER_SUFFIXES = (".h", ".hh", ".hpp")
 
@@ -119,6 +121,10 @@ class FileInfo:
     types: List[str] = field(default_factory=list)
     # types 중 구조체/공용체를 감싼 것만. 상태 핸들 판정용(SCH-02-01)
     struct_types: List[str] = field(default_factory=list)
+    build_system: str = ""
+    build_target: str = ""
+    build_rule_kind: str = ""
+    build_deps: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -244,10 +250,12 @@ class KnowledgeBase:
 
     def __init__(self, documents: Optional[Sequence[dict]] = None,
                  files: Optional[Dict[str, dict]] = None,
+                 build_units: Optional[Sequence[dict]] = None,
                  index: Optional[BM25Index] = None,
                  use_dense: bool = False) -> None:
         self.documents: List[dict] = list(documents or [])
         self.files: Dict[str, dict] = dict(files or {})
+        self.build_units: List[dict] = list(build_units or [])
         if index is None:
             index = BM25Index()
             index.add_documents(self.documents)
@@ -267,7 +275,22 @@ class KnowledgeBase:
     # -- 구축 --------------------------------------------------------------
     @classmethod
     def build(cls, paths: Optional[Sequence[str]] = None,
-              use_dense: bool = False) -> "KnowledgeBase":
+              use_dense: bool = False,
+              bazel_graph: Optional[BazelGraph] = None,
+              bazel_workspace: Optional[str] = None,
+              bazel_targets: Optional[Sequence[str]] = None,
+              bazel: Optional[str] = None) -> "KnowledgeBase":
+        if bazel_graph is None and bazel_workspace and bazel_targets:
+            bazel_graph = query_bazel(
+                bazel_workspace, bazel_targets, bazel=bazel
+            )
+        if not paths and bazel_graph is not None:
+            paths = sorted({
+                path
+                for target in bazel_graph.targets.values()
+                for path in target.sources + target.headers
+                if Path(path).exists()
+            })
         if not paths:
             raise ValueError("paths must be provided")
 
@@ -281,10 +304,15 @@ class KnowledgeBase:
                 text = _read(source)
             except OSError:
                 continue
-            # FileInfo.flags / directory 는 비어 있다. compile_commands.json 수급을
-            # 걷어냈고, Bazel 타깃에서 받아오는 경로는 2주차 extract/bazel_query.py 에서
-            # 붙인다. 그때까지 compile_flags 는 빈 리스트로 나간다.
             info = scan_file(source, text)
+            if bazel_graph is not None:
+                context = bazel_graph.compile_context(source)
+                info.flags = list(context.get("compile_flags", []))
+                info.directory = str(context.get("directory", ""))
+                info.build_system = str(context.get("build_system", ""))
+                info.build_target = str(context.get("build_target", ""))
+                info.build_rule_kind = str(context.get("build_rule_kind", ""))
+                info.build_deps = list(context.get("build_deps", []))
             file_infos[source] = info
             if source.endswith(HEADER_SUFFIXES):
                 for name, doc in header_declaration_docs(text).items():
@@ -302,7 +330,13 @@ class KnowledgeBase:
             test_roots.append(str(entry_path if entry_path.is_dir() else entry_path.parent))
         documents = cls._assemble(facts, file_infos, test_roots=test_roots)
         files = {path: info.to_dict() for path, info in file_infos.items()}
-        return cls(documents=documents, files=files, use_dense=use_dense)
+        build_units = bazel_graph.build_units() if bazel_graph is not None else []
+        return cls(
+            documents=documents,
+            files=files,
+            build_units=build_units,
+            use_dense=use_dense,
+        )
 
     @staticmethod
     def _assemble(facts: Sequence[FunctionFacts],
@@ -371,6 +405,10 @@ class KnowledgeBase:
             info = file_infos.get(document["file"])
             document["includes"] = list(info.includes) if info else []
             document["compile_flags"] = list(info.flags) if info else []
+            document["build_system"] = info.build_system if info else ""
+            document["build_target"] = info.build_target if info else ""
+            document["build_rule_kind"] = info.build_rule_kind if info else ""
+            document["build_deps"] = list(info.build_deps) if info else []
             document["header"] = _declaring_header(document["function"], document["file"],
                                                    headers)
         return documents
@@ -442,6 +480,10 @@ class KnowledgeBase:
         with_flags = sum(1 for d in self.documents if d.get("compile_flags"))
         edges = sum(len(d.get("calls_internal", [])) for d in self.documents)
         covered = sum(1 for d in self.documents if d["constraints"])
+        build_systems: Dict[str, int] = {}
+        for unit in self.build_units:
+            system = str(unit.get("build_system", "unknown"))
+            build_systems[system] = build_systems.get(system, 0) + 1
         return {
             "apis": len(self.documents),
             "files": len(self.files),
@@ -451,6 +493,11 @@ class KnowledgeBase:
             "call_edges": edges,
             "apis_with_header": with_header,
             "apis_with_compile_flags": with_flags,
+            "apis_with_build_unit": sum(
+                1 for document in self.documents if document.get("build_target")
+            ),
+            "build_units": len(self.build_units),
+            "build_units_by_system": dict(sorted(build_systems.items())),
             "constraint_coverage": (
                 round(covered / len(self.documents), 4) if self.documents else 0.0
             ),
@@ -465,6 +512,7 @@ class KnowledgeBase:
             "version": KB_VERSION,
             "documents": self.documents,
             "files": self.files,
+            "build_units": self.build_units,
             "index": self.index.to_dict(),
         }
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -473,14 +521,15 @@ class KnowledgeBase:
     @classmethod
     def load(cls, path: str, use_dense: bool = False) -> "KnowledgeBase":
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        if payload.get("version") != KB_VERSION:
+        if payload.get("version") not in SUPPORTED_KB_VERSIONS:
             raise ValueError(
                 f"unsupported knowledge base version: {payload.get('version')} "
-                f"(expected {KB_VERSION})"
+                f"(expected one of {sorted(SUPPORTED_KB_VERSIONS)})"
             )
         return cls(
             documents=payload["documents"],
             files=payload.get("files", {}),
+            build_units=payload.get("build_units", []),
             index=BM25Index.from_dict(payload["index"]),
             use_dense=use_dense,
         )
@@ -532,6 +581,9 @@ def parse_args(argv=None):
     build_parser.add_argument("--paths", nargs="*", default=[])
     build_parser.add_argument("--output", "-o", required=True)
     build_parser.add_argument("--dense", action="store_true")
+    build_parser.add_argument("--bazel-workspace")
+    build_parser.add_argument("--bazel-target", action="append", default=[])
+    build_parser.add_argument("--bazel", help="bazel/bazelisk executable")
 
     show_parser = subparsers.add_parser("show", help="Show a single API entry")
     show_parser.add_argument("--kb", required=True)
@@ -547,7 +599,13 @@ def main(argv=None):
     args = parse_args(argv)
 
     if args.command == "build":
-        kb = KnowledgeBase.build(paths=args.paths, use_dense=args.dense)
+        kb = KnowledgeBase.build(
+            paths=args.paths,
+            use_dense=args.dense,
+            bazel_workspace=args.bazel_workspace,
+            bazel_targets=args.bazel_target,
+            bazel=args.bazel,
+        )
         kb.save(args.output)
         print(json.dumps({"output": args.output, **kb.stats()}, indent=2, ensure_ascii=False))
         return
