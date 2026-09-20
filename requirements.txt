@@ -1,5 +1,7 @@
-clang
-libclang
+# The libclang wheel ships both the native library and matching Python bindings.
+# Installing the separate `clang` wheel alongside it can mix versions (for
+# example clang bindings 21 with libclang 18) and fail with undefined symbols.
+libclang==18.1.1
 tree_sitter
 pytest
 openai
