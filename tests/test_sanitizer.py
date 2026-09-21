@@ -145,3 +145,21 @@ def test_ubsan_signature_includes_category_and_location():
     findings = _parse_fixture("ubsan_divide_by_zero.txt")
     ubsan = [f for f in findings if f.sanitizer == "UBSAN"][0]
     assert ubsan.signature == "divide-by-zero_json_cc_61"
+
+
+# --- UBSan 파서 -> ANA 시그니처 연결 (4주차) --------------------------------
+def test_ubsan_finding_produces_clean_multiframe_signature():
+    """실제 UBSan 출력이 ANA 시그니처까지 중복 없이 도달하는지 확인한다.
+
+    파서(EXE-04-02)와 시그니처(ANA-05-04)를 따로 고쳤으므로, 둘을 이어
+    붙였을 때 실제로 의도한 결과가 나오는지는 별도로 봐야 한다.
+    """
+    from logosfuzz.analyze.models import CrashRecord
+    from logosfuzz.analyze.signature import signature_key
+
+    findings = _parse_fixture("ubsan_signed_overflow.txt")
+    ubsan = [f for f in findings if f.sanitizer == "UBSAN"][0]
+    key = signature_key(CrashRecord.from_finding(ubsan.to_dict()))
+    assert key == "integer-overflow@json.cc:38|json_fuzzer.cc:10"
+    # 같은 지점이 두 번 들어가지 않는다
+    assert key.count("json.cc:38") == 1
