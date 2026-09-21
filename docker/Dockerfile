@@ -3,11 +3,21 @@
 # Eclipse S-CORE(Bazel) 전환판.
 #   이전: ubuntu:22.04 + clang-14 + afl++ + bear 를 apt로 설치하고, 호스트
 #         툴체인으로 직접 컴파일했다.
-#   현재: 컴파일러·새니타이저·libFuzzer는 전부 baselibs 오버레이의 hermetic
-#         툴체인이 공급한다(--config=bl-x86_64-linux, --config=asan_ubsan_lsan).
+#   현재: 컴파일러·새니타이저·libFuzzer는 전부 Bazel이 공급한다.
 #         따라서 이 이미지는 "Bazel을 돌릴 수 있는 최소 환경 + 캐시 공간"만
 #         책임진다. 툴체인을 apt로 깔면 hermetic 빌드와 이중화되어 오히려
 #         재현성이 깨지므로 의도적으로 설치하지 않는다.
+#
+# config 두 개의 역할이 다르다(GEN 파트 1주차 실측으로 확정):
+#   --config=fuzz            퍼징 주경로. clang 22 + libFuzzer + ASan.
+#                            clang은 @llvm_toolchain(=Bazel이 받아오는 외부
+#                            저장소)에서 오므로 이미지에 apt로 clang을 깔
+#                            필요가 없다. 주차 계획의 "clang 22"는 apt 패키지가
+#                            아니라 이 툴체인을 가리킨다.
+#   --config=bl-x86_64-linux 회귀 게이트 전용. GCC 12.2.0.
+# 둘은 상호 배타다 - 같이 주면 뒤의 --extra_toolchains가 이겨 GCC가 clang을
+# 밀어내고, GCC에는 -fsanitize=fuzzer가 없어 링크에서 죽는다.
+# (asan_ubsan_lsan은 baselibs에서 test:로만 정의돼 있어 퍼징 빌드에는 못 쓴다.)
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -59,9 +69,13 @@ RUN curl -fsSL -o /usr/local/bin/bazelisk \
 #   out      : output base(--output_user_root)
 ENV BAZELISK_HOME=/bazel/bazelisk
 
-# 시스템 bazelrc에 캐시 경로를 박아둔다. 이렇게 하면 EXE 단계가
-# `bazel run --config=...` 만 호출해도 캐시 플래그가 자동 적용되어,
-# docker_runner 쪽에 캐시 관련 인자를 추가할 필요가 없다(2주차 작업 축소).
+# 시스템 bazelrc에 캐시 경로를 박아둔다. 이렇게 하면 빌드 단계가
+# `bazel build --config=fuzz` 만 호출해도 캐시 플래그가 자동 적용되어,
+# 호출부에 캐시 관련 인자를 추가할 필요가 없다.
+#
+# 캐시 영속화는 선택이 아니라 필수다: --config=fuzz의
+# cc_engine_instrumentation이 전이(transition)라 대상의 의존 클로저 전체가
+# clang+sancov로 재컴파일된다(GEN 파트 실측: 첫 빌드 7분 12초 / 159 actions).
 RUN printf '%s\n' \
     'startup --output_user_root=/bazel/out' \
     'common --repository_cache=/bazel/repo' \

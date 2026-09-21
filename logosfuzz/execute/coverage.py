@@ -211,38 +211,36 @@ def _default_runner(argv: list) -> CmdResult:
 
 
 # ---------------------------------------------------------------------------
-# Bazel 빌드 산출물 경로 (EXE-04-01 Bazel 전환 대응)
+# 하네스 바이너리 위치 (EXE-04-01 Bazel 전환 대응)
 # ---------------------------------------------------------------------------
 #
-# GEN이 Bazel BUILD 룰(cc_fuzz_test)로 하네스를 내보내게 되면, 컴파일된
-# 바이너리는 더 이상 ``harness_dir`` 밑에 있지 않고 ``bazel-bin/<패키지 경로>/
-# <타깃 이름>``에 생긴다. llvm-cov export는 그 바이너리를 심볼 소스로 필요로
-# 하므로, 이 매핑을 여기서 한 번 계산해둔다.
+# llvm-cov export는 profdata 말고도 **계측된 바이너리 자체**를 심볼 소스로
+# 읽어야 한다. GEN이 Bazel 어댑터로 넘어가면 그 바이너리는 harness_dir이
+# 아니라 워크스페이스의 bazel-bin 출력 트리에 생긴다.
 #
-# 주의(의도적으로 결정하지 않은 부분): 이 값을 LogicGroup 자체의 필드로 만들지,
-# 아니면 지금처럼 별도 맵으로 CoverageCollector에 주입할지는 SCH/GEN이 그룹
-# 스키마에 build_system 관련 필드를 어떤 이름으로 넣을지에 달려 있다(A 파트
-# 진행 중). LogicGroup은 frozen dataclass라 나중에 필드를 얹어도 이 함수의
-# 사용처만 한 줄 바꾸면 되도록, 여기서는 LogicGroup을 건드리지 않고 그룹
-# 이름 -> Bazel 라벨 맵을 외부에서 넘겨받는 형태로 최소 결합만 만들어 둔다.
-def bazel_binary_relpath(label: str) -> Path:
-    """Bazel 라벨(``//pkg/sub:name``)을 ``bazel-bin`` 기준 상대경로로 변환.
+# 처음에는 Bazel 라벨에서 `bazel-bin/<패키지>/<타깃>` 경로를 직접 조립했는데,
+# GEN 파트가 실측으로 그게 틀렸다는 걸 확인해 줬다:
+#   - 실제 실행 대상은 `<name>` 이 아니라 `<name>_bin`(계측된 퍼저 바이너리)
+#   - `bazel-bin` 은 **직전 빌드 설정**을 가리키는 편의 심링크라, 다른 config
+#     로 빌드가 한 번만 돌아도(회귀 게이트 --config=bl-x86_64-linux 등)
+#     경로가 무효가 된다. 퍼징 config는 --platform_suffix로 출력 트리를
+#     분리해 두기까지 해서 더 잘 어긋난다.
+#
+# 그래서 경로를 조립하지 않는다. 빌드 어댑터가 cquery로 질의해 돌려준 실제
+# 경로를 LogicGroup.harness_path에 담아 넘기고, 여기서는 그걸 그대로 쓴다.
+# docker_runner.harness_binary_path()와 같은 규칙이다.
 
-    ``:name``이 없으면(``//pkg/sub``) 마지막 경로 조각을 타깃 이름으로 쓴다
-    (Bazel이 라벨 생략 시 적용하는 규칙과 동일).
+
+def harness_binary_path(group: LogicGroup, cfg: FuzzConfig) -> Path:
+    """하네스 바이너리의 호스트 경로.
+
+    ``harness_path``에 디렉토리가 붙어 있으면 그 경로를 그대로 쓰고,
+    이름만 있으면 지금까지처럼 ``harness_dir`` 기준으로 푼다.
     """
-    label = label.strip()
-    if label.startswith("//"):
-        label = label[2:]
-    elif label.startswith("@"):
-        # //없이 @repo//pkg:name 형태로 오면 저장소 부분은 버린다 - bazel-bin은
-        # 기본 실행 저장소(execroot) 기준이라 외부 저장소 접두사가 붙지 않는다.
-        label = label.split("//", 1)[-1]
-    if ":" in label:
-        pkg, _, name = label.partition(":")
-    else:
-        pkg, name = label, label.rsplit("/", 1)[-1]
-    return Path(pkg) / name if pkg else Path(name)
+    p = Path(group.harness_path)
+    if p.parent != Path("."):
+        return p.resolve()
+    return (cfg.harness_dir / p.name).resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -259,17 +257,11 @@ class CoverageCollector:
     """
 
     def __init__(self, cfg: FuzzConfig, runner: Optional[CommandRunner] = None,
-                 docker_bin: str = "docker", use_docker: Optional[bool] = None,
-                 bazel_targets: Optional[dict] = None,
-                 bazel_bin_root: Optional[Path] = None):
+                 docker_bin: str = "docker", use_docker: Optional[bool] = None):
         self.cfg = cfg
         self.runner = runner or _default_runner
         self.docker_bin = docker_bin
         self.use_docker = cfg.use_docker if use_docker is None else use_docker
-        # group.name -> Bazel 라벨(예: "//score/json:json_fuzz_test"). 없는
-        # 그룹은 지금까지처럼 harness_dir 기준 경로를 그대로 쓴다(하위 호환).
-        self.bazel_targets = bazel_targets or {}
-        self.bazel_bin_root = Path(bazel_bin_root) if bazel_bin_root else Path("bazel-bin")
 
     # ---- 경로 헬퍼 ----------------------------------------------------
     def profraw_dir(self, group: LogicGroup) -> Path:
@@ -285,15 +277,8 @@ class CoverageCollector:
         return bool(glob.glob(str(self.profraw_dir(group) / "*.profraw")))
 
     def _harness_binary_host_path(self, group: LogicGroup) -> Path:
-        """llvm-cov export가 심볼 소스로 읽을 바이너리의 호스트 경로.
-
-        ``bazel_targets``에 그룹이 등록돼 있으면 ``bazel-bin`` 산출물을,
-        아니면(지금까지의 기본 흐름) ``harness_dir`` 산출물을 가리킨다.
-        """
-        target = self.bazel_targets.get(group.name)
-        if target:
-            return (self.bazel_bin_root / bazel_binary_relpath(target)).resolve()
-        return (self.cfg.harness_dir / group.harness_path.name).resolve()
+        """llvm-cov export가 심볼 소스로 읽을 바이너리의 호스트 경로."""
+        return harness_binary_path(group, self.cfg)
 
     # ---- 컨테이너 내부에서 도구를 돌릴지 여부 ------------------------
     def _in_docker(self) -> bool:
