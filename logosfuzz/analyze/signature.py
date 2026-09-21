@@ -103,6 +103,42 @@ def _normalize_token(frame: Frame) -> str:
     return f"{frame.basename}:{frame.line}"
 
 
+def collapse_repeated_frames(frames: list[Frame]) -> list[Frame]:
+    """정규화 후 같아지는 **연속** 프레임을 하나로 합친다.
+
+    두 상황에서 필요하다.
+
+    1. **UBSan** 진단은 헤더 줄과 스택 프레임 ``#0`` 이 같은 위치를 가리킨다.
+       경로 접두사만 달라서(``score/json/json.cc`` vs
+       ``/proc/self/cwd/score/json/json.cc``) 전체 경로로는 다른 프레임처럼
+       보이지만, 파일명:줄로 정규화하면 같은 한 지점이다. 합치지 않으면
+       시그니처 depth 세 칸 중 한 칸을 중복이 먹어, 남는 실질 정보가 줄고
+       서로 다른 버그가 같은 시그니처로 묶이는 과병합 위험이 커진다.
+
+       실제 출력(tests/fixtures/sanitizer_logs/ubsan_signed_overflow.txt)에서
+       확인한 결과::
+
+           integer-overflow@json.cc:38|json.cc:38|json_fuzzer.cc:10
+                            ^^^^^^^^^^^^^^^^^^^^ 같은 지점이 두 번
+
+    2. **재귀 호출**은 같은 파일:줄이 연속으로 쌓인다. 재귀 깊이는 입력에
+       따라 달라지므로, 합치지 않으면 같은 버그가 깊이별로 흩어진다(과분리).
+       ClusterFuzz 계열이 재귀를 접는 것과 같은 이유다.
+
+    연속된 것만 합친다. 떨어져 있는 같은 위치는 서로 다른 호출 경로를 거쳐
+    다시 도달한 것이므로 버그 정체성에 기여한다.
+    """
+    collapsed: list[Frame] = []
+    previous_token: str | None = None
+    for frame in frames:
+        token = _normalize_token(frame)
+        if token == previous_token:
+            continue
+        collapsed.append(frame)
+        previous_token = token
+    return collapsed
+
+
 def signature_key(record: CrashRecord, depth: int = 3) -> str:
     """사람이 읽는 다중 프레임 시그니처 문자열.
 
@@ -111,7 +147,7 @@ def signature_key(record: CrashRecord, depth: int = 3) -> str:
     앱 프레임이 하나도 없으면(예: 런타임/하네스만) 기본 시그니처로 폴백하고,
     그것도 없으면 ``<bug_type>@unknown``.
     """
-    frames = application_frames(record)[: max(1, depth)]
+    frames = collapse_repeated_frames(application_frames(record))[: max(1, depth)]
     if frames:
         chain = "|".join(_normalize_token(f) for f in frames)
         return f"{record.category}@{chain}"
