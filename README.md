@@ -239,6 +239,47 @@ report.rounds[-1].diagnosis       # "not_visible/expand_visibility"
 그때 올린다. 분류기 자체는 `classifier=` 로 교체 가능하고, 분류기가 예외를 던져도
 루프는 힌트 없이 예전처럼 계속 돈다.
 
+### Bazel 빌드 백엔드 `generate/bazel_compiler.py`
+
+자가치유 루프가 **실제 `bazel build`** 로 하네스를 검증하게 하는 컴파일러 구현이다.
+`SubprocessCompiler`(clang)로는 `no such target`·`is not visible from` 같은
+**Bazel 이 내는 문장**을 만들 수 없어서, 이게 없으면 2주차 분류기와 3주차 프롬프트
+주입이 실제로는 한 번도 검증되지 않는다.
+
+```python
+from logosfuzz.generate.bazel_compiler import BazelCompiler
+
+compiler = BazelCompiler(
+    workspace="tests/fixtures/bazel_repro",
+    target="//harness:json_fuzzer",
+    source_path="harness/json_fuzzer.cc",   # BUILD 의 srcs 와 일치해야 한다
+    config="asan_ubsan_lsan",
+)
+SelfHealLoop(compiler, llm, max_round=3).run(draft)
+```
+
+하네스 소스를 워크스페이스에 써 넣고 빌드한 뒤, stdout+stderr 를 **자르지 않고**
+`CompileResult` 에 싣는다. `requested_target` 을 노출해서 루프가 분류기에 넘긴다 —
+`no such target` 이 자기 타깃인지 의존 대상인지 가르는 값이다(발견 A).
+
+**실제 복구 증명.** `tests/test_bazel_compiler.py` 의 통합 테스트 3개가 진짜 Bazel 로
+돈다(`bazel` 이 PATH 에 없으면 skip). 2주차 완료 기준 "실패 시 자가치유가 1회 이상
+복구"를 스텁이 아니라 실제 툴체인으로 통과한 기록:
+
+```
+최종 결과  : success   (LLM 수정 라운드 1회)
+  라운드 0: 빌드 실패   진단=undefined_symbol/resolve_symbol
+            ld.lld: error: undefined symbol: score::json::ParseStrict(unsigned char const*, ...)
+  라운드 1: 빌드 성공
+  산출물   : .../bazel-bin/harness/json_fuzzer   (실제 존재: True)
+```
+
+Windows 에는 bazel 이 없으므로 통합 테스트는 WSL/컨테이너에서 돌린다:
+
+```bash
+python -m pytest tests/test_bazel_compiler.py -v
+```
+
 ### GEN-03-04 입력 소비 검증 `generate/validation.py`
 
 하네스가 퍼즈 입력을 실제로 쓰는지 정적으로 판정한다. `LLVMFuzzerTestOneInput`

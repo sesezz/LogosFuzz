@@ -39,7 +39,7 @@ from .models import (
 RoundCallback = Callable[[HealRound], None]
 
 # 빌드 로그 -> 분류 결과. 기본은 bazel_errors.classify.
-Classifier = Callable[[str], BazelErrorReport]
+Classifier = Callable[..., BazelErrorReport]
 
 
 @dataclass
@@ -104,6 +104,19 @@ class SelfHealLoop:
         except Exception:
             return source
 
+    def _requested_target(self, draft: HarnessDraft) -> Optional[str]:
+        """빌드를 요청한 Bazel 타깃 레이블. 알 수 없으면 None.
+
+        분류기가 `no such target` 을 만났을 때 지목된 레이블이 **하네스 자신의
+        타깃**인지 **의존 대상**인지 가르는 데 쓴다(코퍼스 발견 A). 처방이 정반대라
+        이 값이 있으면 판별이 훨씬 정확해진다.
+        """
+        target = getattr(self.compiler, "requested_target", None)
+        if target:
+            return str(target)
+        value = draft.context.get("bazel_target") if draft.context else None
+        return str(value) if value else None
+
     def _classify(self, log: str, draft: HarnessDraft) -> Optional[BazelErrorReport]:
         """빌드 로그를 분류한다. 분류기가 죽어도 루프는 계속 간다.
 
@@ -112,6 +125,15 @@ class SelfHealLoop:
         """
         if self.classifier is None:
             return None
+        target = self._requested_target(draft)
+        if target:
+            try:
+                return self.classifier(log, requested_target=target)
+            except TypeError:
+                # 타깃 인자를 받지 않는 분류기를 끼운 경우. 인자 없이 다시 시도한다.
+                pass
+            except Exception:
+                return None
         try:
             return self.classifier(log)
         except Exception:
