@@ -12,6 +12,7 @@ from logosfuzz.execute.coverage import (
     CmdResult,
     CoverageCollector,
     CoverageMetric,
+    bazel_coverage_configs,
     harness_binary_path,
     instrumentation_flags,
     parse_llvm_cov_export,
@@ -61,6 +62,26 @@ def test_instrumentation_flags():
     assert "-fprofile-instr-generate" in llvm and "-fcoverage-mapping" in llvm
     assert "-fsanitize-coverage=trace-pc-guard" in instrumentation_flags(CoverageMode.SANITIZER_COV)
     assert instrumentation_flags(CoverageMode.NONE) == ()
+
+
+# --- Bazel 경로의 계측 수급 (3주차) ---------------------------------------
+def test_bazel_coverage_config_for_llvm_cov():
+    """Bazel 빌드는 개별 -f 플래그가 아니라 대상 저장소가 주는 config를 쓴다."""
+    assert bazel_coverage_configs(CoverageMode.LLVM_COV) == ("llvm_cov",)
+
+
+def test_bazel_coverage_config_empty_for_sancov():
+    """엣지 계측은 퍼징 config(cc_engine_instrumentation)가 이미 켜 준다."""
+    assert bazel_coverage_configs(CoverageMode.SANITIZER_COV) == ()
+
+
+def test_bazel_coverage_config_empty_when_disabled():
+    assert bazel_coverage_configs(CoverageMode.NONE) == ()
+
+
+def test_instrumentation_flags_still_available_for_non_bazel_path():
+    """CMake 대상·빠른 컴파일 검증 경로는 여전히 플래그를 직접 쓴다."""
+    assert "-fprofile-instr-generate" in instrumentation_flags(CoverageMode.LLVM_COV)
 
 
 # --- 환경변수 계산 ---------------------------------------------------------

@@ -53,11 +53,59 @@ _INSTRUMENTATION_FLAGS = {
 def instrumentation_flags(mode: CoverageMode) -> tuple[str, ...]:
     """지정한 커버리지 모드에 필요한 clang 컴파일 플래그를 돌려준다.
 
-    GEN 단계/빌드 스크립트가 하네스를 이 플래그로 빌드해야 실행 시 커버리지가
-    수집된다. 계측되지 않은 바이너리는 ``*.profraw`` 를 생성하지 않으므로
+    빌드 시스템이 Bazel이 아닌 경로(CMake 대상, SubprocessCompiler의 빠른
+    컴파일 검증)에서 쓴다. Bazel 경로는 플래그를 직접 넘기지 않고
+    :func:`bazel_coverage_configs` 가 돌려주는 config를 쓴다.
+
+    계측되지 않은 바이너리는 ``*.profraw`` 를 생성하지 않으므로
     :meth:`CoverageCollector.collect` 가 ``None`` 을 반환한다.
     """
     return _INSTRUMENTATION_FLAGS.get(CoverageMode(mode), ())
+
+
+# ---------------------------------------------------------------------------
+# Bazel 경로의 계측 수급 (EXE-04-04, 3주차)
+# ---------------------------------------------------------------------------
+#
+# Bazel 빌드에서는 위의 개별 컴파일 플래그를 쓰지 않는다. 플래그를 직접
+# 넘기면 hermetic 툴체인이 정한 설정과 이중으로 걸려, 어느 쪽이 실제로
+# 적용됐는지 알 수 없게 된다. 대신 대상 저장소가 제공하는 config를 쓴다.
+#
+# baselibs는 커버리지 설정을 tools/coverage/coverage.bazelrc 에 두고
+# .bazelrc에서 import 한다. 그 파일이 제공하는 config 이름이 llvm_cov 다.
+_BAZEL_COVERAGE_CONFIGS = {
+    CoverageMode.LLVM_COV: ("llvm_cov",),
+    # SanitizerCoverage(엣지 계측)는 퍼징 config가 이미 켜 준다.
+    # rules_fuzzing의 cc_engine_instrumentation=libfuzzer 가 전이(transition)로
+    # 의존 클로저 전체에 sancov를 건다. 따로 붙일 config가 없다.
+    CoverageMode.SANITIZER_COV: (),
+    CoverageMode.NONE: (),
+}
+
+
+def bazel_coverage_configs(mode: CoverageMode) -> tuple[str, ...]:
+    """Bazel 빌드에 붙일 커버리지 config 이름을 돌려준다.
+
+    반환값은 ``--config=<이름>`` 으로 빌드 커맨드에 붙일 것들이다.
+
+    .. warning::
+       **아직 실제로 조합해 본 적이 없다.** 퍼징 빌드는 ``--config=fuzz`` 를
+       쓰는데, 거기에 이 config를 더했을 때 툴체인이 어떻게 해소되는지
+       확인되지 않았다.
+
+       근거 있는 우려다. baselibs의 coverage.bazelrc 는 바로 그
+       "GCC 툴체인이 이 파일의 플래그 뒤에 등록되면 마지막
+       ``--extra_toolchains`` 가 이긴다" 는 경고를 담고 있는 파일이고,
+       ``--config=fuzz`` 가 clang을 등록하는 방식이 정확히 그
+       ``--extra_toolchains`` 다. 순서에 따라 clang이 밀려나면 퍼징 빌드 자체가
+       -fsanitize=fuzzer 링크에서 죽는다.
+
+       Bazel과 baselibs가 있는 환경에서 아래를 먼저 확인해야 한다:
+           bazel build --config=fuzz --config=llvm_cov //<대상>:<이름>_bin
+       실패하면 선택지는 두 가지다 - 커버리지 측정을 별도 빌드로 분리하거나,
+       오버레이에 fuzz+coverage 겸용 config를 새로 정의하는 것.
+    """
+    return _BAZEL_COVERAGE_CONFIGS.get(CoverageMode(mode), ())
 
 
 # ---------------------------------------------------------------------------
