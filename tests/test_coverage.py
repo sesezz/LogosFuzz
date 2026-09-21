@@ -12,7 +12,7 @@ from logosfuzz.execute.coverage import (
     CmdResult,
     CoverageCollector,
     CoverageMetric,
-    bazel_binary_relpath,
+    harness_binary_path,
     instrumentation_flags,
     parse_llvm_cov_export,
     profile_env,
@@ -121,41 +121,37 @@ def test_build_export_argv_docker(tmp_path):
     assert "/harness/grpA" in joined
 
 
-# --- Bazel 라벨 -> bazel-bin 상대경로 (EXE-04-01 대응) --------------------
-def test_bazel_binary_relpath_with_target_name():
-    assert bazel_binary_relpath("//score/json:json_fuzz_test") == \
-        __import__("pathlib").Path("score/json/json_fuzz_test")
+# --- 하네스 바이너리 위치 해석 (EXE-04-01 Bazel 전환 대응) -----------------
+#
+# GEN 어댑터가 cquery 로 질의해 돌려준 실제 바이너리 경로를 harness_path 에
+# 담아 넘기는 구조다. 경로를 조립하지 않는다 - bazel-bin 심링크는 직전 빌드
+# 설정을 가리켜서 config 가 섞이면 무효가 되기 때문(GEN 파트 실측).
+def test_harness_binary_path_uses_explicit_path_as_is(tmp_path):
+    cfg = _cfg(tmp_path)
+    binary = tmp_path / "ws" / "bazel-out" / "fuzz" / "json_parser_fuzz_test_bin"
+    group = LogicGroup(name="grpA", harness_path=binary)
+    assert harness_binary_path(group, cfg) == binary.resolve()
 
 
-def test_bazel_binary_relpath_without_colon_uses_last_segment():
-    assert bazel_binary_relpath("//score/json") == \
-        __import__("pathlib").Path("score/json/json")
+def test_harness_binary_path_falls_back_to_harness_dir_for_bare_name(tmp_path):
+    cfg = _cfg(tmp_path)
+    group = LogicGroup(name="grpA", harness_path="grpA")
+    assert harness_binary_path(group, cfg) == (cfg.harness_dir / "grpA").resolve()
 
 
-def test_bazel_binary_relpath_strips_external_repo_prefix():
-    assert bazel_binary_relpath("@rules_fuzzing//fuzzing:cc_fuzz_test") == \
-        __import__("pathlib").Path("fuzzing/cc_fuzz_test")
-
-
-def test_export_argv_host_uses_bazel_bin_when_target_registered(tmp_path):
+def test_export_argv_host_uses_explicit_binary_path(tmp_path):
     cfg = _cfg(tmp_path, coverage=CoverageMode.LLVM_COV, use_docker=False,
                coverage_in_docker=False)
-    col = CoverageCollector(
-        cfg,
-        bazel_targets={"grpA": "//score/json:json_fuzz_test"},
-        bazel_bin_root=tmp_path / "bazel-bin",
-    )
-    export = col.build_export_argv(_group())
-    harness_arg = export[4]
-    assert "bazel-bin" in harness_arg
-    assert harness_arg.replace("\\", "/").endswith("score/json/json_fuzz_test")
+    binary = tmp_path / "ws" / "bazel-out" / "fuzz" / "json_parser_fuzz_test_bin"
+    group = LogicGroup(name="grpA", harness_path=binary)
+    export = CoverageCollector(cfg).build_export_argv(group)
+    assert export[4] == str(binary.resolve())
 
 
-def test_export_argv_host_falls_back_without_bazel_target(tmp_path):
+def test_export_argv_host_falls_back_to_harness_dir(tmp_path):
     cfg = _cfg(tmp_path, coverage=CoverageMode.LLVM_COV, use_docker=False,
                coverage_in_docker=False)
-    col = CoverageCollector(cfg)  # bazel_targets 미지정 - 기존 동작과 동일해야 함
-    export = col.build_export_argv(_group())
+    export = CoverageCollector(cfg).build_export_argv(_group())
     assert str(cfg.harness_dir.resolve()) in export[4]
 
 

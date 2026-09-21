@@ -21,13 +21,24 @@ from typing import Callable, List, Optional
 from .models import CompileResult, HarnessDraft
 
 # link_fuzzer(하네스가 libFuzzer 링크까지 요구하는지)를 받아 "-fsanitize=..."
-# 인자 목록(0개 이상)을 돌려주는 콜백. 지금 이 인터페이스를 구현하는 것은
-# SubprocessCompiler 자신(_default_sanitize_flags)뿐이지만, 실제 형태는 B가
-# 만들 예정인 BuildAdapter가 될 것으로 보인다(2주차 계획 "BuildAdapter 추상화"
-# 참조). 그 어댑터가 아직 저장소에 없어(2026-09-17 기준 확인) 정확한 타입을
-# 맞출 수 없으므로, 여기서는 어댑터를 직접 참조하지 않고 이 콜백 시그니처만
-# 계약으로 고정해둔다 - 어댑터가 생기면 이 시그니처를 만족하는 메서드를 하나
-# 넘기기만 하면 된다.
+# 인자 목록(0개 이상)을 돌려주는 콜백.
+#
+# BuildAdapter(logosfuzz/generate/bazel/adapter.py)가 나온 뒤 확인한 것:
+# 그 어댑터는 이 콜백을 구현하지 않는다. 그리고 그게 맞다. 두 경로의 역할이
+# 다르기 때문이다.
+#
+#   BazelAdapter  : BUILD 룰을 쓰고 `bazel build --config=fuzz` 로 퍼저
+#                   바이너리를 만든다. 새니타이저/libFuzzer 설정은 개별
+#                   -fsanitize 플래그가 아니라 config(build:fuzz) 가 통째로
+#                   공급하므로, 어댑터가 플래그를 돌려줄 일이 없다.
+#   이 컴파일러    : 자가치유 루프가 "이 하네스 소스가 컴파일은 되는가"를
+#                   빠르게 확인하는 용도다. 전체 Bazel 빌드(의존 클로저 전체
+#                   재컴파일, 실측 7분대)를 매 수정마다 돌릴 수 없어서
+#                   clang -c 로 짧게 끊는 경로가 따로 필요하다.
+#
+# 그래서 이 훅은 "Bazel 어댑터를 꽂는 자리"가 아니라, 빠른 컴파일 검증에
+# 쓸 플래그를 호출부가 바꿔 끼우는 자리로 남는다(예: 대상 프로젝트가
+# UBSan까지 요구하는 경우). 기본값이면 지금까지의 동작 그대로다.
 SanitizeFlagsProvider = Callable[[bool], List[str]]
 
 
