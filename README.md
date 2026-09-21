@@ -9,7 +9,7 @@ logosfuzz/
   extract/      EXT-01 : 소스/컴파일 DB 파싱, AST·제약조건 추출
   knowledge/    EXT-01-04 : 통합 지식베이스 + RAG 색인/검색, KB 어댑터·평가
   schedule/     SCH-02 : Logic Group 추출, 시너지 우선순위, 자원 할당
-  generate/     GEN-03 : 하네스 생성·컴파일 자가치유·검증, Mock 주입
+  generate/     GEN-03 : 하네스 생성, 빌드 에러 분류·자가치유, 하네스 검증
   execute/      EXE-04 : 격리 퍼징 실행, 커버리지·크래시 수집, 코퍼스 관리
   analyze/      ANA-05 : 크래시 트리아지·근본원인·KB 피드백
     cve_reporting/  ANA-05-02 : 크래시 -> CVE 리포트 생성
@@ -214,6 +214,51 @@ print(prompt_hint(report))   # LLM 프롬프트에 넣을 텍스트
 deps 누락의 입구는 `no such target` 이 아니라 clang 의 `file not found` 이며,
 visibility 문구는 `ERROR:` 줄에 없다. 근거는
 [docs/GEN-03-02-ERROR-CORPUS.md](docs/GEN-03-02-ERROR-CORPUS.md) 의 발견 A·B·C 다.
+
+### 자가치유 루프에 붙은 분류기 `generate/selfheal.py`
+
+루프는 실패한 빌드 로그를 **전문 그대로** 프롬프트에 싣고, 그 앞에 분류 결과를
+먼저 붙인다. 모델이 원인을 스스로 추론하기 전에 분류를 보게 하려는 것이다.
+
+```python
+loop = SelfHealLoop(compiler, llm, max_round=3)   # classifier 는 기본으로 붙는다
+report = loop.run(draft)
+report.rounds[-1].diagnosis       # "not_visible/expand_visibility"
+```
+
+분류기를 붙이면서 **고칠 수 없는 결함에서 라운드를 태우지 않도록** 두 가지 조기
+중단을 같이 넣었다. 분류가 정확할수록 루프가 더 확신에 차서 헛돌기 때문이다.
+
+| 상황 | 동작 | 이유 |
+| --- | --- | --- |
+| `dep_cycle` 등 `escalate` 처방 | `HealOutcome.ESCALATED`, LLM 호출 0회 | 타깃을 쪼개야 풀린다 |
+| `add_load`·`add_deps`·`expand_visibility` 등 BUILD 처방 | 같음 | 루프는 하네스 **소스**만 다시 쓴다 |
+
+두 번째는 `SelfHealLoop(can_edit_build=True)` 로 끌 수 있다. B 파트의
+`build_file_generator` 가 컨트롤러에 편입돼 BUILD 재생성까지 한 몸으로 돌게 되면
+그때 올린다. 분류기 자체는 `classifier=` 로 교체 가능하고, 분류기가 예외를 던져도
+루프는 힌트 없이 예전처럼 계속 돈다.
+
+### GEN-03-04 입력 소비 검증 `generate/validation.py`
+
+하네스가 퍼즈 입력을 실제로 쓰는지 정적으로 판정한다. `LLVMFuzzerTestOneInput`
+본문이 제 인자를 한 번도 참조하지 않으면 무엇을 넣든 같은 경로만 돈다.
+
+```python
+from logosfuzz.generate.validation import check_input_consumption
+check_input_consumption(source, dry_run_log).passed
+```
+
+커버리지 검사와 무엇이 다른가 — 커버리지가 0이면 "타겟에 못 닿았다"이고, 커버리지는
+나오는데 입력을 안 쓰면 "닿긴 했는데 항상 같은 값으로 닿는다"이다. **후자는 커버리지
+임계치를 통과**하므로 기존 단계로는 걸리지 않는데, 캠페인을 몇 시간 돌려도 새 경로가
+하나도 안 나온다. LLM 이 대상 API 를 부르면서 인자를 하드코딩할 때 생긴다.
+
+게이트는 **증명 가능한 경우에만** 실패시킨다. 진입점을 파싱하지 못하면 통과시키되
+`checked=False` 로 "근거 없이 통과시켰다"를 남긴다 — 검사기의 빈틈 때문에 멀쩡한
+하네스를 막으면 안 되기 때문이다. `(void)data;` 같은 명시적 버림, 주석·문자열
+리터럴에만 등장하는 경우는 사용으로 세지 않는다. 길이만 쓰고 버퍼는 안 쓰면
+통과시키되 경고(`report.warnings`)로 남긴다.
 
 ## 커밋 메시지 규칙
 

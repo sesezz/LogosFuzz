@@ -143,6 +143,24 @@ def extract_note(llm_response: str) -> str:
 # --------------------------------------------------------------------------- #
 # 리페어 프롬프트
 # --------------------------------------------------------------------------- #
+def truncate_middle(text: str, limit: int) -> str:
+    """가운데를 잘라 `limit` 안에 맞춘다. 머리와 꼬리를 남긴다.
+
+    빌드 로그는 꼬리만 남기면 안 된다. Bazel 은 핵심 `ERROR:` 를 앞쪽에 찍고 끝에는
+    "Build did NOT complete successfully" 같은 요약만 남기므로, 꼬리 N자만 자르면
+    정작 원인이 통째로 사라진다. 반대로 머리만 남기면 clang/링커 진단을 잃는다.
+    """
+    if len(text) <= limit:
+        return text
+    marker = "\n... (중략) ...\n"
+    keep = limit - len(marker)
+    if keep <= 0:
+        return text[:limit]
+    head = keep * 2 // 3          # 원인은 앞쪽에 몰려 있다
+    tail = keep - head
+    return text[:head] + marker + text[-tail:]
+
+
 class RepairPromptBuilder:
     """컴파일 에러를 고치기 위한 수정 프롬프트를 만든다."""
 
@@ -154,7 +172,10 @@ class RepairPromptBuilder:
         "entry point and the intended target API calls."
     )
 
-    def __init__(self, max_log_chars: int = 2000) -> None:
+    def __init__(self, max_log_chars: int = 8000) -> None:
+        # 기본값이 2000 이던 시절엔 `error_digest()`(파싱된 진단 몇 줄)만 넣었다.
+        # 이제 로그 **전문**을 넣으므로 한도를 넉넉히 잡는다. Bazel 로그는 진행률
+        # 줄이 섞여 길지만, 진단이 로그 전반에 흩어져 있어 요약하면 원인을 잃는다.
         self.max_log_chars = max_log_chars
 
     def system_prompt(self) -> str:
@@ -167,27 +188,37 @@ class RepairPromptBuilder:
         compile_result: CompileResult,
         round_idx: int,
         knowledge: Optional[Dict[str, str]] = None,
+        hint: str = "",
     ) -> str:
-        digest = compile_result.error_digest()[: self.max_log_chars]
+        """수정 프롬프트를 만든다.
+
+        Args:
+            hint: GEN-03-02 에러 분류기가 만든 진단 블록
+                (`logosfuzz.generate.bazel_errors.prompt_hint`). 로그 원문보다
+                **먼저** 싣는다 - 모델이 원인을 스스로 추론하기 전에 분류 결과를
+                보게 하려는 것이다. 빈 문자열이면 이 절을 넣지 않는다.
+        """
+        log = truncate_middle(compile_result.log, self.max_log_chars)
         apis = ", ".join(draft.target_apis) if draft.target_apis else "(미지정)"
         kb = ""
         if knowledge:
             kb = "\n# 지식베이스 힌트\n" + "\n".join(f"- {k}: {v}" for k, v in knowledge.items())
+        diagnosis = f"\n{hint}\n" if hint else ""
         return f"""\
-# 작업: 컴파일 에러 수정 (라운드 {round_idx})
+# 작업: 빌드 에러 수정 (라운드 {round_idx})
 프로젝트: {draft.project or '-'}
 로직 그룹: {draft.logic_group}
 타깃 API: {apis}
 {kb}
-
+{diagnosis}
 # 현재 하네스 소스
 ```c
 {source}
 ```
 
-# 컴파일러 에러
+# 빌드 로그 전문
 ```
-{digest}
+{log}
 ```
 
 # 지시

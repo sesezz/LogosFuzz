@@ -24,7 +24,9 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
+from . import bazel_errors
 from .compiler import Compiler
+from .errors import BazelErrorReport
 from .llm import LLMClient, RepairPromptBuilder, extract_code, extract_note
 from .models import (
     GenerateReport,
@@ -35,6 +37,9 @@ from .models import (
 
 # 라운드 종료 시 호출되는 콜백(진행 상황 표시/모니터링용)
 RoundCallback = Callable[[HealRound], None]
+
+# 빌드 로그 -> 분류 결과. 기본은 bazel_errors.classify.
+Classifier = Callable[[str], BazelErrorReport]
 
 
 @dataclass
@@ -57,9 +62,35 @@ class SelfHealLoop:
     # 그래서 훅을 루프 안에 둔다.
     sanitize: Optional[Callable[[str, HarnessDraft], str]] = None
 
+    # GEN-03-02 에러 분류기. 빌드 로그 전문을 받아 "무엇이 잘못됐고 무엇을 고쳐야
+    # 하는지"를 돌려준다. None 이면 bazel_errors.classify 를 쓴다. 분류 결과는
+    # 프롬프트 맨 앞에 실려 나가고, 라운드 기록에도 남는다.
+    classifier: Optional[Classifier] = None
+
+    # 분류기가 "LLM 재시도로는 못 고친다"고 본 결함에서 조기 중단할지.
+    #
+    # 왜 필요한가 - 순환 의존은 타깃을 쪼개야 풀린다. 그걸 모르면 루프가 라운드를
+    # 전부 태우고 EXHAUSTED 로 끝나는데, 그동안 LLM 호출 비용만 나가고 결과는
+    # 같다. 조기에 ESCALATED 로 끊고 사람에게 올리는 편이 낫다.
+    stop_on_escalate: bool = True
+
+    # 이 루프가 BUILD 파일도 고칠 수 있는가.
+    #
+    # 기본은 False 다 - 지금 루프는 하네스 **소스**만 LLM 에게 다시 쓰게 한다.
+    # 그런데 분류 결과의 상당수(load() 누락, deps 추가, visibility)는 BUILD 를
+    # 고쳐야 풀리고, 소스를 아무리 다시 써도 같은 에러가 반복된다. 분류가 정확할수록
+    # 더 확신에 차서 헛도는 상황이라, 고칠 수 없는 산출물을 지목한 경우엔 라운드를
+    # 쓰지 않고 바로 에스컬레이션한다.
+    #
+    # B 파트의 build_file_generator 가 컨트롤러에 편입돼 BUILD 재생성까지 한 몸으로
+    # 돌게 되면 True 로 올린다.
+    can_edit_build: bool = False
+
     def __post_init__(self) -> None:
         if self.prompt_builder is None:
             self.prompt_builder = RepairPromptBuilder()
+        if self.classifier is None:
+            self.classifier = bazel_errors.classify
         if self.max_round < 0:
             raise ValueError("max_round는 0 이상이어야 합니다")
 
@@ -73,6 +104,32 @@ class SelfHealLoop:
         except Exception:
             return source
 
+    def _classify(self, log: str, draft: HarnessDraft) -> Optional[BazelErrorReport]:
+        """빌드 로그를 분류한다. 분류기가 죽어도 루프는 계속 간다.
+
+        분류는 '거들 뿐'이다. 실패하면 힌트 없이 로그 원문만 들고 예전처럼 돌면
+        되므로, 여기서 예외가 나도 자가치유 자체를 멈추지 않는다.
+        """
+        if self.classifier is None:
+            return None
+        try:
+            return self.classifier(log)
+        except Exception:
+            return None
+
+    def _blocked_reason(self, report: Optional[BazelErrorReport]) -> str:
+        """이 루프로는 못 고치는 결함이면 그 이유를, 아니면 빈 문자열."""
+        if report is None or report.primary is None:
+            return ""
+        if self.stop_on_escalate and report.needs_human:
+            return f"자동 수정 대상이 아님({report.primary.kind.value}): {report.primary.summary}"
+        if not self.can_edit_build and bazel_errors.needs_build_file_edit(report):
+            return (
+                f"BUILD 파일을 고쳐야 풀리는 결함({report.primary.kind.value})이라 "
+                f"하네스 소스 수정으로는 해결되지 않는다: {report.primary.summary}"
+            )
+        return ""
+
     def run(self, draft: HarnessDraft) -> GenerateReport:
         start = time.monotonic()
         rounds: List[HealRound] = []
@@ -85,19 +142,28 @@ class SelfHealLoop:
         except Exception as e:  # 컴파일러 백엔드 예외
             return self._error_report(draft, rounds, start, f"컴파일러 예외: {e}")
 
-        rounds.append(HealRound(index=0, source=source, compile_result=result))
+        report = None if result.ok else self._classify(result.log, draft)
+        rounds.append(HealRound(index=0, source=source, compile_result=result,
+                                classification=report))
         self._emit(rounds[-1])
 
         if result.ok:
             outcome = HealOutcome.SUCCESS
             return self._finish(draft, rounds, source, outcome, start)
 
+        # 분류 결과가 "여기서는 못 고친다"면 라운드를 쓰지 않고 바로 끊는다.
+        blocked = self._blocked_reason(report)
+        if blocked:
+            return self._finish(draft, rounds, source, HealOutcome.ESCALATED,
+                                start, note=blocked)
+
         prev_signature = result.signature()
 
         # 라운드 1..max_round: LLM 수정 → 재컴파일
         for i in range(1, self.max_round + 1):
             prompt = self.prompt_builder.build(
-                draft, source, result, round_idx=i, knowledge=self.knowledge
+                draft, source, result, round_idx=i, knowledge=self.knowledge,
+                hint=bazel_errors.prompt_hint(report) if report is not None else "",
             )
             try:
                 response = self.llm.complete(
@@ -121,15 +187,22 @@ class SelfHealLoop:
             except Exception as e:
                 return self._error_report(draft, rounds, start, f"컴파일러 예외: {e}")
 
+            report = None if result.ok else self._classify(result.log, draft)
             rounds.append(
                 HealRound(index=i, source=source, compile_result=result,
-                          repaired_by_llm=True, llm_note=note)
+                          repaired_by_llm=True, llm_note=note,
+                          classification=report)
             )
             self._emit(rounds[-1])
 
             if result.ok:
                 outcome = HealOutcome.SUCCESS
                 break
+
+            blocked = self._blocked_reason(report)
+            if blocked:
+                return self._finish(draft, rounds, source, HealOutcome.ESCALATED,
+                                    start, note=blocked)
 
             sig = result.signature()
             if self.stop_on_stagnation and sig and sig == prev_signature:
@@ -157,6 +230,7 @@ class SelfHealLoop:
         source: str,
         outcome: HealOutcome,
         start: float,
+        note: str = "",
     ) -> GenerateReport:
         report = GenerateReport(
             logic_group=draft.logic_group,
@@ -167,7 +241,7 @@ class SelfHealLoop:
             elapsed_sec=time.monotonic() - start,
         )
         if not report.success:
-            self._escalate(draft, report)
+            self._escalate(draft, report, note=note)
         return report
 
     def _error_report(self, draft, rounds, start, msg) -> GenerateReport:
@@ -182,7 +256,8 @@ class SelfHealLoop:
         report.hitl_decision = msg
         return report
 
-    def _escalate(self, draft: HarnessDraft, report: GenerateReport) -> None:
+    def _escalate(self, draft: HarnessDraft, report: GenerateReport,
+                  note: str = "") -> None:
         """
         실패한 하네스를 HITL HARNESS_REVIEW로 올린다(연결돼 있을 때만).
         정책이 CONDITIONAL(compile_ok=False → 사람 검토)이므로 큐에 쌓인다.
@@ -194,21 +269,37 @@ class SelfHealLoop:
         except Exception:
             return
         last = report.last_compile
+        # 마지막 라운드의 분류 결과를 같이 올린다. 검토자가 로그를 처음부터 읽지
+        # 않고 "무엇이 왜 실패했는지"를 바로 보게 하려는 것이다.
+        last_round = report.rounds[-1] if report.rounds else None
+        classification = getattr(last_round, "classification", None)
+        primary = getattr(classification, "primary", None)
+        summary = (f"[{draft.logic_group}] 자가치유 {report.outcome.value} "
+                   f"({report.rounds_used}라운드 소진)")
+        if note:
+            summary = f"{summary} - {note}"
+        payload = {
+            "logic_group": draft.logic_group,
+            "compile_ok": False,
+            "outcome": report.outcome.value,
+            "rounds_used": report.rounds_used,
+            "compile_log": last.error_digest() if last else "",
+            "harness_code": report.final_source,
+            "target_apis": draft.target_apis,
+        }
+        if note:
+            payload["stop_reason"] = note
+        if primary is not None:
+            payload["diagnosis"] = primary.kind.value
+            payload["fix_action"] = primary.action.value
+            payload["fix_target"] = bazel_errors.fix_target_artifact(primary.action)
+            payload["diagnosis_detail"] = dict(primary.detail)
         decision = self.hitl.request(
             Checkpoint.HARNESS_REVIEW,
             target=draft.logic_group,
             project=draft.project,
-            summary=f"[{draft.logic_group}] 자가치유 {report.outcome.value} "
-                    f"({report.rounds_used}라운드 소진)",
-            payload={
-                "logic_group": draft.logic_group,
-                "compile_ok": False,
-                "outcome": report.outcome.value,
-                "rounds_used": report.rounds_used,
-                "compile_log": last.error_digest() if last else "",
-                "harness_code": report.final_source,
-                "target_apis": draft.target_apis,
-            },
+            summary=summary,
+            payload=payload,
         )
         report.hitl_decision = decision.type.value
         # 방금 쌓인 PENDING 항목 id를 기록(있으면)
