@@ -4,6 +4,9 @@ import subprocess
 import pytest
 
 from logosfuzz.knowledge.kb_adapters import (
+    build_unit_for_api,
+    build_unit_metadata,
+    call_sequences_by_build_unit,
     configuration_apis,
     render_configuration_apis,
     api_reference,
@@ -92,6 +95,43 @@ def kb(tmp_path):
     return KnowledgeBase.build(paths=[str(tmp_path)])
 
 
+@pytest.fixture
+def bazel_kb(kb):
+    """Attach the Week 2 Bazel schema without invoking an external Bazel binary."""
+    for document in kb.documents:
+        is_client = document["file"].endswith("client.c")
+        document["build_system"] = "bazel"
+        document["build_target"] = "//app:client" if is_client else "//lib:uds"
+        document["build_rule_kind"] = "cc_binary" if is_client else "cc_library"
+        document["build_deps"] = ["//lib:uds"] if is_client else []
+        document["compile_flags"] = ["-DUDS_BUILD=1"]
+    kb.build_units = [
+        {
+            "target": "//app:client",
+            "rule_kind": "cc_binary",
+            "deps": ["//lib:uds"],
+            "sources": ["client.c"],
+            "headers": [],
+            "include_dirs": [],
+            "compile_flags": ["-DAPP_BUILD=1"],
+            "build_file": "BUILD",
+            "build_system": "bazel",
+        },
+        {
+            "target": "//lib:uds",
+            "rule_kind": "cc_library",
+            "deps": [],
+            "sources": ["uds.c"],
+            "headers": ["uds.h"],
+            "include_dirs": [],
+            "compile_flags": ["-DUDS_BUILD=1"],
+            "build_file": "lib/BUILD",
+            "build_system": "bazel",
+        },
+    ]
+    return kb
+
+
 # ---------------------------------------------------------------------------
 # B (SCH-02-02 / SCH-02-03) 지원
 # ---------------------------------------------------------------------------
@@ -113,6 +153,13 @@ def test_synergy_api_fields_are_populated(kb):
     assert isinstance(entry.api_id, int)
     assert entry.func_signature.startswith("int uds_session_start")
     assert entry.dep_graph_ref.endswith("uds.c")
+
+
+def test_synergy_dependency_reference_uses_build_unit(bazel_kb):
+    apis, _ = to_synergy_inputs(bazel_kb)
+    entry = next(a for a in apis if "uds_session_start" in a.func_signature)
+
+    assert entry.dep_graph_ref == "//lib:uds"
 
 
 def test_synergy_constraints_carry_rule_text_and_api_id(kb):
@@ -204,6 +251,30 @@ def test_call_sequences_by_file(kb):
     assert client.index("uds_session_start") < client.index("uds_read_did")
 
 
+def test_build_unit_metadata_joins_owned_apis(bazel_kb):
+    units = build_unit_metadata(bazel_kb)
+    uds = next(unit for unit in units if unit["build_target"] == "//lib:uds")
+
+    assert uds["build_rule_kind"] == "cc_library"
+    assert "uds_session_start" in uds["api_names"]
+    assert uds["api_ids"] == sorted(uds["api_ids"])
+
+
+def test_build_unit_for_api_returns_normalized_owner(bazel_kb):
+    unit = build_unit_for_api(bazel_kb, "read_vin")
+
+    assert unit["build_target"] == "//app:client"
+    assert unit["build_deps"] == ["//lib:uds"]
+
+
+def test_call_sequences_are_exposed_by_build_unit(bazel_kb):
+    sequences = call_sequences_by_build_unit(bazel_kb)
+
+    assert "//app:client" in sequences
+    assert sequences["//app:client"].index("uds_session_start") < \
+        sequences["//app:client"].index("uds_read_did")
+
+
 # ---------------------------------------------------------------------------
 # B (GEN-03-01 하네스 초안 생성) 지원
 # ---------------------------------------------------------------------------
@@ -217,6 +288,14 @@ def test_harness_context_includes_build_information(kb):
     assert "signature:" in block
     assert '#include "' in block
     assert "constraints:" in block
+
+
+def test_harness_context_exposes_build_unit_contract(bazel_kb):
+    block = harness_context(bazel_kb, "read_vin")
+
+    assert "build unit: //app:client" in block
+    assert "build rule: bazel/cc_binary" in block
+    assert "build deps: //lib:uds" in block
 
 
 def test_harness_context_emits_header_name_not_full_path(kb):
@@ -404,6 +483,14 @@ def test_api_reference_has_join_keys_for_reporting(kb):
     assert reference["file"].endswith("uds.c")
     assert reference["header"].endswith("uds.h")
     assert reference["constraint_count"] > 0
+
+
+def test_api_reference_includes_build_unit_metadata(bazel_kb):
+    reference = api_reference(bazel_kb, "read_vin")
+
+    assert reference["build_target"] == "//app:client"
+    assert reference["build_rule_kind"] == "cc_binary"
+    assert reference["build_deps"] == ["//lib:uds"]
 
 
 def test_api_reference_returns_none_for_unknown(kb):
