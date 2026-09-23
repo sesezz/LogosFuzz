@@ -12,6 +12,7 @@
   - buffer_size  : (포인터, 길이) 인자 쌍
   - resource     : malloc/fopen 등 자원 획득과 해제 책임
   - return_value : 실패 시 반환값 규약
+  - error_contract: score::Result 가 반환하는 오류 규약
   - risky_call   : 길이 검증이 필요한 위험 API 사용
   - doc          : 주석에 서술된 제약조건
 
@@ -104,6 +105,27 @@ FATAL_CALL_RE = re.compile(
     re.I,
 )
 ANY_EXIT_RE = re.compile(r"\b(return|goto|break|continue|throw)\b")
+RESULT_ERROR_RETURN_RE = re.compile(
+    r"\breturn\b[^;]*(?:MakeUnexpected|Unexpected\s*\{|\bunexpect\b)", re.S
+)
+# Inside a ``score`` namespace S-CORE definitions commonly spell the same type
+# as unqualified ``Result<T>``.  Requiring a score-specific failure constructor
+# below keeps the broader spelling from creating contracts for unrelated types.
+SCORE_RESULT_TYPE_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:(?:::)?score::)?Result\s*<"
+)
+MAKE_UNEXPECTED_RE = re.compile(
+    r"(?:(?:::)?score::)?MakeUnexpected(?:\s*<[^;{}()]+>)?\s*\((.*)\)\s*$",
+    re.S,
+)
+UNEXPECTED_VALUE_RE = re.compile(
+    r"(?:(?:::)?score::)?Unexpected\s*\{(.*)\}\s*$", re.S
+)
+RESULT_UNEXPECT_RE = re.compile(
+    r"(?:(?:::)?score::)?Result\s*<.*>\s*\{\s*"
+    r"(?:(?:::)?score::)?unexpect\s*,\s*(.*)\}\s*$",
+    re.S,
+)
 
 BRANCH_ERROR_EXIT = "error_exit"
 BRANCH_PLAIN_EXIT = "plain_exit"
@@ -373,6 +395,46 @@ def _skip_ws(text: str, pos: int) -> int:
     return pos
 
 
+def _ends_with_template_type(prefix: str) -> bool:
+    """Whether ``prefix`` ends in a balanced C++ template type.
+
+    The generic false-positive guard rejects a declaration prefix ending in
+    ``>`` because it often belongs to a comparison expression.  A real return
+    type such as ``score::Result<int>`` has a balanced template suffix whose
+    opening ``<`` follows an identifier, and can be admitted safely.
+    """
+    text = prefix.rstrip()
+    if not text.endswith(">"):
+        return False
+    depth = 0
+    for index in range(len(text) - 1, -1, -1):
+        char = text[index]
+        if char == ">":
+            depth += 1
+        elif char == "<":
+            depth -= 1
+            if depth == 0:
+                owner = text[:index].rstrip()
+                return bool(owner) and (owner[-1].isalnum() or owner[-1] in "_:")
+            if depth < 0:
+                return False
+    return False
+
+
+def _has_rejected_prefix_tail(prefix: str) -> bool:
+    if not prefix or prefix[-1] not in REJECT_PREFIX_TAIL:
+        return False
+    if prefix.endswith("::"):
+        return False  # C++ out-of-class member definition: `Result<T> Type::Method`
+    return not (prefix[-1] == ">" and _ends_with_template_type(prefix))
+
+
+def _return_type_from_prefix(prefix: str) -> str:
+    """Remove a C++ declarator's trailing namespace/class qualification."""
+    without_scope = re.sub(r"(?:[A-Za-z_]\w*::)+\s*$", "", prefix)
+    return " ".join(without_scope.split())
+
+
 # 함수를 매크로로 감싸 선언·정의하는 라이브러리가 있다. libpng 이 대표적이다.
 #
 #   PNG_FUNCTION(png_structp, PNGAPI
@@ -460,6 +522,18 @@ def find_functions(masked: str) -> List[dict]:
             if not qualifier:
                 break
             pos = _skip_ws(masked, qualifier.end())
+        trailing_return = ""
+        if masked.startswith("->", pos):
+            # C++ trailing return type: `auto f() noexcept -> score::Result<T> {`.
+            # S-CORE uses this form heavily.  The previous scanner required `{`
+            # immediately after qualifiers and silently dropped these functions.
+            return_start = _skip_ws(masked, pos + 2)
+            body_open = masked.find("{", return_start)
+            declaration_end = masked.find(";", return_start)
+            if body_open == -1 or (declaration_end != -1 and declaration_end < body_open):
+                continue
+            trailing_return = " ".join(masked[return_start:body_open].split())
+            pos = body_open
         if pos >= len(masked) or masked[pos] != "{":
             continue
 
@@ -473,7 +547,7 @@ def find_functions(masked: str) -> List[dict]:
         # 정확히 그렇게 사라졌다.
         entry_name, entry_name_start = name, match.start()
         entry_params = (paren_open + 1, paren_close)
-        entry_return = " ".join(prefix.split())
+        entry_return = trailing_return or _return_type_from_prefix(prefix)
         macro_wrapped = False
         if _MACRO_NAME_RE.match(name):
             inner = destructure_macro_declaration(
@@ -487,12 +561,12 @@ def find_functions(masked: str) -> List[dict]:
                 entry_return = inner["return_type"] or entry_return
 
         if not macro_wrapped:
-            if not prefix or prefix[-1] in REJECT_PREFIX_TAIL:
+            if not prefix or _has_rejected_prefix_tail(prefix):
                 continue
             prefix_tokens = re.findall(r"[A-Za-z_]\w*", prefix)
             if not prefix_tokens or prefix_tokens[-1] in CONTROL_KEYWORDS:
                 continue
-        elif prefix and prefix[-1] in REJECT_PREFIX_TAIL:
+        elif prefix and _has_rejected_prefix_tail(prefix):
             continue  # 매크로라도 호출식 한가운데면 정의가 아니다
 
         body_end = match_delim(masked, pos, "{", "}")
@@ -571,6 +645,7 @@ def _classify_branch(masked: str, close_pos: int) -> str:
     segment = _branch_segment(masked, close_pos)
     if (
         ERROR_RETURN_RE.search(segment)
+        or RESULT_ERROR_RETURN_RE.search(segment)
         or ERROR_GOTO_RE.search(segment)
         or FATAL_CALL_RE.search(segment)
     ):
@@ -840,6 +915,60 @@ def _return_constraints(masked: str, original: str, body_span, return_type: str,
     return constraints
 
 
+def _first_argument(arguments: str) -> str:
+    """Return the first top-level constructor/call argument."""
+    parts = split_top_level(arguments)
+    return parts[0].strip() if parts else arguments.strip()
+
+
+def _score_result_error(expression: str) -> Optional[str]:
+    """Extract the error payload from a score::Result failure expression."""
+    for pattern in (MAKE_UNEXPECTED_RE, UNEXPECTED_VALUE_RE, RESULT_UNEXPECT_RE):
+        match = pattern.fullmatch(expression.strip())
+        if match:
+            return _first_argument(match.group(1))
+    return None
+
+
+def _score_result_constraints(masked: str, original: str, body_span,
+                              return_type: str, index: LineIndex) -> List[Constraint]:
+    """Extract explicit error alternatives returned by ``score::Result`` APIs.
+
+    Supported S-CORE idioms are ``MakeUnexpected(error, message)``,
+    ``Unexpected{error}``, and ``Result<T>{score::unexpect, error}``.  Propagated
+    ``child.error()`` values are retained as contracts as well because a harness
+    must still exercise and check the failure alternative.
+    """
+    if not SCORE_RESULT_TYPE_RE.search(return_type):
+        return []
+
+    constraints: List[Constraint] = []
+    start, end = body_span
+    for match in RETURN_RE.finditer(masked, start, end):
+        value = match.group(1).strip()
+        error = _score_result_error(value)
+        if error is None:
+            continue
+        propagated = ".error(" in error or ".error (" in error
+        constraints.append(
+            Constraint(
+                kind="error_contract",
+                target="return",
+                expression=_snippet(original, match.start(), match.end()),
+                description=(
+                    f"score::Result propagates error `{error}`; callers must check "
+                    "has_value() before accessing value()"
+                    if propagated else
+                    f"score::Result may fail with `{error}`; callers must check "
+                    "has_value() before accessing value()"
+                ),
+                line=index.line_of(match.start()),
+                confidence=0.9 if propagated else 0.95,
+            )
+        )
+    return constraints
+
+
 DOC_OBLIGATION_RE = re.compile(
     r"(?i)(must|must not|shall|should|non-?null|nonnull|not\s+be\s+null|caller|ownership|"
     r"free|thread-?safe|반드시|해야|널|NULL|해제|호출자)"
@@ -940,6 +1069,9 @@ def extract_from_text(text: str, path: str = "<memory>") -> List[FunctionFacts]:
         constraints.extend(_risky_call_constraints(calls, line))
         constraints.extend(
             _return_constraints(masked, text, body_span, info["return_type"], index)
+        )
+        constraints.extend(
+            _score_result_constraints(masked, text, body_span, info["return_type"], index)
         )
 
         doc = extract_doc_comment(text, info["decl_start"])

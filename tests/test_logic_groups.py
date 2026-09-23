@@ -206,6 +206,47 @@ def test_apis_sharing_a_handle_are_grouped(kb):
     assert "uds_ctx_t" in uds.state_types
 
 
+def test_build_unit_is_a_hard_boundary_even_for_shared_state_type(kb):
+    kb.api("uds_session_start")["build_target"] = "//uds:session"
+    kb.api("uds_read_did")["build_target"] = "//uds:reader"
+    kb.api("uds_close")["build_target"] = "//uds:reader"
+
+    groups = extract_groups(kb, link_calls=False)
+
+    assert _group_of(groups, "uds_session_start") is not _group_of(groups, "uds_read_did")
+    assert _group_of(groups, "uds_session_start").build_units == ["//uds:session"]
+    assert _group_of(groups, "uds_read_did").build_units == ["//uds:reader"]
+
+
+def test_stateless_apis_in_different_files_share_one_build_unit(tmp_path):
+    (tmp_path / "a.c").write_text("int alpha(void) { return 1; }", encoding="utf-8")
+    (tmp_path / "b.c").write_text("int beta(void) { return 2; }", encoding="utf-8")
+    local_kb = KnowledgeBase.build(paths=[str(tmp_path)])
+    for document in local_kb.documents:
+        document["build_target"] = "//tools:helpers"
+
+    group = extract_groups(local_kb, link_calls=False)[0]
+
+    assert set(group.api_names) == {"alpha", "beta"}
+    assert group.basis == "build_unit"
+    assert group.name == "//tools:helpers"
+
+
+def test_call_edges_do_not_cross_build_unit_boundary(tmp_path):
+    (tmp_path / "both.c").write_text(
+        "int callee(void) { return 1; }\n"
+        "int caller(void) { return callee(); }\n",
+        encoding="utf-8",
+    )
+    local_kb = KnowledgeBase.build(paths=[str(tmp_path)])
+    local_kb.api("caller")["build_target"] = "//app:caller"
+    local_kb.api("callee")["build_target"] = "//lib:callee"
+
+    groups = extract_groups(local_kb, link_calls=True)
+
+    assert _group_of(groups, "caller") is not _group_of(groups, "callee")
+
+
 def test_unrelated_modules_are_separate_groups(kb):
     groups = extract_groups(kb, link_calls=False)
 
@@ -365,6 +406,19 @@ def test_save_and_load_roundtrip(kb, tmp_path):
     assert [len(g.realtime_signals) for g in restored] == \
         [len(g.realtime_signals) for g in groups]
     assert stats(restored) == stats(groups)
+
+
+def test_save_and_load_preserves_build_units(kb, tmp_path):
+    for document in kb.documents:
+        document["build_target"] = "//sample:all"
+    groups = build_groups(kb)
+    path = tmp_path / "groups-with-build-unit.json"
+
+    save_groups(groups, str(path))
+    restored = load_groups(str(path))
+
+    assert {unit for group in restored for unit in group.build_units} == {"//sample:all"}
+    assert stats(restored)["build_units"] == ["//sample:all"]
 
 
 def test_saved_file_keeps_korean_and_is_json(kb, tmp_path):

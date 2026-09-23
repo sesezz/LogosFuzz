@@ -7,7 +7,11 @@ EXE-04-03 (타임아웃 산정) 의 공통 작업 단위가 된다.
 
 무엇을 "같은 상태"로 보는가
 ---------------------------
-1순위는 **핸들 타입 공유**다. `uds_open(uds_ctx_t *ctx, ...)` 와
+가장 바깥 경계는 **빌드 단위(Bazel target)** 다. 서로 다른 빌드 타깃의 API는
+같은 타입을 쓰거나 서로 호출하더라도 하나의 퍼징 단위로 합치지 않는다. 빌드
+메타데이터가 없는 기존 KB에서는 소스 파일을 호환 경계로 사용한다.
+
+경계 안의 1순위 기준은 **핸들 타입 공유**다. `uds_open(uds_ctx_t *ctx, ...)` 와
 `uds_read_did(uds_ctx_t *ctx, ...)` 처럼 같은 컨텍스트 구조체를 포인터로
 주고받는 API 들은 같은 상태 머신에 속한다고 본다.
 
@@ -16,7 +20,8 @@ EXE-04-03 (타임아웃 산정) 의 공통 작업 단위가 된다.
 그룹이 의미를 잃는다. 지식베이스가 타입 정의 위치를 알고 있으므로
 (`kb.defines_type`) 프로젝트 내부에서 정의된 타입인지 확인할 수 있다.
 
-핸들 타입이 없는 API 는 호출 관계로 잇고, 그것도 없으면 같은 파일끼리 묶는다.
+핸들 타입이 없는 API 는 같은 빌드 단위 안의 호출 관계로 잇고, 그것도 없으면
+같은 빌드 단위끼리 묶는다.
 
 실시간 신호 결합
 ----------------
@@ -219,6 +224,7 @@ class GroupInfo:
     api_names: List[str] = field(default_factory=list)
     state_types: List[str] = field(default_factory=list)
     files: List[str] = field(default_factory=list)
+    build_units: List[str] = field(default_factory=list)
     basis: str = "file"
     priority: float = 0.0
     realtime_signals: List[RealtimeSignal] = field(default_factory=list)
@@ -231,6 +237,7 @@ class GroupInfo:
             "api_names": self.api_names,
             "state_types": self.state_types,
             "files": self.files,
+            "build_units": self.build_units,
             "basis": self.basis,
             "priority": self.priority,
             "realtime_signals": [
@@ -256,6 +263,17 @@ MIN_APIS_FOR_RATIO = 20
 # 32는 하네스 하나가 다루기 현실적인 API 수의 상한으로 잡은 값이고, CLI
 # `--max-call-group` 으로 조정할 수 있다.
 MAX_CALL_LINK_GROUP = 32
+
+
+def _build_unit_boundary(document: dict) -> str:
+    """Return the hard grouping boundary for one API document."""
+    return str(document.get("build_target") or document.get("file") or "unknown")
+
+
+def _group_slug(label: str) -> str:
+    """Turn a state type, target label, or file stem into a stable group id."""
+    slug = re.sub(r"[^A-Za-z0-9_]+", "_", label.strip().lstrip("/"))
+    return slug.strip("_") or "unknown"
 
 
 def generic_types(owners_by_type: Dict[str, List[int]], total_apis: int,
@@ -293,7 +311,7 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
     name_to_id = {d["function"]: d["api_id"] for d in documents}
     union = _UnionFind(by_id)
 
-    # 1) 핸들 타입 공유
+    # 1) 같은 빌드 단위 안에서 핸들 타입 공유
     types_by_api: Dict[int, List[str]] = {}
     owners_by_type: Dict[str, List[int]] = {}
     for document in documents:
@@ -312,9 +330,15 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
         }
 
     for owners in owners_by_type.values():
-        first = owners[0]
-        for other in owners[1:]:
-            union.union(first, other)
+        owners_by_boundary: Dict[str, List[int]] = {}
+        for api_id in owners:
+            owners_by_boundary.setdefault(
+                _build_unit_boundary(by_id[api_id]), []
+            ).append(api_id)
+        for bounded_owners in owners_by_boundary.values():
+            first = bounded_owners[0]
+            for other in bounded_owners[1:]:
+                union.union(first, other)
 
     # 2) 호출 관계 (핸들 타입이 없는 API 를 흡수)
     #
@@ -342,6 +366,8 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
                 callee_id = name_to_id.get(callee)
                 if callee_id is None:
                     continue
+                if _build_unit_boundary(document) != _build_unit_boundary(by_id[callee_id]):
+                    continue  # 빌드/링크 경계를 넘는 하네스 그룹은 만들지 않는다
                 caller_root, callee_root = union.find(caller_id), union.find(callee_id)
                 if caller_root == callee_root:
                     continue
@@ -353,15 +379,16 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
                 merged = root_types.pop(caller_root, set()) | root_types.pop(callee_root, set())
                 root_types[union.find(caller_id)] = merged
 
-    # 3) 남은 단독 API 는 같은 파일끼리
+    # 3) 남은 단독 API 는 같은 빌드 단위끼리. 빌드 메타데이터가 없는 KB만
+    #    소스 파일이 경계가 된다.
     clusters = union.groups()
-    singleton_by_file: Dict[str, int] = {}
+    singleton_by_boundary: Dict[str, int] = {}
     for root, members in list(clusters.items()):
         if len(members) > 1:
             continue
         only = members[0]
-        file_path = by_id[only]["file"]
-        anchor = singleton_by_file.setdefault(file_path, only)
+        boundary = _build_unit_boundary(by_id[only])
+        anchor = singleton_by_boundary.setdefault(boundary, only)
         if anchor != only:
             union.union(anchor, only)
 
@@ -377,8 +404,11 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
         state_types = sorted(type_counts, key=lambda t: (-type_counts[t], t))
 
         files = sorted({d["file"] for d in docs})
+        build_units = sorted({d.get("build_target", "") for d in docs if d.get("build_target")})
         if state_types:
             label, basis = state_types[0], "state_type"
+        elif len(build_units) == 1:
+            label, basis = build_units[0], "build_unit"
         elif len(files) == 1:
             label, basis = Path(files[0]).stem, "file"
         else:
@@ -386,12 +416,13 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
 
         groups.append(
             GroupInfo(
-                group_id=f"lg_{label}",
+                group_id=f"lg_{_group_slug(label)}",
                 name=label,
                 api_ids=member_ids,
                 api_names=[d["function"] for d in docs],
                 state_types=state_types,
                 files=files,
+                build_units=build_units,
                 basis=basis,
             )
         )
@@ -529,6 +560,7 @@ def load_groups(path: str) -> List[GroupInfo]:
                 api_names=entry["api_names"],
                 state_types=entry["state_types"],
                 files=entry["files"],
+                build_units=entry.get("build_units", []),
                 basis=entry["basis"],
                 priority=entry.get("priority", 0.0),
                 realtime_signals=[
@@ -552,6 +584,7 @@ def stats(groups: Sequence[GroupInfo]) -> dict:
         "by_basis": dict(sorted(by_basis.items())),
         "groups_with_realtime_signal": sum(1 for g in groups if g.realtime_signals),
         "state_types": sorted({t for g in groups for t in g.state_types}),
+        "build_units": sorted({u for g in groups for u in g.build_units}),
     }
 
 
