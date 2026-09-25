@@ -40,6 +40,17 @@ from logosfuzz.knowledge.knowledge_base import HEADER_SUFFIXES, KnowledgeBase
 _DOC_KINDS = {"doc"}
 
 
+def _build_unit_ref(document: dict) -> str:
+    """Return the scheduler boundary for an API.
+
+    Bazel ownership is the authoritative boundary when it is available.  Older
+    knowledge bases do not carry build metadata, so retaining the source file as
+    a fallback keeps their grouping behaviour deterministic and backwards
+    compatible.
+    """
+    return str(document.get("build_target") or document.get("file") or "unknown")
+
+
 def default_source_type(constraint: dict, document: dict) -> str:
     """제약조건의 출처를 나타내는 문자열.
 
@@ -49,7 +60,8 @@ def default_source_type(constraint: dict, document: dict) -> str:
     """
     import os
 
-    module = os.path.basename(document.get("file", "")) or "unknown"
+    module = document.get("build_target") or os.path.basename(document.get("file", ""))
+    module = module or "unknown"
     origin = "DOC" if constraint.get("kind") in _DOC_KINDS else "CODE"
     return f"{origin}:{module}"
 
@@ -77,7 +89,10 @@ def to_synergy_inputs(
                 api_id=document["api_id"],
                 func_signature=document["signature"],
                 call_seq=[str(i) for i in document.get("call_seq_ids", [])],
-                dep_graph_ref=document["file"],
+                # `dep_graph_ref` is the only build/dependency boundary field in
+                # B's existing data model.  Point it at the owning build unit;
+                # legacy KBs still fall back to the source path.
+                dep_graph_ref=_build_unit_ref(document),
             )
         )
         for constraint in document["constraints"]:
@@ -133,6 +148,88 @@ def call_sequences_by_file(kb: KnowledgeBase) -> Dict[str, List[str]]:
     return sequences
 
 
+def build_unit_metadata(kb: KnowledgeBase) -> List[dict]:
+    """Expose normalized build-unit records to scheduler/generator consumers.
+
+    Week 2 stores Bazel rules at ``kb.build_units`` and repeats ownership on each
+    API document.  This adapter joins both views and adds the APIs owned by each
+    unit, so downstream parts do not need to know the KB's internal schema.
+    """
+    units: Dict[str, dict] = {}
+    for raw in kb.build_units:
+        target = str(raw.get("target") or raw.get("build_target") or "")
+        if not target:
+            continue
+        units[target] = {
+            "build_system": str(raw.get("build_system", "")),
+            "build_target": target,
+            "build_rule_kind": str(raw.get("rule_kind") or raw.get("build_rule_kind") or ""),
+            "build_deps": list(raw.get("deps") or raw.get("build_deps") or []),
+            "sources": list(raw.get("sources") or []),
+            "headers": list(raw.get("headers") or []),
+            "include_dirs": list(raw.get("include_dirs") or []),
+            "compile_flags": list(raw.get("compile_flags") or []),
+            "build_file": str(raw.get("build_file", "")),
+            "api_ids": [],
+            "api_names": [],
+        }
+
+    for document in sorted(kb.documents, key=lambda d: d["api_id"]):
+        target = str(document.get("build_target") or "")
+        if not target:
+            continue
+        unit = units.setdefault(
+            target,
+            {
+                "build_system": str(document.get("build_system", "")),
+                "build_target": target,
+                "build_rule_kind": str(document.get("build_rule_kind", "")),
+                "build_deps": list(document.get("build_deps") or []),
+                "sources": [],
+                "headers": [],
+                "include_dirs": [],
+                "compile_flags": list(document.get("compile_flags") or []),
+                "build_file": "",
+                "api_ids": [],
+                "api_names": [],
+            },
+        )
+        unit["api_ids"].append(document["api_id"])
+        unit["api_names"].append(document["function"])
+
+    return [units[target] for target in sorted(units)]
+
+
+def build_unit_for_api(kb: KnowledgeBase, target) -> Optional[dict]:
+    """Return the normalized build unit owning an API id/name."""
+    document = kb.api(target)
+    if document is None or not document.get("build_target"):
+        return None
+    wanted = document["build_target"]
+    return next(
+        (unit for unit in build_unit_metadata(kb) if unit["build_target"] == wanted),
+        None,
+    )
+
+
+def call_sequences_by_build_unit(kb: KnowledgeBase) -> Dict[str, List[str]]:
+    """Return observed internal call order grouped by build-unit boundary.
+
+    Source-file fallback is deliberate for KB v1/legacy inputs that have no
+    Bazel ownership attached.
+    """
+    sequences: Dict[str, List[str]] = {}
+    for document in sorted(
+        kb.documents,
+        key=lambda d: (_build_unit_ref(d), d["file"], d["line"]),
+    ):
+        if document["calls_internal"]:
+            sequences.setdefault(_build_unit_ref(document), []).extend(
+                document["calls_internal"]
+            )
+    return sequences
+
+
 # ---------------------------------------------------------------------------
 # B (GEN-03-01 하네스 초안 생성) 지원
 # ---------------------------------------------------------------------------
@@ -156,6 +253,18 @@ def harness_context(kb: KnowledgeBase, target: str, max_constraints: int = 12) -
         f"defined in: {document['file']}:{document['line']}",
         f"signature: {document['signature']}",
     ]
+    if document.get("build_target"):
+        lines.append(f"build unit: {document['build_target']}")
+        if document.get("build_system") or document.get("build_rule_kind"):
+            details = "/".join(
+                value for value in (
+                    document.get("build_system", ""),
+                    document.get("build_rule_kind", ""),
+                ) if value
+            )
+            lines.append(f"build rule: {details}")
+        if document.get("build_deps"):
+            lines.append("build deps: " + " ".join(document["build_deps"]))
     if document.get("header"):
         # 헤더 이름만 쓰고 디렉터리는 -I 로 넘긴다. `#include "..."` 는 그 문을
         # 포함한 파일 기준으로 해석되므로, 저장소 기준 전체 경로를 넣으면
@@ -371,6 +480,10 @@ def api_reference(kb: KnowledgeBase, name: str) -> Optional[dict]:
         "file": document["file"],
         "line": document["line"],
         "header": document.get("header"),
+        "build_system": document.get("build_system", ""),
+        "build_target": document.get("build_target", ""),
+        "build_rule_kind": document.get("build_rule_kind", ""),
+        "build_deps": list(document.get("build_deps") or []),
         "constraint_count": len(document["constraints"]),
     }
 

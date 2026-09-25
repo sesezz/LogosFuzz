@@ -1,0 +1,9 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+# 정상 상태. 파손 변형은 breaks/<case>/ 아래에 같은 경로로 들어 있고,
+# scripts/collect_selfheal_corpus.sh 가 워크스페이스 위에 덮어써서 빌드한다.
+cc_binary(
+    name = "json_fuzzer",
+    srcs = ["json_fuzzer.cc"],
+    deps = ["//score/json"],
+)

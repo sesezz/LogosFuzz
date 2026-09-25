@@ -53,11 +53,59 @@ _INSTRUMENTATION_FLAGS = {
 def instrumentation_flags(mode: CoverageMode) -> tuple[str, ...]:
     """지정한 커버리지 모드에 필요한 clang 컴파일 플래그를 돌려준다.
 
-    GEN 단계/빌드 스크립트가 하네스를 이 플래그로 빌드해야 실행 시 커버리지가
-    수집된다. 계측되지 않은 바이너리는 ``*.profraw`` 를 생성하지 않으므로
+    빌드 시스템이 Bazel이 아닌 경로(CMake 대상, SubprocessCompiler의 빠른
+    컴파일 검증)에서 쓴다. Bazel 경로는 플래그를 직접 넘기지 않고
+    :func:`bazel_coverage_configs` 가 돌려주는 config를 쓴다.
+
+    계측되지 않은 바이너리는 ``*.profraw`` 를 생성하지 않으므로
     :meth:`CoverageCollector.collect` 가 ``None`` 을 반환한다.
     """
     return _INSTRUMENTATION_FLAGS.get(CoverageMode(mode), ())
+
+
+# ---------------------------------------------------------------------------
+# Bazel 경로의 계측 수급 (EXE-04-04, 3주차)
+# ---------------------------------------------------------------------------
+#
+# Bazel 빌드에서는 위의 개별 컴파일 플래그를 쓰지 않는다. 플래그를 직접
+# 넘기면 hermetic 툴체인이 정한 설정과 이중으로 걸려, 어느 쪽이 실제로
+# 적용됐는지 알 수 없게 된다. 대신 대상 저장소가 제공하는 config를 쓴다.
+#
+# baselibs는 커버리지 설정을 tools/coverage/coverage.bazelrc 에 두고
+# .bazelrc에서 import 한다. 그 파일이 제공하는 config 이름이 llvm_cov 다.
+_BAZEL_COVERAGE_CONFIGS = {
+    CoverageMode.LLVM_COV: ("llvm_cov",),
+    # SanitizerCoverage(엣지 계측)는 퍼징 config가 이미 켜 준다.
+    # rules_fuzzing의 cc_engine_instrumentation=libfuzzer 가 전이(transition)로
+    # 의존 클로저 전체에 sancov를 건다. 따로 붙일 config가 없다.
+    CoverageMode.SANITIZER_COV: (),
+    CoverageMode.NONE: (),
+}
+
+
+def bazel_coverage_configs(mode: CoverageMode) -> tuple[str, ...]:
+    """Bazel 빌드에 붙일 커버리지 config 이름을 돌려준다.
+
+    반환값은 ``--config=<이름>`` 으로 빌드 커맨드에 붙일 것들이다.
+
+    .. warning::
+       **아직 실제로 조합해 본 적이 없다.** 퍼징 빌드는 ``--config=fuzz`` 를
+       쓰는데, 거기에 이 config를 더했을 때 툴체인이 어떻게 해소되는지
+       확인되지 않았다.
+
+       근거 있는 우려다. baselibs의 coverage.bazelrc 는 바로 그
+       "GCC 툴체인이 이 파일의 플래그 뒤에 등록되면 마지막
+       ``--extra_toolchains`` 가 이긴다" 는 경고를 담고 있는 파일이고,
+       ``--config=fuzz`` 가 clang을 등록하는 방식이 정확히 그
+       ``--extra_toolchains`` 다. 순서에 따라 clang이 밀려나면 퍼징 빌드 자체가
+       -fsanitize=fuzzer 링크에서 죽는다.
+
+       Bazel과 baselibs가 있는 환경에서 아래를 먼저 확인해야 한다:
+           bazel build --config=fuzz --config=llvm_cov //<대상>:<이름>_bin
+       실패하면 선택지는 두 가지다 - 커버리지 측정을 별도 빌드로 분리하거나,
+       오버레이에 fuzz+coverage 겸용 config를 새로 정의하는 것.
+    """
+    return _BAZEL_COVERAGE_CONFIGS.get(CoverageMode(mode), ())
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +259,39 @@ def _default_runner(argv: list) -> CmdResult:
 
 
 # ---------------------------------------------------------------------------
+# 하네스 바이너리 위치 (EXE-04-01 Bazel 전환 대응)
+# ---------------------------------------------------------------------------
+#
+# llvm-cov export는 profdata 말고도 **계측된 바이너리 자체**를 심볼 소스로
+# 읽어야 한다. GEN이 Bazel 어댑터로 넘어가면 그 바이너리는 harness_dir이
+# 아니라 워크스페이스의 bazel-bin 출력 트리에 생긴다.
+#
+# 처음에는 Bazel 라벨에서 `bazel-bin/<패키지>/<타깃>` 경로를 직접 조립했는데,
+# GEN 파트가 실측으로 그게 틀렸다는 걸 확인해 줬다:
+#   - 실제 실행 대상은 `<name>` 이 아니라 `<name>_bin`(계측된 퍼저 바이너리)
+#   - `bazel-bin` 은 **직전 빌드 설정**을 가리키는 편의 심링크라, 다른 config
+#     로 빌드가 한 번만 돌아도(회귀 게이트 --config=bl-x86_64-linux 등)
+#     경로가 무효가 된다. 퍼징 config는 --platform_suffix로 출력 트리를
+#     분리해 두기까지 해서 더 잘 어긋난다.
+#
+# 그래서 경로를 조립하지 않는다. 빌드 어댑터가 cquery로 질의해 돌려준 실제
+# 경로를 LogicGroup.harness_path에 담아 넘기고, 여기서는 그걸 그대로 쓴다.
+# docker_runner.harness_binary_path()와 같은 규칙이다.
+
+
+def harness_binary_path(group: LogicGroup, cfg: FuzzConfig) -> Path:
+    """하네스 바이너리의 호스트 경로.
+
+    ``harness_path``에 디렉토리가 붙어 있으면 그 경로를 그대로 쓰고,
+    이름만 있으면 지금까지처럼 ``harness_dir`` 기준으로 푼다.
+    """
+    p = Path(group.harness_path)
+    if p.parent != Path("."):
+        return p.resolve()
+    return (cfg.harness_dir / p.name).resolve()
+
+
+# ---------------------------------------------------------------------------
 # 커버리지 수집 오케스트레이터
 # ---------------------------------------------------------------------------
 
@@ -243,6 +324,10 @@ class CoverageCollector:
     def has_profraw(self, group: LogicGroup) -> bool:
         return bool(glob.glob(str(self.profraw_dir(group) / "*.profraw")))
 
+    def _harness_binary_host_path(self, group: LogicGroup) -> Path:
+        """llvm-cov export가 심볼 소스로 읽을 바이너리의 호스트 경로."""
+        return harness_binary_path(group, self.cfg)
+
     # ---- 컨테이너 내부에서 도구를 돌릴지 여부 ------------------------
     def _in_docker(self) -> bool:
         return self.use_docker and self.cfg.coverage_in_docker
@@ -265,7 +350,16 @@ class CoverageCollector:
                 "-o", str(self.profdata_path(group))]
 
     def build_export_argv(self, group: LogicGroup) -> list:
-        """``llvm-cov export`` argv. profdata + 하네스 바이너리로 커버리지 JSON 생성."""
+        """``llvm-cov export`` argv. profdata + 하네스 바이너리로 커버리지 JSON 생성.
+
+        컨테이너 내부 경로(``/harness/...``)는 아직 harness_dir 마운트
+        규약(``docker_runner.py``가 ``-v harness_dir:/harness:ro``로 붙이는
+        것) 그대로 둔다. 컨테이너 안에서 Bazel이 만든 바이너리를 직접 실행하는
+        전환(같은 1주차 항목인 "docker_runner.py를 바이너리 직접 실행으로")이
+        아직 끝나지 않아, 그 전까지는 컨테이너 쪽 마운트/경로 규약이 확정되지
+        않았기 때문이다. 호스트(비-Docker) 경로만 bazel-bin을 인식하도록
+        먼저 연결해둔다.
+        """
         sources = list(self.cfg.coverage_sources)
         if self._in_docker():
             g = group.name
@@ -277,7 +371,7 @@ class CoverageCollector:
             ]
             parts += [shlex.quote(s) for s in sources]
             return self._docker_prefix() + ["bash", "-lc", " ".join(parts)]
-        harness = str((self.cfg.harness_dir / group.harness_path.name).resolve())
+        harness = str(self._harness_binary_host_path(group))
         argv = [self.cfg.llvm_cov, "export", "-format=text",
                 f"-instr-profile={self.profdata_path(group)}", harness]
         argv += sources

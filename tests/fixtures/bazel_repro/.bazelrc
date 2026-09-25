@@ -1,0 +1,37 @@
+# C(임세은) 1주차가 docker 이미지에 넣을 --config=asan_ubsan_lsan 의 최소 재현.
+#
+# LSan 은 리눅스에서 ASan 에 포함되어 있고 detect_leaks=1 이 기본이라 별도 플래그가
+# 없다 — 이름에 lsan 이 들어가지만 실제로 붙는 건 address,undefined 둘이다.
+
+build --repo_env=CC=clang
+build --repo_env=CXX=clang++
+build --cxxopt=-std=c++17
+
+# 실패해도 나머지 타깃을 계속 빌드해 에러를 한 번에 다 모은다.
+build --keep_going
+
+common --enable_bzlmod
+
+# libFuzzer 진입점(main) 제공 — rules_fuzzing 의 cc_fuzz_test 가 해 주는 일을
+# 최소로 흉내낸다. 하네스에는 LLVMFuzzerTestOneInput 만 있고 main 이 없으므로
+# 이 설정 없이 cc_binary 를 링크하면 `undefined symbol: main` 으로 죽는다.
+# Bazel 파손 에러 수집은 sanitizer 가 필요 없으므로 이 설정만 쓴다(빠르다).
+build:fuzzer --copt=-fsanitize=fuzzer-no-link
+build:fuzzer --linkopt=-fsanitize=fuzzer
+
+build:asan_ubsan_lsan --config=fuzzer
+build:asan_ubsan_lsan --copt=-fsanitize=address,undefined
+build:asan_ubsan_lsan --copt=-fno-omit-frame-pointer
+build:asan_ubsan_lsan --copt=-g
+build:asan_ubsan_lsan --copt=-O1
+build:asan_ubsan_lsan --linkopt=-fsanitize=address,undefined
+build:asan_ubsan_lsan --strip=never
+
+# 같은 설정에서 UBSan 만 '치명적'으로 바꾼 변형.
+#
+# 왜 따로 두나 — 기본 UBSan 은 **복구 가능(recoverable)** 이라 진단을 한 줄 찍고
+# 그냥 실행을 계속한다. libFuzzer 는 프로세스가 죽어야 크래시로 기록하므로, 이
+# 플래그가 없으면 UB 를 찾아놓고도 크래시 아티팩트가 안 생긴다. 1주차 수집에서
+# 두 형태를 모두 남기는 이유다(docs/GEN-03-02-ERROR-CORPUS.md 참고).
+build:asan_ubsan_lsan_halt --config=asan_ubsan_lsan
+build:asan_ubsan_lsan_halt --copt=-fno-sanitize-recover=undefined

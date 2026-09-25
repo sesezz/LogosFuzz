@@ -1,0 +1,56 @@
+# GEN-03-02 자가치유 에러 코퍼스 수집/재현 이미지 (D 파트 1주차)
+# ==============================================================
+#
+# docker/Dockerfile(EXE-04-01 퍼징 실행 이미지)과는 **별개**다. 저건 하네스를
+# 격리 실행하는 이미지고, 이건 Bazel 을 고의로 파손해 에러 원문을 뽑는 이미지다.
+# C(임세은) 1주차가 docker/Dockerfile 을 bazelisk 툴체인으로 갈아엎으면 그때
+# 이 파일은 지우고 그쪽으로 합치면 된다.
+#
+# 베이스를 ubuntu:24.04 로 고정한 이유 — 코퍼스를 clang 18.1.3 / Ubuntu 24.04
+# 에서 수집했다. sanitizer 진단 문구는 clang 메이저 버전마다 바뀌므로, 같은
+# 출력을 재현하려면 같은 조합이어야 한다.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Asia/Seoul
+
+#   libclang-rt-18-dev 가 없으면 컴파일은 되는데 **링크에서** 죽는다:
+#     ld.lld: error: cannot open .../libclang_rt.fuzzer-x86_64.a: No such file or directory
+#     ld.lld: error: cannot open .../libclang_rt.ubsan_standalone-x86_64.a: No such file or directory
+#   clang 메타패키지는 compiler-rt 런타임 아카이브를 끌어오지 않는다. -fsanitize=
+#   fuzzer / address / undefined 를 쓰려면 반드시 따로 넣어야 한다.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        clang \
+        llvm \
+        lld \
+        libclang-rt-18-dev \
+        python3 \
+        curl \
+        ca-certificates \
+        git \
+        zip \
+        unzip \
+        file \
+    && rm -rf /var/lib/apt/lists/*
+
+# bazelisk: .bazelversion 에 적힌 Bazel 을 받아 실행한다(재현 워크스페이스는 9.2.0 고정).
+ARG BAZELISK_VERSION=v1.25.0
+RUN curl -fsSL -o /usr/local/bin/bazel \
+        "https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-amd64" \
+    && chmod +x /usr/local/bin/bazel
+
+# 수집 결과는 /repo(rw 마운트)에, Bazel 빌드는 컨테이너 내부 네이티브 FS 에서 한다.
+# 빌드를 마운트된 볼륨에서 돌리면 느리고 심볼릭 링크가 깨진다.
+ENV SCRATCH=/scratch
+RUN mkdir -p /scratch /repo
+WORKDIR /repo
+
+# 사용법:
+#   docker build -f docker/Dockerfile.selfheal -t logosfuzz-selfheal .
+#   docker run --rm -v "$PWD":/repo logosfuzz-selfheal
+#
+# 컨테이너 안에서 Bazel 의 linux-sandbox 가 막히면(권한 부족) Bazel 이 알아서
+# processwrapper-sandbox 로 내려간다. 에러 '문장'은 그대로지만 샌드박스 안내
+# 한 줄이 달라질 수 있어, 완전히 같은 바이트를 원하면 다음을 붙인다:
+#   docker run --rm --privileged -v "$PWD":/repo logosfuzz-selfheal
+CMD ["bash", "scripts/collect_selfheal_corpus.sh", "--out-root", "/repo", "--scratch", "/scratch"]

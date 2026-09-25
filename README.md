@@ -6,7 +6,7 @@
 
 ```
 logosfuzz/
-  extract/      EXT-01 : 소스/컴파일 DB 파싱, AST·제약조건 추출
+  extract/      EXT-01 : Bazel 그래프, C/C++ AST·제약조건 추출
   knowledge/    EXT-01-04 : 통합 지식베이스 + RAG 색인/검색, KB 어댑터·평가
   schedule/     SCH-02 : Logic Group 추출, 시너지 우선순위, 자원 할당
   generate/     GEN-03 : 하네스 생성·컴파일 자가치유·검증, Mock 주입
@@ -36,14 +36,36 @@ S-CORE 는 Bazel 로 빌드하며 strict deps·visibility 를 강제한다. 이 
 | 모듈 | 대체 |
 | --- | --- |
 | `logosfuzz/extract/bear_integration.py` | 없음 (Bazel 이 빌드를 소유) |
-| `logosfuzz/extract/compile_commands.py` | 2주차 `extract/bazel_query.py` |
-| `logosfuzz/extract/compile_db_analyzer.py` | 2주차 `extract/bazel_query.py` |
+| `logosfuzz/extract/compile_commands.py` | `extract/bazel_query.py` |
+| `logosfuzz/extract/compile_db_analyzer.py` | `extract/bazel_query.py` |
 | `examples/run_bear_example.py` | 없음 |
 
 `KnowledgeBase.build()` / `rag_constraints.build_kb()` / `kb_eval.evaluate()` /
-`logic_groups` 의 `--compile-db` 옵션도 함께 없앴다. `FileInfo.flags` 와 문서의
-`compile_flags` 필드는 **남겨 뒀다** — 2주차에 Bazel 타깃에서 받은 값으로 채우기
-위해서다. 그때까지는 빈 리스트로 나간다.
+`logic_groups` 의 `--compile-db` 옵션도 함께 없앴다. 이제
+`logosfuzz.extract.bazel_query`가 Bazel 타깃의 deps·include·copts를 추출하고,
+`KnowledgeBase.build()`가 파일/API별 `build_system`, `build_target`, `build_deps`,
+`compile_flags`와 최상위 `build_units` 스키마에 기록한다.
+
+```bash
+# Bazel 타깃 의존 그래프(JSON)
+python -m logosfuzz.extract.bazel_query \
+  --workspace third_party/score-baselibs \
+  --target //score/json:json \
+  --output build/score-json-graph.json
+
+# 같은 그래프에서 받은 -I/-D 플래그로 C++ AST 분석
+python -m logosfuzz.extract.ast_analyzer \
+  --bazel-workspace third_party/score-baselibs \
+  --bazel-target //score/json:json \
+  --output build/score-json-ast.json
+
+# 빌드 단위 메타데이터가 포함된 통합 KB
+python -m logosfuzz.knowledge.knowledge_base build \
+  --paths third_party/score-baselibs/score/json \
+  --bazel-workspace third_party/score-baselibs \
+  --bazel-target //score/json:json \
+  --output build/score-json-kb.json
+```
 
 ### 예제 스크립트
 
@@ -52,9 +74,10 @@ S-CORE 는 Bazel 로 빌드하며 strict deps·visibility 를 강제한다. 이 
 
 ## EXT-01-01 `//score/json` C++ 파싱 실패 케이스
 
-현행 `logosfuzz/extract/ast_analyzer.py` 는 C 전용이다. `//score/json` 106개 파일에
-그대로 돌린 결과와 실패 분류는
+1주차 당시 C 전용 분석기를 `//score/json` 106개 파일에 돌린 실패 분류는
 [docs/EXT-01-01-SCORE-JSON-CPP-FAILURES.md](docs/EXT-01-01-SCORE-JSON-CPP-FAILURES.md) 에 있다.
+2주차 구현은 확장자로 C/C++17을 자동 선택하고, 클래스·네임스페이스·메서드·생성자·
+함수 템플릿과 완전 한정 이름을 보존한다.
 재현:
 
 ```bash
@@ -146,6 +169,74 @@ from logosfuzz.knowledge.kb_adapters import api_reference, constraints_for_triag
 api_reference(kb, "uds_read_did")                                  # api_id/시그니처/헤더
 constraints_for_triage(kb, "uds_read_did", min_confidence=0.7)     # 신뢰도 높은 제약조건
 ```
+
+## GEN-03-02 자가치유 에러 코퍼스 (D 파트)
+
+2주차 `generate/bazel_errors.py` 분류기를 추측으로 짜지 않기 위해, **실제로 빌드를
+깨뜨려서** Bazel 에러와 sanitizer 출력 원문을 모아 뒀다. 대응표와 분석은
+[docs/GEN-03-02-ERROR-CORPUS.md](docs/GEN-03-02-ERROR-CORPUS.md) 에 있다.
+
+| 경로 | 내용 |
+| --- | --- |
+| `tests/fixtures/bazel_repro/` | 고의 파손용 최소 Bazel 워크스페이스 (+ `breaks/` 오버레이 10종) |
+| `tests/fixtures/bazel_errors/` | deps·visibility·구문 오류 등 Bazel 에러 원문 |
+| `tests/fixtures/sanitizer_logs/` | UBSan/ASan/LSan 출력 원문 (설정 2종 × 케이스 11종) |
+| `scripts/collect_selfheal_corpus.sh` | 수집기 (리눅스 전용) |
+| `docker/Dockerfile.selfheal` | 수집 환경 이미지 (bazelisk + clang 18 / Ubuntu 24.04) |
+
+재수집(툴체인을 바꿨을 때만 필요하다 — 코퍼스는 커밋되어 있다):
+
+```bash
+bash scripts/collect_selfheal_corpus.sh --out-root .
+```
+
+```bash
+docker build -f docker/Dockerfile.selfheal -t logosfuzz-selfheal . && docker run --rm -v "$PWD":/repo logosfuzz-selfheal
+```
+
+`tests/test_selfheal_corpus.py` 가 코퍼스와 문서 대응표의 일치를 지킨다. Bazel 없이
+도는 순수 픽스처 테스트라 CI 에서 툴체인이 필요 없다.
+
+### 에러 분류기 `generate/bazel_errors.py`
+
+위 코퍼스를 정답지로 만든 분류기다. 빌드 로그 원문을 받아 "무엇이 잘못됐고 무엇을
+고쳐야 하는지"를 구조화해 돌려준다. 3주차에 `selfheal.py` 가 이 결과를 리페어
+프롬프트에 주입한다.
+
+```python
+from logosfuzz.generate.bazel_errors import classify, prompt_hint
+
+report = classify(build_log, requested_target="//harness:json_fuzzer")
+
+report.primary.kind      # BazelErrorKind.NOT_VISIBLE
+report.primary.action    # FixAction.EXPAND_VISIBILITY
+report.primary.detail    # {"label": "//score/internal:helper", "from": "//harness:json_fuzzer"}
+report.needs_human       # 순환 의존처럼 LLM 재시도로 못 고치는 경우 True
+print(prompt_hint(report))   # LLM 프롬프트에 넣을 텍스트
+```
+
+결과 타입(`BazelErrorKind` / `FixAction` / `BazelDiagnostic` / `BazelErrorReport`)은
+`generate/errors.py` 에 있다. 분류기를 쓰지 않는 모듈이 결과 타입만 가져다 쓸 수 있게
+분리해 뒀다.
+
+| 분류 | 처방 | 판별 신호 |
+| --- | --- | --- |
+| `missing_load` | `add_load` | `This rule has been removed from Bazel` |
+| `build_syntax_error` | `fix_build_syntax` | `syntax error at` |
+| `not_visible` | `expand_visibility` | `is not visible from` (ERROR 줄 **다음** 줄) |
+| `no_such_package` | `fix_dep_label` | `no such package '<경로>'` |
+| `no_such_target` | `fix_dep_label` | `no such target` + 레이블이 **의존 대상** |
+| `target_not_defined` | `define_target` | `no such target` + 레이블이 **하네스 자신** |
+| `missing_dep` | `add_deps` | clang 의 `fatal error: '<헤더>' file not found` |
+| `missing_srcs_file` | `add_srcs_file` | `missing input file` |
+| `dep_cycle` | `escalate` | `cycle in dependency graph` |
+| `undefined_symbol` | `resolve_symbol` | `undefined symbol:` |
+
+주의할 점 셋은 전부 1주차 코퍼스에서 나왔다 —
+`no such target` 은 단독 분류 키로 쓸 수 없고(BUILD 파싱 실패도 같은 문장을 낸다),
+deps 누락의 입구는 `no such target` 이 아니라 clang 의 `file not found` 이며,
+visibility 문구는 `ERROR:` 줄에 없다. 근거는
+[docs/GEN-03-02-ERROR-CORPUS.md](docs/GEN-03-02-ERROR-CORPUS.md) 의 발견 A·B·C 다.
 
 ## 커밋 메시지 규칙
 

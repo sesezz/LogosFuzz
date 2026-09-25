@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+from logosfuzz.extract.ast_analyzer import clang_args_for_path, qualified_name
 from logosfuzz.extract.constraint_extractor import iter_source_files
 from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 from logosfuzz.knowledge.rag_index import split_identifier
@@ -70,21 +71,53 @@ def clang_ground_truth(paths: Sequence[str],
     except Exception as exc:
         raise GroundTruthUnavailable(f"libclang 바이너리 없음: {exc}") from exc
 
-    args = list(clang_args or ["-std=c11"])
     apis: Dict[str, dict] = {}
     parsed = 0
+    argument_sets: set[tuple[str, ...]] = set()
 
     for source in iter_source_files(paths):
+        args = clang_args_for_path(source, clang_args)
+        try:
+            source_text = Path(source).read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            source_text = ""
         try:
             unit = index.parse(source, args=args)
         except Exception:
             continue
         parsed += 1
+        argument_sets.add(tuple(args))
         source_key = os.path.normcase(os.path.abspath(source))
         for cursor in unit.cursor.walk_preorder():
-            if cursor.kind != cindex.CursorKind.FUNCTION_DECL:
+            if cursor.kind.name not in {
+                "FUNCTION_DECL", "CXX_METHOD", "CONSTRUCTOR", "FUNCTION_TEMPLATE",
+            }:
                 continue
-            if not cursor.is_definition():
+            is_definition = cursor.is_definition()
+            if cursor.kind.name == "FUNCTION_TEMPLATE" and not is_definition:
+                # Some libclang versions report function templates as declarations
+                # even when the cursor owns the template body.  Depending on the
+                # libclang build, COMPOUND_STMT may also be omitted, so inspect
+                # the cursor's own token extent as the final source of truth.
+                is_definition = any(
+                    child.kind.name == "COMPOUND_STMT"
+                    for child in cursor.get_children()
+                )
+                if not is_definition:
+                    try:
+                        is_definition = any(
+                            token.spelling == "{" for token in cursor.get_tokens()
+                        )
+                    except Exception:
+                        pass
+                if not is_definition and source_text:
+                    try:
+                        head = source_text[:cursor.extent.end.offset].rstrip()
+                        tail = source_text[cursor.extent.end.offset:].lstrip()
+                        is_definition = head.endswith("{") or tail.startswith("{")
+                    except Exception:
+                        pass
+            if not is_definition:
                 continue
             location = cursor.location
             if not location.file:
@@ -92,10 +125,21 @@ def clang_ground_truth(paths: Sequence[str],
             # 시스템 헤더에서 딸려온 정의는 제외한다
             if os.path.normcase(os.path.abspath(location.file.name)) != source_key:
                 continue
-            apis.setdefault(cursor.spelling, {
+            name = qualified_name(cursor) or cursor.spelling
+            try:
+                return_type = (
+                    "" if cursor.kind.name == "CONSTRUCTOR"
+                    else cursor.result_type.spelling
+                )
+            except Exception:
+                return_type = ""
+            apis.setdefault(name, {
+                "name": cursor.spelling,
+                "qualified_name": name,
+                "kind": cursor.kind.name,
                 "file": source,
                 "line": location.line,
-                "return_type": cursor.result_type.spelling,
+                "return_type": return_type,
                 "params": [a.spelling for a in cursor.get_arguments()],
             })
 
@@ -106,8 +150,12 @@ def clang_ground_truth(paths: Sequence[str],
             f"clang 이 {parsed}개 파일을 파싱했지만 함수 정의를 찾지 못함 "
             f"(선언만 있는 헤더거나 소스에 정의가 없는 경우)"
         )
-    return GroundTruth(source="clang", apis=apis,
-                       note=f"libclang, {parsed} files, args={' '.join(args)}")
+    rendered_args = "; ".join(" ".join(args) for args in sorted(argument_sets))
+    return GroundTruth(
+        source="clang",
+        apis=apis,
+        note=f"libclang, {parsed} files, args={rendered_args}",
+    )
 
 
 def nm_ground_truth(paths: Sequence[str], cc: str = "gcc",

@@ -209,6 +209,37 @@ class DockerIsolationRunner:
         if rc != 0:
             raise ImageBuildError(f"이미지 빌드 실패: {self.config.image}")
 
+    # ---- 하네스 바이너리 위치 해석 -------------------------------------
+    #
+    # GEN이 Bazel 어댑터로 넘어가면서 하네스 바이너리가 harness_dir 밖에
+    # 생긴다. cc_fuzz_test 는 `<name>_bin`(계측된 퍼저 바이너리)을 워크스페이스
+    # 의 bazel-bin 출력 트리에 떨구고, 그 경로는 빌드 설정(--platform_suffix)
+    # 에 따라 달라진다. 그래서 EXE 계층은 경로를 **추측하지 않고** 빌드
+    # 어댑터가 돌려준 실제 경로를 그대로 받는다(GEN 파트 결정사항 ④:
+    # "EXE 계층은 bazel run 이 아니라 바이너리를 직접 실행한다").
+    #
+    # 덕분에 이 계층은 빌드 시스템을 모른다 - Bazel 산출물이든 CMake
+    # 산출물이든 docker_runner 에겐 그냥 실행 파일 하나다.
+    def harness_binary_path(self, group: LogicGroup) -> Path:
+        """하네스 바이너리의 호스트 경로.
+
+        ``harness_path`` 에 디렉토리가 붙어 있으면(절대경로 등) 그 경로를
+        그대로 쓰고, 이름만 있으면 지금까지처럼 ``harness_dir`` 기준으로 푼다.
+        """
+        p = Path(group.harness_path)
+        if p.parent != Path("."):
+            return p.resolve()
+        return (self.config.harness_dir / p.name).resolve()
+
+    def harness_mount_dir(self, group: LogicGroup) -> Path:
+        """``/harness`` 로 읽기 전용 마운트할 호스트 디렉토리.
+
+        바이너리가 harness_dir 밖(bazel-bin 등)에 있으면 그 바이너리가 있는
+        디렉토리를 대신 마운트한다. 컨테이너 안 경로는 두 경우 모두
+        ``/harness/<파일명>`` 이라 내부 커맨드 구성은 달라지지 않는다.
+        """
+        return self.harness_binary_path(group).parent
+
     # ---- 실행 커맨드 구성 (EXE-04-01 핵심 로직) -----------------------
     def _in_container_cmd(self, group: LogicGroup) -> str:
         """엔진별로 컨테이너 내부에서 실행할 셸 명령 문자열."""
@@ -263,7 +294,7 @@ class DockerIsolationRunner:
                 # 조용히 사라진다(실측 확인).
                 argv += ["--user", user]
         argv += [
-            "-v", f"{c.harness_dir.resolve()}:/harness:ro",
+            "-v", f"{self.harness_mount_dir(group)}:/harness:ro",
             "-v", f"{c.output_dir.resolve()}:/out",
         ]
         if group.corpus_dir:
@@ -290,7 +321,7 @@ class DockerIsolationRunner:
 
     def _local_argv(self, group: LogicGroup) -> list:
         """--docker 미사용 시(디버그) 호스트에서 직접 실행하는 커맨드."""
-        harness = str((self.config.harness_dir / group.harness_path.name).resolve())
+        harness = str(self.harness_binary_path(group))
         t = self.config.timeout_sec
         if self.config.engine is Engine.LIBFUZZER:
             argv = [harness, f"-max_total_time={t}",
@@ -322,7 +353,7 @@ class DockerIsolationRunner:
     # ---- 그룹 1개 실행 ------------------------------------------------
     def run_group(self, group: LogicGroup, monitor: Optional[StatsMonitor] = None,
                   sanitizer_monitor: Optional[SanitizerMonitor] = None) -> GroupResult:
-        harness_file = self.config.harness_dir / group.harness_path.name
+        harness_file = self.harness_binary_path(group)
         if not harness_file.exists():
             raise HarnessNotFoundError(
                 f"하네스 없음: {harness_file} (GEN 단계 산출물을 확인하세요)"

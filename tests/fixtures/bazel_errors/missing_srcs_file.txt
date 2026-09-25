@@ -1,0 +1,10 @@
+
+INFO: Analyzed target //harness:json_fuzzer (<N> packages loaded, <N> targets configured).
+ERROR: <WORKSPACE>/harness/BUILD.bazel:3:10: Compiling harness/json_fuzzer_extra.cc failed: missing input file '//harness:json_fuzzer_extra.cc'
+ERROR: <WORKSPACE>/harness/BUILD.bazel:3:10: Compiling harness/json_fuzzer_extra.cc failed: 1 input file(s) do not exist
+INFO: Found 1 target...
+Target //harness:json_fuzzer failed to build
+Use --verbose_failures to see the command lines of failed build steps.
+INFO: Elapsed time: <T>s, Critical Path: <T>s
+INFO: <N> processes: <STRATEGY>
+ERROR: Build did NOT complete successfully
