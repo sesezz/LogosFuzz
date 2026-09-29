@@ -44,6 +44,17 @@ from .models import (
     HealRound,
     parse_diagnostics,
 )
+from .kb_bridge import (
+    ApiNotFoundError,
+    HarnessBuildPlan,
+    KnowledgeBaseDepsProvider,
+    KnowledgeBridgeError,
+    KnowledgeBuildResult,
+    MissingBuildUnitError,
+    UnsupportedApiError,
+    build_harness_from_kb,
+    plan_harness,
+)
 from .selfheal import SelfHealLoop, summarize
 
 __all__ = [
@@ -69,6 +80,15 @@ __all__ = [
     "FnLLMClient",
     "RepairPromptBuilder",
     "extract_code",
+    "ApiNotFoundError",
+    "HarnessBuildPlan",
+    "KnowledgeBaseDepsProvider",
+    "KnowledgeBridgeError",
+    "KnowledgeBuildResult",
+    "MissingBuildUnitError",
+    "UnsupportedApiError",
+    "build_harness_from_kb",
+    "plan_harness",
 ]
 
 __version__ = "0.1.0"  # GEN-03-02 골격
