@@ -75,6 +75,42 @@ def normalize_path(path: str) -> str:
     return text.lstrip("./")
 
 
+def is_harness_file(path: str) -> bool:
+    """측정 도구 쪽 코드(퍼징 하네스, 유닛테스트 본문)인가.
+
+    하네스 파일은 퍼징 lcov 에만, 테스트 본문은 유닛 lcov 에만 나온다. 비교에
+    넣으면 각자 "혼자만 밟은 라인" 으로 잡혀 수치가 부풀려진다. 대상 코드만
+    비교해야 한다.
+    """
+    norm = normalize_path(path)
+    stem = Path(norm).stem
+    return (
+        "/fuzz/" in f"/{norm}"
+        or stem.endswith(("_test", "_fuzz", "_fuzzer"))
+        or "/test/" in f"/{norm}"
+        or "/testing/" in f"/{norm}"
+    )
+
+
+def filter_lcov(lcov: dict, include: "list[str] | None" = None,
+                exclude_harness: bool = False) -> dict:
+    """비교 범위를 대상 코드로 좁힌다.
+
+    baselibs 의 유닛테스트 커버리지는 커버리지 scope 전체(5주차 실측 457개
+    파일)를 담는다. 퍼징 하네스가 닿을 수 없는 모듈까지 "유닛테스트만" 으로
+    세면 비교가 무의미해지므로 ``include`` 접두사(정규화 경로 기준)로 자른다.
+    """
+    result = {}
+    for path, lines in lcov.items():
+        norm = normalize_path(path)
+        if include and not any(norm.startswith(prefix) for prefix in include):
+            continue
+        if exclude_harness and is_harness_file(norm):
+            continue
+        result[path] = lines
+    return result
+
+
 def covered_lines(lcov: dict) -> dict:
     """``{정규화 경로: {실제로 실행된 행 번호}}``."""
     result: dict = defaultdict(set)
@@ -187,13 +223,20 @@ def main() -> int:
     ap.add_argument("--fuzz-lcov", required=True, type=Path)
     ap.add_argument("--out", type=Path, help="비교 결과 JSON 경로")
     ap.add_argument("--markdown", type=Path, help="발표용 표 마크다운 경로")
+    ap.add_argument("--include", action="append", default=[],
+                    help="비교할 경로 접두사(정규화 기준, 예: score/json/). 여러 번 가능")
+    ap.add_argument("--exclude-harness", action="store_true",
+                    help="퍼징 하네스·유닛테스트 본문 파일을 비교에서 뺀다")
     args = ap.parse_args()
 
     for path in (args.unit_lcov, args.fuzz_lcov):
         if not path.exists():
             ap.error(f"lcov 파일이 없다: {path}")
 
-    report = compare(parse_lcov(args.unit_lcov), parse_lcov(args.fuzz_lcov))
+    def load(path: Path) -> dict:
+        return filter_lcov(parse_lcov(path), args.include, args.exclude_harness)
+
+    report = compare(load(args.unit_lcov), load(args.fuzz_lcov))
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)

@@ -84,28 +84,102 @@ _BAZEL_COVERAGE_CONFIGS = {
 
 
 def bazel_coverage_configs(mode: CoverageMode) -> tuple[str, ...]:
-    """Bazel 빌드에 붙일 커버리지 config 이름을 돌려준다.
+    """``bazel coverage`` 커맨드에 붙일 커버리지 config 이름을 돌려준다.
 
-    반환값은 ``--config=<이름>`` 으로 빌드 커맨드에 붙일 것들이다.
+    반환값은 ``--config=<이름>`` 으로 붙일 것들이다. **``bazel coverage`` 전용이다.**
+    퍼징 빌드(``bazel build --config=fuzz``)에는 붙이지 않는다 - 퍼징 쪽 계측은
+    :func:`bazel_fuzz_coverage_build_argv` 를 쓴다.
 
-    .. warning::
-       **아직 실제로 조합해 본 적이 없다.** 퍼징 빌드는 ``--config=fuzz`` 를
-       쓰는데, 거기에 이 config를 더했을 때 툴체인이 어떻게 해소되는지
-       확인되지 않았다.
+    5주차 실측(baselibs 09be72c, Bazel 8.6.0):
 
-       근거 있는 우려다. baselibs의 coverage.bazelrc 는 바로 그
-       "GCC 툴체인이 이 파일의 플래그 뒤에 등록되면 마지막
-       ``--extra_toolchains`` 가 이긴다" 는 경고를 담고 있는 파일이고,
-       ``--config=fuzz`` 가 clang을 등록하는 방식이 정확히 그
-       ``--extra_toolchains`` 다. 순서에 따라 clang이 밀려나면 퍼징 빌드 자체가
-       -fsanitize=fuzzer 링크에서 죽는다.
-
-       Bazel과 baselibs가 있는 환경에서 아래를 먼저 확인해야 한다:
-           bazel build --config=fuzz --config=llvm_cov //<대상>:<이름>_bin
-       실패하면 선택지는 두 가지다 - 커버리지 측정을 별도 빌드로 분리하거나,
-       오버레이에 fuzz+coverage 겸용 config를 새로 정의하는 것.
+    * baselibs 는 이 config 를 ``coverage:llvm_cov`` 로만 정의한다. 그래서
+      ``bazel build --config=fuzz --config=llvm_cov`` 는 툴체인 충돌까지 가지도
+      못하고 ``Config value 'llvm_cov' is not defined in any .rc file`` 로 죽는다.
+      3주차에 걱정했던 "clang 이 밀려난다" 는 이 조합에서는 일어나지 않는다.
+    * ``bazel coverage --config=llvm_cov //score/json:json_test`` 는 단독으로
+      성공한다(clang 22). ``--config=bl-x86_64-linux`` 를 같이 주면 안 된다 -
+      coverage.bazelrc 가 경고하듯 GCC 가 이겨서 LLVM covmap 이 안 나온다.
+    * 결과 ``bazel-out/_coverage/_coverage_report.dat`` 는 lcov 가 아니라
+      baselibs 리포터(@score_coverage)가 만든 **zip** 이다. lcov 는 그 안의
+      ``lcov_report/lcov.dat`` 에 있다. :func:`extract_bazel_lcov` 참고.
     """
     return _BAZEL_COVERAGE_CONFIGS.get(CoverageMode(mode), ())
+
+
+# 퍼징 하네스용 커버리지 빌드 (5주차 실측으로 확정).
+#
+# 퍼징 config(clang 22 + libFuzzer + ASan)를 그대로 두고 소스 기반 계측만 얹는다.
+# --config=fuzz 가 이미 clang 을 등록하므로 -fprofile-instr-generate 를 직접
+# 넘겨도 "어느 쪽이 적용됐는지 모른다" 는 이중 설정 문제가 생기지 않는다.
+# platform_suffix 를 따로 줘서 퍼징 본 빌드(k8-fastbuild-fuzz)와 산출물이
+# 섞이지 않게 한다(k8-fastbuild-fuzz_cov). 실측: 빌드 성공, 프로파일 심볼 398개,
+# -runs=0 재생 한 번에 profraw 1개.
+#
+# 퍼징은 계측 없는 본 바이너리로 돌려 코퍼스를 키우고, 커버리지는 그 코퍼스를
+# 이 바이너리에 -runs=0 으로 한 번 재생해서 잰다. 계측 오버헤드가 퍼징 속도를
+# 깎지 않게 하려는 분리다.
+FUZZ_COVERAGE_PLATFORM_SUFFIX = "fuzz_cov"
+FUZZ_COVERAGE_FLAGS = (
+    "--copt=-fprofile-instr-generate",
+    "--copt=-fcoverage-mapping",
+    "--linkopt=-fprofile-instr-generate",
+)
+
+
+def bazel_fuzz_coverage_build_argv(
+    target: str, *, fuzz_config: str = "fuzz", bazel: str = "bazel"
+) -> list[str]:
+    """퍼징 하네스를 소스 기반 커버리지로 계측해 빌드하는 커맨드.
+
+    ``target`` 은 cc_fuzz_test 라벨이며, 실제로 빌드되는 것은 ``<name>_bin`` 이다.
+    """
+    if not target.endswith("_bin"):
+        target = f"{target}_bin"
+    return [
+        bazel, "build", f"--config={fuzz_config}",
+        f"--platform_suffix={FUZZ_COVERAGE_PLATFORM_SUFFIX}",
+        *FUZZ_COVERAGE_FLAGS,
+        target,
+    ]
+
+
+# 툴체인 llvm 도구 (5주차 실측).
+#
+# 시스템 llvm-profdata(Ubuntu 24.04 기본 18.x)는 hermetic 툴체인 clang 22 가 만든
+# profraw 를 못 읽는다:
+#     raw profile version mismatch: Profile uses raw profile format version = 10;
+#     expected version = 9
+# 그래서 Bazel 이 받아 둔 툴체인 쪽 도구를 써야 한다.
+_LLVM_TOOLCHAIN_BIN_GLOB = "external/toolchains_llvm++llvm+llvm_toolchain_llvm/bin"
+
+
+def bazel_llvm_tool(output_base: "Path | str", tool: str) -> Optional[Path]:
+    """``bazel info output_base`` 아래에서 툴체인의 llvm 도구 경로를 찾는다.
+
+    ``tool`` 은 ``llvm-profdata`` / ``llvm-cov`` 등. 못 찾으면 ``None`` -
+    아직 퍼징/커버리지 빌드를 한 번도 안 돌려 툴체인이 받아지지 않은 상태다.
+    """
+    for candidate in sorted(Path(output_base).glob(f"{_LLVM_TOOLCHAIN_BIN_GLOB}/{tool}")):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def extract_bazel_lcov(report: "Path | str", dest: "Path | str") -> Path:
+    """``bazel coverage`` 결과물에서 lcov 를 꺼내 ``dest`` 에 쓴다.
+
+    baselibs 의 ``--config=llvm_cov`` 는 리포터를 교체해 결과를 zip(html/lcov/
+    text 리포트 묶음)으로 낸다. 일반 Bazel 은 lcov 를 그대로 낸다. 둘 다 받는다.
+    """
+    import zipfile
+
+    report, dest = Path(report), Path(dest)
+    if zipfile.is_zipfile(report):
+        with zipfile.ZipFile(report) as bundle:
+            dest.write_bytes(bundle.read("lcov_report/lcov.dat"))
+    else:
+        dest.write_bytes(report.read_bytes())
+    return dest
 
 
 # ---------------------------------------------------------------------------

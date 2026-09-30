@@ -13,6 +13,9 @@ from logosfuzz.execute.coverage import (
     CoverageCollector,
     CoverageMetric,
     bazel_coverage_configs,
+    bazel_fuzz_coverage_build_argv,
+    bazel_llvm_tool,
+    extract_bazel_lcov,
     harness_binary_path,
     instrumentation_flags,
     parse_llvm_cov_export,
@@ -77,6 +80,60 @@ def test_bazel_coverage_config_empty_for_sancov():
 
 def test_bazel_coverage_config_empty_when_disabled():
     assert bazel_coverage_configs(CoverageMode.NONE) == ()
+
+
+# --- 퍼징 쪽 커버리지 빌드 (5주차 실측) ---------------------------------------
+def test_fuzz_coverage_build_does_not_use_llvm_cov_config():
+    """llvm_cov 는 coverage: 전용이라 bazel build 에 붙이면 정의 안 됨으로 죽는다."""
+    argv = bazel_fuzz_coverage_build_argv("//score/json/fuzz:json_parser_fuzz_test")
+    assert argv[:3] == ["bazel", "build", "--config=fuzz"]
+    assert "--config=llvm_cov" not in argv
+    assert "--config=bl-x86_64-linux" not in argv
+
+
+def test_fuzz_coverage_build_adds_source_based_instrumentation():
+    argv = bazel_fuzz_coverage_build_argv("//score/json/fuzz:json_parser_fuzz_test")
+    assert "--copt=-fprofile-instr-generate" in argv
+    assert "--copt=-fcoverage-mapping" in argv
+    assert "--linkopt=-fprofile-instr-generate" in argv
+
+
+def test_fuzz_coverage_build_is_separated_from_fuzz_outputs():
+    """계측 빌드가 퍼징 본 빌드 산출물(k8-fastbuild-fuzz)을 덮어쓰면 안 된다."""
+    argv = bazel_fuzz_coverage_build_argv("//score/json/fuzz:json_parser_fuzz_test")
+    assert "--platform_suffix=fuzz_cov" in argv
+    assert argv[-1] == "//score/json/fuzz:json_parser_fuzz_test_bin"
+
+
+def test_bazel_llvm_tool_finds_toolchain_binary(tmp_path):
+    """시스템 llvm-profdata(18)는 clang 22 profraw 를 못 읽는다. 툴체인 쪽을 찾는다."""
+    bin_dir = tmp_path / "external" / "toolchains_llvm++llvm+llvm_toolchain_llvm" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "llvm-profdata").write_text("")
+    assert bazel_llvm_tool(tmp_path, "llvm-profdata") == bin_dir / "llvm-profdata"
+
+
+def test_bazel_llvm_tool_none_before_toolchain_is_fetched(tmp_path):
+    assert bazel_llvm_tool(tmp_path, "llvm-profdata") is None
+
+
+def test_extract_bazel_lcov_from_baselibs_zip(tmp_path):
+    """baselibs 리포터는 _coverage_report.dat 를 zip 으로 낸다."""
+    import zipfile
+
+    report = tmp_path / "_coverage_report.dat"
+    with zipfile.ZipFile(report, "w") as bundle:
+        bundle.writestr("html_report/index.html", "<html/>")
+        bundle.writestr("lcov_report/lcov.dat", "SF:a.cc\nDA:1,1\nend_of_record\n")
+    out = extract_bazel_lcov(report, tmp_path / "unit.lcov")
+    assert out.read_text() == "SF:a.cc\nDA:1,1\nend_of_record\n"
+
+
+def test_extract_bazel_lcov_passes_plain_lcov_through(tmp_path):
+    report = tmp_path / "_coverage_report.dat"
+    report.write_text("SF:a.cc\nend_of_record\n")
+    out = extract_bazel_lcov(report, tmp_path / "unit.lcov")
+    assert out.read_text() == "SF:a.cc\nend_of_record\n"
 
 
 def test_instrumentation_flags_still_available_for_non_bazel_path():

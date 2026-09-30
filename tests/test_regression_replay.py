@@ -32,14 +32,25 @@ def test_replay_build_swaps_engine_to_replay():
     )
 
 
-def test_replay_build_passes_sanitizer_features_directly():
-    """asan_ubsan_lsan 은 test: 로만 정의돼 build 에서 쓸 수 없다.
+def test_replay_build_uses_sanitizer_config():
+    """baselibs 는 이제 asan_ubsan_lsan 을 build: 로 정의한다(5주차 실측).
 
-    그래서 그 config 가 펼치는 것과 같은 --features 를 직접 넘긴다.
+    --features 를 흉내 내면 @score_cpp_policies 쪽 플래그가 빠진다.
     """
     argv = gcc_replay_build_argv("//score/json/fuzz:json_parser_fuzz_test")
-    assert "--features=asan" in argv
-    assert "--config=asan_ubsan_lsan" not in argv
+    assert "--config=asan_ubsan_lsan" in argv
+    assert not any(a.startswith("--features=") for a in argv)
+
+
+def test_replay_build_relaxes_werror_only_for_abseil():
+    """GCC 12 가 rules_fuzzing 이 끌고 온 abseil 에서 -Wformat-nonliteral 로 죽는다.
+
+    대상 코드의 경고 정책은 건드리지 않고 외부 저장소만 푼다.
+    """
+    argv = gcc_replay_build_argv("//score/json/fuzz:json_parser_fuzz_test")
+    relax = [a for a in argv if a.startswith("--per_file_copt=")]
+    assert relax == ["--per_file_copt=external/abseil-cpp.*@-Wno-error"]
+    assert "--copt=-Wno-error" not in argv
 
 
 def test_replay_build_targets_bin_variant():
