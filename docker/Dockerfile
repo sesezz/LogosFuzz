@@ -17,8 +17,16 @@
 #   --config=bl-x86_64-linux 회귀 게이트 전용. GCC 12.2.0.
 # 둘은 상호 배타다 - 같이 주면 뒤의 --extra_toolchains가 이겨 GCC가 clang을
 # 밀어내고, GCC에는 -fsanitize=fuzzer가 없어 링크에서 죽는다.
-# (asan_ubsan_lsan은 baselibs에서 test:로만 정의돼 있어 퍼징 빌드에는 못 쓴다.)
-FROM ubuntu:22.04
+# (asan_ubsan_lsan 은 퍼징 빌드에 쓰지 않는다. 5주차 baselibs 에서는 build:
+#  config 로 바뀌어 GCC 재생 빌드가 쓴다 - logosfuzz/execute/regression.py 참고.)
+#
+# 베이스 이미지 = ubuntu:24.04 (5주차 실측으로 22.04 에서 올림)
+#   하네스는 호스트에서 Bazel 로 빌드되고 이 컨테이너는 실행만 한다
+#   (docker_runner 가 바이너리 디렉터리를 /harness 로 ro 마운트). Bazel 의
+#   clang 은 hermetic 이지만 sysroot 는 호스트 glibc 를 쓰므로, 바이너리가
+#   요구하는 glibc 가 호스트(WSL Ubuntu 24.04 = 2.39)를 따라간다. 22.04(2.35)
+#   에서는 json_parser_fuzz_test_bin 이 GLIBC_2.38 을 못 찾아 실행되지 않았다.
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Seoul \
@@ -31,8 +39,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #   binutils                 : addr2line. GCC 새니타이저(ASan/UBSan/LSan)가
 #                              심볼라이즈에 사용한다. 없으면 스택이 주소값만
 #                              남아 EXE-04-02 sanitizer 파서가 프레임을 잃는다.
+#   libatomic1               : @llvm_toolchain clang 이 하네스를 libatomic.so.1 에
+#                              동적 링크한다. 없으면 실행 즉시 "error while loading
+#                              shared libraries" 로 rc=127 (5주차 실측).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
+        libatomic1 \
         curl \
         git \
         python3 \
@@ -96,7 +108,9 @@ ENV ASAN_OPTIONS="abort_on_error=1:detect_leaks=1:symbolize=1" \
 # ---- 실행 사용자 -----------------------------------------------------------
 # 소스는 /src(ro), 출력은 /out(rw), 캐시는 /bazel(rw)로 마운트된다.
 # Bazel은 output base에 쓰기가 필요하므로 /bazel 소유권을 미리 넘긴다.
-RUN useradd -m -u 1000 fuzzer \
+# ubuntu:24.04 는 uid 1000 의 기본 사용자 ubuntu 를 갖고 있어 먼저 지운다.
+RUN (userdel -r ubuntu 2>/dev/null || true) \
+    && useradd -m -u 1000 fuzzer \
     && mkdir -p /out /src /bazel/bazelisk /bazel/repo /bazel/disk /bazel/out \
     && chown -R fuzzer:fuzzer /out /bazel
 
