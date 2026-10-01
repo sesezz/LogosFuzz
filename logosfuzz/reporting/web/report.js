@@ -79,32 +79,25 @@ const SAMPLE = {
 
 /* ── 전역 상태 ───────────────────────────────── */
 let currentData = null;
+let currentFileName = "";
 
 /* ── 진입점 ──────────────────────────────────── */
 document.addEventListener("DOMContentLoaded", () => {
-  setupDropZone();
   setupFileInput();
-  document.getElementById("load-sample").addEventListener("click", () => render(SAMPLE));
+  setupDropZone();
+  setupGlobalDrop();
+  document.getElementById("load-sample").addEventListener("click", () => {
+    clearNotice();
+    currentFileName = "샘플 (can-utils)";
+    render(SAMPLE);
+  });
+  document.getElementById("open-btn").addEventListener("click", openFileDialog);
   document.getElementById("download-btn").addEventListener("click", downloadJSON);
 });
 
-/* ── 드래그앤드롭 ────────────────────────────── */
-function setupDropZone() {
-  const zone = document.getElementById("drop-zone");
-
-  zone.addEventListener("dragover", e => {
-    e.preventDefault();
-    zone.classList.add("over");
-  });
-
-  zone.addEventListener("dragleave", () => zone.classList.remove("over"));
-
-  zone.addEventListener("drop", e => {
-    e.preventDefault();
-    zone.classList.remove("over");
-    const file = e.dataTransfer.files[0];
-    if (file) readFile(file);
-  });
+/* ── 파일 불러오기 ───────────────────────────── */
+function openFileDialog() {
+  document.getElementById("file-input").click();
 }
 
 function setupFileInput() {
@@ -114,17 +107,89 @@ function setupFileInput() {
   });
 }
 
+/* 초기 화면의 드롭존: 영역 아무 곳이나 눌러도 파일 선택창이 열린다. */
+function setupDropZone() {
+  const zone = document.getElementById("drop-zone");
+  zone.addEventListener("click", e => {
+    if (e.target.closest("button, label, input")) return;   // 버튼·라벨은 자기 동작이 있다
+    openFileDialog();
+  });
+}
+
+/* 화면 어디에 끌어다 놔도 그 파일로 리포트를 바꾼다(리포트를 보는 중에도).
+ * 파일이 아닌 드래그(텍스트 선택 등)는 건드리지 않는다. */
+function setupGlobalDrop() {
+  let depth = 0;
+  const hasFiles = e =>
+    !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+
+  window.addEventListener("dragenter", e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth += 1;
+    document.body.classList.add("dragging");
+  });
+  window.addEventListener("dragover", e => {
+    if (hasFiles(e)) e.preventDefault();       // drop 이벤트가 오려면 필요하다
+  });
+  window.addEventListener("dragleave", e => {
+    if (!hasFiles(e)) return;
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) document.body.classList.remove("dragging");
+  });
+  window.addEventListener("drop", e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();                          // 브라우저가 파일을 직접 열지 않게
+    depth = 0;
+    document.body.classList.remove("dragging");
+    const file = e.dataTransfer.files[0];
+    if (file) readFile(file);
+  });
+}
+
 function readFile(file) {
   const reader = new FileReader();
   reader.onload = e => {
+    let data;
     try {
-      const data = JSON.parse(e.target.result);
-      render(data);
+      data = JSON.parse(e.target.result);
     } catch {
-      alert("JSON 파싱 실패. 올바른 validation-summary.json 파일인지 확인해주세요.");
+      showNotice(`“${file.name}” 은(는) JSON 이 아닙니다. 올바른 validation-summary.json 인지 확인해 주세요.`);
+      return;
     }
+    if (!isSummary(data)) {
+      showNotice(`“${file.name}” 은(는) validation-summary.json 형식이 아닙니다 (run / metrics / build_units 가 없음).`);
+      return;
+    }
+    clearNotice();
+    currentFileName = file.name;
+    render(data);
+    window.scrollTo({ top: 0 });
   };
+  reader.onerror = () => showNotice(`“${file.name}” 을(를) 읽지 못했습니다.`);
   reader.readAsText(file);
+  // 같은 파일을 다시 골라도 change 가 발생하도록 비운다.
+  document.getElementById("file-input").value = "";
+}
+
+function isSummary(data) {
+  return !!data && typeof data === "object" && !Array.isArray(data)
+    && !!(data.run || data.metrics || data.build_units);
+}
+
+/* 실패해도 이미 불러온 리포트는 그대로 둔다. */
+function showNotice(message) {
+  const el = document.getElementById("notice");
+  el.className = "notice notice-error";
+  el.innerHTML = `<span>${esc(message)}</span>`
+    + `<button class="notice-close" type="button" aria-label="닫기">✕</button>`;
+  el.querySelector(".notice-close").addEventListener("click", clearNotice);
+}
+
+function clearNotice() {
+  const el = document.getElementById("notice");
+  el.className = "notice hidden";
+  el.innerHTML = "";
 }
 
 /* ── 렌더 ────────────────────────────────────── */
@@ -133,20 +198,25 @@ function render(data) {
 
   document.getElementById("drop-zone").classList.add("hidden");
   document.getElementById("report").classList.remove("hidden");
+  document.getElementById("header-actions").classList.remove("hidden");
 
   renderHeader(data);
   renderSummaryBar(data);
   renderMetrics(data);
   renderGroups(data);
+  renderBuildUnits(data);
   renderFindings(data);
   renderGen(data);
 }
 
 function renderHeader(data) {
   const meta = data.metadata || {};
-  const commit = meta.commit ? `@${meta.commit}` : "";
-  document.getElementById("header-meta").textContent =
-    `${meta.project || "—"}  ${commit}  ·  ${formatDate(data.generated_at)}`;
+  const commit = meta.commit ? ` @${meta.commit}` : "";
+  const text = [currentFileName, `${meta.project || "—"}${commit}`, formatDate(data.generated_at)]
+    .filter(Boolean).join("  ·  ");
+  const el = document.getElementById("header-meta");
+  el.textContent = text;
+  el.title = text;
 }
 
 function renderSummaryBar(data) {
@@ -166,10 +236,16 @@ function renderMetrics(data) {
   setText("m-fp",      m.false_positive ?? "—");
   setText("m-review",  m.needs_review   ?? "—");
   setText("m-engine",  run.engine       || "—");
+
+  // 크래시가 있으면 카드를 빨갛게 — 한눈에 보이게.
+  const crashes = Number(m.crashes ?? run.total_crashes ?? 0);
+  const card = document.getElementById("mc-crashes");
+  if (card) card.classList.toggle("accent-red", Number.isFinite(crashes) && crashes > 0);
 }
 
 function renderGroups(data) {
   const groups = (data.run || {}).groups || [];
+  setCount("c-groups", groups.length);
   const tbody = document.getElementById("group-tbody");
   tbody.innerHTML = "";
 
@@ -179,23 +255,136 @@ function renderGroups(data) {
   }
 
   groups.forEach(g => {
+    const name = g.target || g.group || g.name || "—";
     const tr = document.createElement("tr");
+    // 긴 이름은 한 줄로 줄이고(title 로 전체 표시), 숫자도 문자열이 마크업이 되지 않게 이스케이프한다.
     tr.innerHTML = `
-      <td>${esc(g.target || g.group || g.name || "—")}</td>
+      <td class="cell-name" title="${esc(name)}">${esc(name)}</td>
       <td>${badgeHTML(g.status)}</td>
-      <td>${fmtNum(g.exec_per_sec)}</td>
-      <td>${g.coverage ?? "—"}</td>
-      <td>${g.crash_count ?? 0}</td>
-      <td>${g.timed_out ? 1 : 0}</td>
-      <td>${g.compile_error_count ?? 0}</td>
+      <td class="num">${esc(fmtNum(g.exec_per_sec))}</td>
+      <td class="num">${esc(String(g.coverage ?? "—"))}</td>
+      <td class="num">${esc(String(g.crash_count ?? 0))}</td>
+      <td class="num">${g.timed_out ? 1 : 0}</td>
+      <td class="num">${esc(String(g.compile_error_count ?? 0))}</td>
     `;
     tbody.appendChild(tr);
   });
 }
 
+/* ── 빌드 단위별 결과 ────────────────────────────
+ * validation-summary.json 의 최상위 `build_units`(reporting/summary.py)를 카드로 그린다.
+ * Bazel 타깃(빌드 단위) 하나가 Logic Group 여럿을 가질 수 있어서, 그룹 표와 별도로
+ * "어느 타깃이 빌드됐고(자가치유 여부) 퍼징 결과가 어땠나"를 한눈에 본다.
+ * 표 대신 카드인 이유: 타깃·그룹 이름이 길어서 열이 많은 표는 중간에서 깨진다.
+ * 필드가 없으면(예전 산출물) 섹션을 통째로 숨긴다 — 기존 샘플 JSON 은 화면이 그대로다.
+ * 모든 값은 innerHTML 로 들어가므로 문자열은 esc(), 숫자는 genNum() 으로 강제 변환한다. */
+const BUILD_STATUS_BADGE = {
+  built:     ["passed",   "빌드 성공"],
+  repaired:  ["repaired", "자가치유 후 성공"],
+  failed:    ["failed",   "빌드 실패"],
+  emitted:   ["emitted",  "파일만 생성"],
+  not_built: ["notrun",   "빌드 정보 없음"],
+};
+const RUN_STATUS_BADGE = {
+  passed:  ["passed",  "통과"],
+  crashed: ["crashed", "크래시"],
+  timeout: ["timeout", "타임아웃"],
+  failed:  ["failed",  "실패"],
+  not_run: ["notrun",  "미실행"],
+};
+const UNASSIGNED_UNIT = "(unassigned)";
+
+function mappedBadge(map, status) {
+  const [cls, label] = map[status] || ["", status || "—"];
+  return `<span class="badge${cls ? ` badge-${cls}` : ""}">${esc(label)}</span>`;
+}
+
+/** 카드 왼쪽 띠 색: 문제가 있는 순서대로 우선한다. */
+function buTone(u) {
+  if (u.build_target === UNASSIGNED_UNIT) return "unassigned";
+  if (u.build_status === "failed") return "bad";
+  if (u.run_status === "crashed") return "crash";
+  if (u.build_status === "repaired") return "repaired";
+  return "ok";
+}
+
+function buCardHTML(u) {
+  const target = u.build_target || "—";
+  const groups = (Array.isArray(u.groups) ? u.groups : [])
+    .map(g => `<span class="chip" title="${esc(g)}">${esc(g)}</span>`).join("");
+  const crashes = genNum(u.crashes, 0);
+  const sanitizer = genNum(u.sanitizer_findings, 0);
+  const execs = `${u.execs_estimated === true ? "~" : ""}${fmtNum(genNum(u.execs, 0))}`;
+
+  return `
+    <article class="bu-card bu-${buTone(u)}">
+      <div class="bu-head">
+        <div class="bu-target" title="${esc(target)}">${esc(target)}</div>
+        ${mappedBadge(BUILD_STATUS_BADGE, u.build_status)}
+      </div>
+      <div class="bu-groups">${groups || `<span class="chip">그룹 없음</span>`}</div>
+      <dl class="bu-stats">
+        <div><dt>실행</dt><dd>${mappedBadge(RUN_STATUS_BADGE, u.run_status)}</dd></div>
+        <div><dt>크래시</dt><dd class="${crashes > 0 ? "is-bad" : ""}">${crashes}</dd></div>
+        <div><dt>sanitizer</dt><dd class="${sanitizer > 0 ? "is-bad" : ""}">${sanitizer}</dd></div>
+        <div><dt>execs</dt><dd>${esc(execs)}</dd></div>
+        <div><dt>커버리지</dt><dd>${esc(fmtNum(genNum(u.coverage, 0)))}</dd></div>
+        <div><dt>빌드 라운드</dt><dd>${genNum(u.rounds_used, 0)}</dd></div>
+      </dl>
+    </article>
+  `;
+}
+
+function renderBuildUnits(data) {
+  const section = document.getElementById("build-units-section");
+  const bu = data.build_units;
+  const units = bu && Array.isArray(bu.units) ? bu.units : [];
+
+  if (!bu || bu.status === "not_run" || !units.length) {
+    section.classList.add("hidden");
+    return;
+  }
+  section.classList.remove("hidden");
+
+  const built = genNum(bu.built_units, 0);
+  const repaired = genNum(bu.repaired_units, 0);
+  const failed = genNum(bu.failed_units, 0);
+  const crashed = genNum(bu.crashed_units, 0);
+  const total = genNum(bu.total_units, units.length);
+  setCount("c-units", total);
+
+  const stats = [
+    { key: "빌드 단위",   val: total,    cls: "" },
+    { key: "빌드 성공",   val: built,    cls: built > 0 ? "is-good" : "" },
+    { key: "자가치유 복구", val: repaired, cls: repaired > 0 ? "is-info" : "" },
+    { key: "빌드 실패",   val: failed,   cls: failed > 0 ? "is-bad" : "" },
+    { key: "크래시 발생", val: crashed,  cls: crashed > 0 ? "is-bad" : "" },
+    { key: "빌드 시스템", val: [bu.build_system, bu.config].filter(Boolean).join(" · ") || "—", cls: "is-text" },
+  ];
+  document.getElementById("bu-summary").innerHTML = stats.map(s => `
+    <div class="bu-stat">
+      <span class="bu-stat-key">${s.key}</span>
+      <span class="bu-stat-val ${s.cls}">${esc(String(s.val))}</span>
+    </div>
+  `).join("");
+
+  document.getElementById("bu-grid").innerHTML = units.map(buCardHTML).join("");
+
+  const notes = [];
+  if (units.some(u => u.execs_estimated === true)) {
+    notes.push("execs 앞의 ~ 는 퍼징 요약에 총 실행 횟수가 없어 exec/s × 실행 시간으로 추정한 값입니다.");
+  }
+  if (units.some(u => u.build_target === UNASSIGNED_UNIT)) {
+    notes.push("(unassigned) 는 빌드 결과와 이름이 맞는 그룹을 찾지 못한 퍼징 그룹입니다.");
+  }
+  document.getElementById("bu-notes").innerHTML =
+    notes.map(n => `<p class="bu-note">${esc(n)}</p>`).join("");
+}
+
 function renderFindings(data) {
   const container = document.getElementById("findings-container");
   const findings = (data.analysis || {}).findings || [];
+  setCount("c-findings", findings.length || "");
 
   if (!findings.length) {
     container.innerHTML = `<p class="empty-msg">크래시 없음</p>`;
@@ -327,6 +516,12 @@ function setText(id, val) {
   if (el) el.textContent = val;
 }
 
+/** 섹션 제목 옆 개수 칩. 빈 값이면 칩이 사라진다(CSS :empty). */
+function setCount(id, n) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = n === "" || n === null || n === undefined ? "" : String(n);
+}
+
 function esc(str) {
   return String(str)
     .replace(/&/g, "&amp;")
@@ -361,5 +556,6 @@ function badgeHTML(status) {
     compile_failed:["compile_failed","컴파일 실패"],
   };
   const [cls, label] = map[status] || ["", status || "—"];
-  return `<span class="badge badge-${cls}">${label}</span>`;
+  // 알 수 없는 상태 문자열이 마크업이 되지 않게 이스케이프한다.
+  return `<span class="badge${cls ? ` badge-${cls}` : ""}">${esc(label)}</span>`;
 }
