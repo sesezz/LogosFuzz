@@ -80,6 +80,13 @@ def _build_parser() -> argparse.ArgumentParser:
     a.add_argument("--output", "-o", type=Path, default=None, help="통합 결과 JSON 저장 경로")
     a.add_argument("--source-root", help="대상 C/C++ 소스 트리(도달 가능성 증거 수집)")
     a.add_argument("--harness-dir", help="크래시를 낸 하네스 소스 디렉터리(선택)")
+    # 크래시 승인 게이트(CTR-06-02 CRASH_TRIAGE)·에러계약 KB 옵션은 ANA CLI와 공유한다.
+    from logosfuzz.analyze.cli import add_gate_arguments
+    add_gate_arguments(a)
+
+    # 승인 게이트에 쌓인 항목을 사람이 처리한다(logosfuzz review list/approve/...).
+    from logosfuzz.control.hitl.cli import register as register_review
+    register_review(sub)
 
     s = sub.add_parser(
         "summary",
@@ -148,6 +155,9 @@ def main(argv: list | None = None) -> int:
         )
         print(f"  -> {path}")
         return 0
+
+    if args.command == "review":
+        return args.func(args)
 
     if args.command == "analyze":
         # ANA 파트로 위임(설계서 기능 흐름도의 analyze 명령)

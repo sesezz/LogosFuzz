@@ -179,7 +179,12 @@ class CrashCluster:
         )
 
     def to_dict(self) -> dict:
+        # signature 가 이 모듈을 import 하므로 지연 import 한다.
+        from logosfuzz.analyze.signature import application_frames
+
         rep = self.representative
+        # abort/raise 같은 런타임 프레임이 아니라 첫 코드 프레임을 위치로 보인다.
+        top = (application_frames(rep) or rep.traceback)[:1]
         return {
             "cluster_id": self.cluster_id,
             "signature": self.signature,
@@ -187,9 +192,7 @@ class CrashCluster:
             "count": self.count,
             "sanitizer": rep.sanitizer,
             "error_reason": rep.error_reason,
-            "crash_location": (
-                f"{rep.traceback[0].file}:{rep.traceback[0].line}" if rep.traceback else None
-            ),
+            "crash_location": f"{top[0].file}:{top[0].line}" if top else None,
             "traceback": [{"file": f.file, "line": f.line} for f in rep.traceback],
             "groups": self.groups,
             "crash_inputs": self.crash_inputs,

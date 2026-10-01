@@ -286,9 +286,11 @@ def analyze_error_contract(record: CrashRecord, kb=None) -> ErrorContractEvidenc
 # 점수 근거: reachability.derive_signals 의 harness-only-caller(-0.45)와 같은 무게로
 # 하네스 위반을 깎는다 — 둘 다 "대상이 아니라 하네스가 만든 상황"의 증명이다.
 # 대상 위반은 정상 호출로 재현되는 결함의 증명이라 결함 유형 사전확률(unknown=0.30)
-# 을 정탐 임계치(0.65) 위로 올릴 만큼 준다.
+# 을 정탐 임계치(0.65) 위로 올릴 만큼 준다. 0.30 이면 실측 로그가 정확히 0.80 이
+# 되어 크래시 승인 게이트의 자동 승인 경계(신뢰도 0.8)에 걸린다 - 증명된 근거가
+# 부동소수 반올림에 따라 사람 검토로 갈지 말지 갈리면 안 되므로 여유를 둔다.
 _HARNESS_VIOLATION_DELTA = -0.45
-_TARGET_VIOLATION_DELTA = 0.30
+_TARGET_VIOLATION_DELTA = 0.35
 _CONTRACT_BYPASSED_DELTA = 0.10
 
 _MEMORY_LIKE = {
