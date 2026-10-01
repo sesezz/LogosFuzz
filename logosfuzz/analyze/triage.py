@@ -30,8 +30,9 @@
 
 from __future__ import annotations
 
+from logosfuzz.analyze import error_contract as _ec
 from logosfuzz.analyze.models import CrashCluster, TriageResult, Verdict
-from logosfuzz.analyze.signature import has_application_frame
+from logosfuzz.analyze.signature import application_frames, has_application_frame
 
 # 전통적 메모리 커럽션 계열: sanitizer 탐지 신뢰도가 높아 정탐 사전확률이 크다.
 _MEMORY_BUGS = {
@@ -58,7 +59,7 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
 
 
-def rule_triage(cluster: CrashCluster, context=None) -> TriageResult:
+def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageResult:
     """결정적 휴리스틱으로 하나의 클러스터를 판별한다.
 
     Args:
@@ -67,8 +68,14 @@ def rule_triage(cluster: CrashCluster, context=None) -> TriageResult:
             (선택). 주어지면 정적으로 증명 가능한 도달 가능성 신호를 점수에
             반영한다. 불변식 추론이 필요한 사안은 여기서 판정하지 않는다 —
             그건 ``reachability.render_for_prompt()`` 로 LLM 판별기에 넘긴다.
+        contract: :class:`~logosfuzz.analyze.error_contract.ErrorContractEvidence`
+            (선택). 없으면 대표 레코드의 원문 로그만으로 계산한다 — 스택에서
+            읽히는 계약 위반은 KB 없이도 증명되기 때문이다. KB 의 선언된 계약까지
+            보려면 ``KnowledgeBaseContractProvider(kb)`` 로 만든 근거를 넘긴다.
     """
     rep = cluster.representative
+    if contract is None:
+        contract = _ec.analyze_error_contract(rep)
     cat = cluster.bug_type
     signals: list[str] = []
 
@@ -133,9 +140,17 @@ def rule_triage(cluster: CrashCluster, context=None) -> TriageResult:
         score += delta
         signals.extend(reach_signals)
 
+    # (6) 에러계약: score::Result 의 오류 대안을 누가 무시했는가 / 거부 통로가
+    # 있는 API 가 거부 대신 메모리를 깨뜨렸는가
+    delta, contract_signals = _ec.derive_signals(contract, cat)
+    score += delta
+    signals.extend(contract_signals)
+
     score = _clamp(score)
 
-    loc = f"{rep.traceback[0].file}:{rep.traceback[0].line}" if rep.traceback else "위치 미상"
+    # 근거문 위치는 런타임(abort/raise 등)을 건너뛴 첫 프레임으로 잡는다.
+    top = (application_frames(rep) or rep.traceback)[:1]
+    loc = f"{top[0].file}:{top[0].line}" if top else "위치 미상"
     if score >= _TP_THRESHOLD:
         verdict = Verdict.TRUE_POSITIVE
         # 자동 판정은 절대 확신(1.0)을 피한다: 최종 확정은 HITL(사람)이 한다.
@@ -176,6 +191,8 @@ def rule_triage(cluster: CrashCluster, context=None) -> TriageResult:
             "의도된 호출자가 라이브러리를 링크하는 외부 애플리케이션이라는 뜻이므로, "
             "도달 불가로 해석하면 안 된다."
         )
+    # 에러계약 근거는 위 도달 가능성 근거와 독립이라 함께 남긴다.
+    rationale += _ec.render_rationale(contract)
 
     return TriageResult(
         verdict=verdict,
@@ -194,15 +211,23 @@ class RuleBasedTriager:
         context_provider: ``cluster -> ReachabilityContext`` 콜러블(선택).
             ``reachability.SourceReachabilityProvider(대상_소스_루트)`` 를 넣으면
             호출부 증거를 점수에 반영한다. 없으면 기존 동작 그대로다.
+        contract_provider: ``cluster -> ErrorContractEvidence`` 콜러블(선택).
+            ``error_contract.KnowledgeBaseContractProvider(kb)`` 를 넣으면 KB 에
+            선언된 에러계약까지 근거로 쓴다. 없으면 원문 로그만 본다.
     """
 
     model_name = RULE_MODEL_NAME
 
-    def __init__(self, context_provider=None) -> None:
+    def __init__(self, context_provider=None, contract_provider=None) -> None:
         self.context_provider = context_provider
+        self.contract_provider = contract_provider
 
     def triage(self, cluster: CrashCluster) -> TriageResult:
-        return rule_triage(cluster, context=_safe_context(self.context_provider, cluster))
+        return rule_triage(
+            cluster,
+            context=_safe_context(self.context_provider, cluster),
+            contract=_safe_context(self.contract_provider, cluster),
+        )
 
 
 def _safe_context(provider, cluster):
@@ -256,7 +281,7 @@ _REACHABILITY_QUESTION = """\
   취급하고, 3번 질문(계약 위반이 필요한가)으로 판단하라."""
 
 
-def build_triage_prompt(cluster: CrashCluster, context=None) -> str:
+def build_triage_prompt(cluster: CrashCluster, context=None, contract=None) -> str:
     """클러스터 대표 결함을 LLM 판별용 프롬프트로 직렬화한다.
 
     Args:
@@ -275,6 +300,11 @@ def build_triage_prompt(cluster: CrashCluster, context=None) -> str:
         from logosfuzz.analyze.reachability import render_for_prompt
 
         evidence = render_for_prompt(context) + "\n\n"
+
+    contract = contract if contract is not None else _ec.analyze_error_contract(rep)
+    contract_block = _ec.render_for_prompt(contract)
+    if contract_block:
+        evidence += contract_block + "\n\n"
 
     return (
         f"[결함 유형] {cluster.bug_type}\n"
@@ -328,17 +358,22 @@ class LLMTriager:
     """
 
     def __init__(self, client, model_name: str = "deepseek-r1", fallback=None,
-                 context_provider=None) -> None:
+                 context_provider=None, contract_provider=None) -> None:
         self.client = client
         self.model_name = model_name
         self.context_provider = context_provider
-        self.fallback = fallback or RuleBasedTriager(context_provider=context_provider)
+        self.contract_provider = contract_provider
+        self.fallback = fallback or RuleBasedTriager(
+            context_provider=context_provider, contract_provider=contract_provider
+        )
 
     def triage(self, cluster: CrashCluster) -> TriageResult:
         context = _safe_context(self.context_provider, cluster)
+        contract = _safe_context(self.contract_provider, cluster)
         try:
             raw = self.client.complete(
-                build_triage_prompt(cluster, context=context), system=_TRIAGE_SYSTEM
+                build_triage_prompt(cluster, context=context, contract=contract),
+                system=_TRIAGE_SYSTEM,
             )
         except Exception:
             return self._fallback(cluster, "llm-call-failed")
@@ -348,6 +383,10 @@ class LLMTriager:
         signals = ["llm-judgment"]
         if context is not None and context.resolved:
             signals.append("reachability-context")
+        if contract is None:
+            contract = _ec.analyze_error_contract(cluster.representative)
+        if contract.found:
+            signals.append("error-contract-context")
         return TriageResult(
             verdict=Verdict(str(parsed["verdict"])),
             confidence=_clamp(float(parsed.get("confidence", 0.5))),
