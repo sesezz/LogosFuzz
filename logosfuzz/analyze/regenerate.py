@@ -56,7 +56,8 @@ def _api_context_blocks(
         if document is None:
             continue
         block = harness_context(kb, name)
-        override_text = overrides.current_text(document["api_id"])
+        # 타깃 노트(같은 Bazel 타깃의 다른 API에서 나온 오탐 포함) + API 노트
+        override_text = overrides.notes_for(document)
         if override_text:
             block += f"\n\nself-correction notes (오탐 역피드백):\n{override_text}"
         blocks.append(block)

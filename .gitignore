@@ -80,3 +80,6 @@ Bear64.exe
 #         https://github.com/eclipse-score/baselibs.git third_party/score-baselibs
 #       git -C third_party/score-baselibs sparse-checkout set score
 third_party/
+
+# LogosFuzz 런타임 상태(HITL 리뷰 저장소, KB 오버라이드, 감사 로그)
+.logosfuzz/

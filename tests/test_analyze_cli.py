@@ -47,7 +47,8 @@ def test_triage_cli_preserves_reachability_evidence(tmp_path):
     output = tmp_path / "triage.json"
 
     assert main([
-        "triage", str(dedup), "--source-root", str(source_root), "-o", str(output)
+        "triage", str(dedup), "--source-root", str(source_root), "-o", str(output),
+        "--review-store", str(tmp_path / "reviews.json"),
     ]) == 0
 
     result = json.loads(output.read_text(encoding="utf-8"))
@@ -61,10 +62,11 @@ def test_triage_cli_without_source_root_keeps_legacy_shape(tmp_path):
     _, dedup = _dedup_input(tmp_path)
     output = tmp_path / "triage.json"
 
-    assert main(["triage", str(dedup), "-o", str(output)]) == 0
+    assert main(["triage", str(dedup), "-o", str(output), "--no-approval-gate"]) == 0
 
     result = json.loads(output.read_text(encoding="utf-8"))
     assert result["results"][0]["reachability"] is None
+    assert "verified_crashes" not in result  # 게이트를 끄면 예전 출력 그대로
 
 
 def test_generated_harness_frame_is_not_target_application_code():
