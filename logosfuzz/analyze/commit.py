@@ -27,11 +27,20 @@ def apply_kb_update(
     *,
     decided_by: str = "operator",
 ) -> KBUpdateProposal:
-    """승인된 제안을 오버라이드 스토어에 upsert하고 제안 상태를 갱신한다."""
-    overrides.upsert(
-        proposal.api_id, proposal.after_text, proposal.proposal_id,
-        embedding=proposal.embedding,
-    )
+    """승인된 제안을 오버라이드 스토어에 upsert하고 제안 상태를 갱신한다.
+
+    Bazel 타깃 제안이면 타깃 노트로, 아니면(구 KB) API 노트로 반영한다.
+    """
+    if proposal.build_target:
+        overrides.upsert_target(
+            proposal.build_target, proposal.after_text, proposal.proposal_id,
+            api_ids=[proposal.api_id], embedding=proposal.embedding,
+        )
+    else:
+        overrides.upsert(
+            proposal.api_id, proposal.after_text, proposal.proposal_id,
+            embedding=proposal.embedding,
+        )
     proposal.status = ProposalStatus.APPROVED
     proposal.decided_at = now_iso()
     proposal.decided_by = decided_by

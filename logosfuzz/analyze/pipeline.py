@@ -16,6 +16,11 @@ ANA-05-01이 오탐(FALSE_POSITIVE)으로 확정한 크래시(`FalsePositiveCras
        - SKIP/DEFER    -> 이번 호출에서는 더 진행하지 않는다(PENDING 유지)
   5. 각 단계 산출물을 `AuditTrailStore`에 기록(crash_id/api_id/harness_id 추적성)
 
+역피드백 단위는 Bazel 타깃이다(4주차). 크래시 API를 소유한 타깃을 찾아
+제안·HITL 대상·재생성 범위를 모두 그 타깃으로 맞춘다 - 같은 타깃의 다른 API
+하네스도 같은 노트를 보고 재생성돼야 같은 오탐을 반복하지 않는다. 타깃을 모르는
+구 KB에서는 예전처럼 API 단위로 동작한다(`kb_feedback` 모듈 docstring 참조).
+
 트리거 정책은 reactive(즉시)다: ANA-05-01이 오탐 판정을 내리는 즉시 이
 파이프라인을 호출한다고 전제한다. 크래시 발생 빈도 자체가 이미 "이벤트당
 1회 LLM 호출"의 자연스러운 상한이고, 실제 KB/재생성 반영은 어차피 HITL
@@ -35,7 +40,12 @@ from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 from . import commit, regenerate
 from .audit import AuditTrailStore
-from .kb_feedback import KBOverrideStore, propose_kb_update, rebuild_with_overrides
+from .kb_feedback import (
+    KBOverrideStore,
+    apis_in_target,
+    propose_kb_update,
+    rebuild_with_overrides,
+)
 from .models import FalsePositiveCrash, KBUpdateProposal, RegenerationRecord, RootCauseAnalysis
 from .rootcause import analyze_false_positive
 
@@ -81,24 +91,36 @@ def run_ana_05_03(
     (`FalsePositiveCrash.__post_init__`이 강제)."""
     analysis = analyze_false_positive(crash, kb, llm)
 
-    proposal = propose_kb_update(analysis, crash.harness_id, overrides)
+    proposal = propose_kb_update(
+        analysis, crash.harness_id, overrides, kb=kb, build_target=crash.build_target,
+    )
     audit.record_proposal(proposal)
 
+    # 타깃 단위 제안이면 검토 대상도 타깃이다 - 같은 타깃의 다른 API까지 바뀐다는
+    # 사실을 검토자가 승인 전에 봐야 한다.
+    review_target = proposal.build_target or str(crash.api_id)
+    unit_apis = apis_in_target(kb, proposal.build_target)
     decision = hitl.request(
         Checkpoint.KB_FEEDBACK,
-        target=str(crash.api_id),
+        target=review_target,
         project=project,
-        summary=f"[api_id={crash.api_id}] 오탐 역피드백 제안 (crash={crash.crash_id})",
+        summary=(
+            f"[{proposal.scope}] 오탐 역피드백 제안 "
+            f"(crash={crash.crash_id}, api_id={crash.api_id}, "
+            f"영향 API {len(proposal.affected_api_ids)}개)"
+        ),
         payload={
             "crash_id": crash.crash_id,
             "api_id": crash.api_id,
             "harness_id": crash.harness_id,
+            "build_target": proposal.build_target,
+            "affected_apis": [d["function"] for d in unit_apis] or [crash.api_id],
             "before_text": proposal.before_text,
             "after_text": proposal.after_text,
             "root_cause_summary": analysis.summary,
         },
     )
-    proposal.hitl_item_id = _latest_item_id(hitl, project, str(crash.api_id))
+    proposal.hitl_item_id = _latest_item_id(hitl, project, review_target)
 
     result_kb = kb
     regeneration: Optional[RegenerationRecord] = None
@@ -109,10 +131,11 @@ def run_ana_05_03(
         result_kb = rebuild_with_overrides(kb, overrides)
 
         if compiler is not None:
+            # Logic Group 경계가 Bazel 타깃이므로(3주차) 재생성 범위도 타깃 전체다.
             record, _report = regenerate.trigger_regeneration(
                 proposal, result_kb, overrides, compiler, llm,
-                logic_group=logic_group or crash.harness_id,
-                target_apis=target_apis or [],
+                logic_group=logic_group or proposal.build_target or crash.harness_id,
+                target_apis=target_apis or [d["function"] for d in unit_apis],
                 max_round=max_round, project=project, hitl=hitl,
             )
             audit.record_regeneration(record)
