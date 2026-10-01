@@ -13,7 +13,8 @@ B 쪽 우회는 이미 들어가 있어 지금 동작에는 지장이 없지만,
 | 10분 퍼징(`vajson_parser`) | 2,189,305회, 크래시 0건, cov 3095에서 포화 |
 | 빌드 단위 리포트 | 두 단위가 `built`/`repaired` + `passed` 로 정상 조인 |
 | 전체 테스트 | 최신 dev 병합 후 963 passed, 1 skipped |
-| Docker 실행 | **실패** — 아래 C-1 |
+| Docker 실행(`ubuntu:22.04` 이미지) | **실패** — 아래 C-1 |
+| Docker 실행(24.04 로컬 이미지) | 성공 — 두 그룹 10초 퍼징(17k~25k exec/s), 크래시 0건, 리포트 `passed` |
 
 ## C 파트 (실행·계측)
 
@@ -27,9 +28,19 @@ B 쪽 우회는 이미 들어가 있어 지금 동작에는 지장이 없지만,
   이미지는 `ubuntu:22.04`(glibc 2.35) 라서 로더가 거부한다.
 - 확인: 같은 바이너리를 `docker run -v <bin dir>:/harness:ro ubuntu:24.04 ... -max_total_time=5` 로 돌리면
   6초에 152,883회 정상 실행.
-- 제안: `FROM ubuntu:24.04`. 상위 호환이라 호스트가 24.04 이하인 팀원도 문제없다.
-  (근본 해결은 sysroot 를 고정한 hermetic 빌드이나 작업량이 크다. 정적 링크는 libstdc++ 만 풀고
-  `GLIBC_2.38` 은 남아 효과가 없다.)
+- 전체 경로 확인: `docker/Dockerfile` 사본(`FROM ubuntu:24.04`, `useradd` 줄만 아래처럼 수정)으로 로컬 이미지를
+  빌드해 `logosfuzz fuzz --groups ...` (Docker 모드)를 돌리면 두 그룹이 정상 퍼징되고 리포트까지 이어진다.
+- **주의(`FROM` 줄만 바꾸면 빌드가 깨진다)**: 24.04 베이스 이미지에는 UID 1000 의 `ubuntu` 사용자가 이미 있어
+  `RUN useradd -m -u 1000 fuzzer ...` 가 `useradd: UID 1000 is not unique` 로 실패한다.
+  `RUN (userdel -r ubuntu || true) && useradd -m -u 1000 fuzzer ...` 로 바꾸면 17단계 모두 통과한다.
+- 제안(단기): `FROM ubuntu:24.04` + 위 `useradd` 수정. 컨테이너가 바이너리를 **빌드한 호스트보다 같거나 새로워야** 하므로,
+  호스트가 24.04 이하인 팀원에게만 통한다. 호스트가 더 최신인 팀원은 같은 문제가 다시 난다.
+- 제안(범용): 바이너리가 실행 환경과 무관하게 돌게 하려면 **빌드 쪽을 고정**해야 한다.
+  1. 오래된 glibc 의 sysroot 를 Bazel LLVM 툴체인에 고정(오버레이 `MODULE.bazel`, B·C 협의) — 호스트 버전과
+     무관하게 낮은 glibc 만 요구하는 바이너리가 나온다. 아직 시도하지 않았고 baselibs 가 그 libstdc++ 로
+     빌드되는지 확인이 필요하다.
+  2. 이미지 안에서 빌드하고 같은 이미지에서 실행(이미지에 bazelisk 가 이미 있다).
+  (정적 링크는 libstdc++ 만 풀고 `GLIBC_2.38` 은 남으며, ASan 은 정적 glibc 와 함께 쓸 수 없어 해결책이 아니다.)
 
 ### C-2. 시작하지 못한 실행이 조용히 묻힌다
 - 증상: 위 실패에서도 화면에는 `exec/s=0 cov=0 execs=0 ... 완료: 총 크래시 0건 → analyze 단계로 전달` 만 나온다.
@@ -41,14 +52,17 @@ B 쪽 우회는 이미 들어가 있어 지금 동작에는 지장이 없지만,
 ### C-3. `fuzz_summary.json` 그룹에 총 실행 횟수(`execs`)를 기록해 달라
 - 증상: 화면에는 `execs=743036` 이 나오는데 JSON 에는 `exec_per_sec`·`duration_sec`·`coverage` 만 있다.
 - 제안: `fuzz_session.py` 그룹 dict 에 `"execs": g.stats.execs` 한 줄.
-- B 쪽 대응: 없으면 `exec_per_sec × duration_sec` 로 추정해 `~` 를 붙여 표시한다(실측 대비 약 0.5%).
+- B 쪽 대응: 없으면 `exec_per_sec × duration_sec` 로 추정해 `~` 를 붙여 표시한다(실측 대비 호스트 실행 약 0.5%, Docker 실행 약 4% — Docker 는 `duration_sec` 에 컨테이너 시작 시간이 들어간다).
   `execs` 가 생기면 자동으로 실측값을 쓴다.
 
-### C-4. llvm-cov 계측 빌드 설정 (4주차 커버리지 비교에 필요)
-- `build:fuzz` 에는 `-fprofile-instr-generate -fcoverage-mapping` 이 없다. 유닛테스트 vs 퍼징 커버리지
-  비교(`reporting/coverage_compare.py`)는 같은 단위(줄)의 퍼징 lcov 가 필요하다.
-- libFuzzer 의 `cov:` 는 엣지 수라 유닛테스트의 줄 커버리지와 직접 비교할 수 없다.
-- 수집 절차 초안은 `logosfuzz/generate/bazel/README.md` 의 "4주차: 유닛테스트 vs 퍼징 커버리지 비교" (미검증).
+### C-4. (확인 요청) 커버리지 비교 담당과 baselibs 기준 커밋
+- 4주차 "유닛테스트 vs 퍼징 커버리지 비교실험"은 C 의 `scripts/compare_coverage.sh`(커밋 `d65c0dd`)가
+  이미 구현·실측한 것으로 보인다. 이 항목이 C 담당이 맞는지 확인해 달라.
+  B 가 만든 `reporting/coverage_compare.py` 는 기능이 겹치고 실데이터로 검증하지 못했다 — 제외해도 되는가?
+- 스크립트는 baselibs `09be72c`(`--config=llvm_cov`, `tools/coverage/`) 기준이다. B 의 로컬 baselibs 는
+  `ff0e4b6`(2026-06-03)이고 그 커밋은 없다. 이 환경에서 직접 시도한 `bazel coverage`와 수동 계측은
+  막혔다(기본 config 에서 `-Werror=deprecated-declarations`, 이후 vajson 구현 `.cpp` 의 커버리지 매핑 누락).
+  팀이 쓰는 baselibs 커밋을 알려 달라.
 
 ### C-5. (계약 확인) `groups.json` 의 `harness` 경로
 - B 는 `bazel-out/.../*_bin`(심볼릭 링크)이 아니라 **링크를 푼 실제 파일 경로**(`.../*_raw_`)를 준다.
@@ -85,6 +99,11 @@ B 쪽 우회는 이미 들어가 있어 지금 동작에는 지장이 없지만,
 
 ## 팀 결정이 필요한 것
 
-1. **"검증된 고유 크래시 목록"(4주차 완료 기준)** — 현재 크래시 0건이다. 빈 목록도 산출로 인정하는가,
+1. **"검증된 고유 크래시 목록"(4주차 완료 기준)** — 현재 크래시 0건이다(10분 퍼징 포함). 빈 목록도 산출로 인정하는가,
    실제 크래시가 필요한가? 필요하다면 다른 진입점 추가, `*_test.cc` 시드 코퍼스, 1주차식 심은 결함 중 선택.
-2. **크래시 분류 계약** — 시작 실패를 `crashed` 가 아니라 `failed` 로 구분하는 B 의 변경(C-2)에 동의하는가.
+2. **크래시 분류 계약** — 시작 실패를 `crashed` 가 아니라 `failed` 로 구분하는 B 의 변경(C-2)에 동의하는가
+   (스키마 소유자 확인 필요).
+3. **커버리지 비교 담당** — C 의 `scripts/compare_coverage.sh` 로 가는가? B 의 `coverage_compare.py` 는 제외?
+4. **"최종 리포트 취합·발표자료"의 범위**(B 4주차 항목) — 코드인가 문서인가?
+5. **baselibs 기준 커밋 통일**(C: `09be72c` / B 로컬: `ff0e4b6`) 과 **Docker 실행 환경 정책**
+   (단기 24.04 이미지 / 범용 sysroot 고정 또는 이미지 안 빌드).

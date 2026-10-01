@@ -121,7 +121,7 @@ def _execs_of(group: Mapping[str, Any]) -> tuple[int, bool]:
     EXE 의 ``fuzz_summary.json`` 은 그룹별로 ``exec_per_sec``/``duration_sec`` 만 쓰고 총
     실행 횟수는 기록하지 않는다(화면 출력에만 나온다). ``execs`` 가 없으면 0 으로 채워
     "한 번도 안 돌았다"고 읽히게 하지 말고 ``exec_per_sec × duration_sec`` 로 추정하고
-    추정치임을 표시한다. 실측 대비 1% 안팎이었다(743,036회 실측 vs 추정 747,801회).
+    추정치임을 표시한다. 실측 대비 호스트 실행은 약 0.5%(743,036회 실측 vs 추정 747,801회), Docker 실행은 약 4%(278,556회 vs 289,695회) 높게 나온다 — Docker 의 ``duration_sec`` 에는 컨테이너 시작 시간이 들어간다.
     """
     execs = group.get("execs")
     if execs is not None:
