@@ -146,6 +146,11 @@ python -m logosfuzz.cli summary \
 - 소스(.cc) 자가치유(`--heal-rounds`)로 복구된 단위는 `build_status`가 `repaired`이다.
   `build_summary.json`의 `units[*].heal`(`attempted`, `ok`, `outcome`, `rounds_used`,
   `reason`)과 최상위 `healed_units`에 기록되며, 이 요약 JSON의 필드는 늘지 않는다.
+- `execs`: 입력 `run` 그룹에 `execs` 가 있으면 그 값을 쓴다. EXE 의 `fuzz_summary.json` 은 총 실행
+  횟수를 기록하지 않으므로(`exec_per_sec`·`duration_sec` 만 있다) 없을 때는
+  `exec_per_sec × duration_sec` 로 **추정**하고 그룹과 빌드 단위에 `execs_estimated: true` 를
+  붙인다. Markdown 표에서는 `~` 를 앞에 붙여 추정치임을 드러낸다. EXE 가 `execs` 를 기록하면
+  자동으로 실측 값이 쓰인다.
 - 빌드 정보가 없는 그룹은 `(unassigned)` 단위로 모이며 집계 수에서는 빠진다.
 - 선택 필드 추가이므로 `schema_version`은 `1.0` 그대로이고 `metrics`는 바뀌지 않는다.
 

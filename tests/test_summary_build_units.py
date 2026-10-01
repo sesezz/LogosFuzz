@@ -177,3 +177,36 @@ def test_cli_summary_with_build(tmp_path, capsys):
     assert saved["build_units"]["built_units"] == 1
     assert md.read_text(encoding="utf-8").startswith("빌드 단위 3개")
     assert "빌드 단위 3개" in capsys.readouterr().out
+
+
+def test_execs_are_estimated_when_exe_does_not_record_them():
+    """EXE 의 fuzz_summary.json 에는 총 실행 횟수가 없다 — 0 이 아니라 추정치를 보여 준다."""
+    run = {"groups": [
+        {"group": "lg_json", "exit_code": 0, "exec_per_sec": 23968.0, "duration_sec": 31.2},   # execs 없음
+        {"group": "lg_json_writer", "exit_code": 0, "execs": 50},                                # 실측 있음
+        {"group": "lg_digest", "exit_code": 0},                                                  # 추정할 근거도 없음
+    ]}
+    result = build_validation_summary(run, build_summary=_build())
+    groups = {g["target"]: g for g in result["run"]["groups"]}
+
+    assert groups["lg_json"]["execs"] == round(23968.0 * 31.2)
+    assert groups["lg_json"]["execs_estimated"] is True
+    assert groups["lg_json_writer"]["execs"] == 50 and groups["lg_json_writer"]["execs_estimated"] is False
+    assert groups["lg_digest"]["execs"] == 0 and groups["lg_digest"]["execs_estimated"] is False
+
+    unit = _units(result)[JSON_UNIT]                      # lg_json(추정) + lg_json_writer(실측)
+    assert unit["execs"] == round(23968.0 * 31.2) + 50
+    assert unit["execs_estimated"] is True                 # 하나라도 추정이면 합계도 추정
+
+
+def test_measured_execs_are_never_marked_estimated():
+    result = build_validation_summary(_run(), build_summary=_build())
+    assert all(g["execs_estimated"] is False for g in result["run"]["groups"])
+    assert all(u["execs_estimated"] is False for u in result["build_units"]["units"])
+
+
+def test_markdown_marks_estimated_execs():
+    run = {"groups": [{"group": "lg_json", "exit_code": 0, "exec_per_sec": 1000.0, "duration_sec": 10.0}]}
+    text = render_build_units_markdown(build_validation_summary(run, build_summary=_build()))
+    assert "| ~10000 |" in text
+

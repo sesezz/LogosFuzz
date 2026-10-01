@@ -103,6 +103,23 @@ def _status(group: Mapping[str, Any]) -> str:
     return "passed"
 
 
+def _execs_of(group: Mapping[str, Any]) -> tuple[int, bool]:
+    """(총 실행 횟수, 추정 여부).
+
+    EXE 의 ``fuzz_summary.json`` 은 그룹별로 ``exec_per_sec``/``duration_sec`` 만 쓰고 총
+    실행 횟수는 기록하지 않는다(화면 출력에만 나온다). ``execs`` 가 없으면 0 으로 채워
+    "한 번도 안 돌았다"고 읽히게 하지 말고 ``exec_per_sec × duration_sec`` 로 추정하고
+    추정치임을 표시한다. 실측 대비 1% 안팎이었다(743,036회 실측 vs 추정 747,801회).
+    """
+    execs = group.get("execs")
+    if execs is not None:
+        return _int(execs), False
+    rate, seconds = _float(group.get("exec_per_sec")), _float(group.get("duration_sec"))
+    if rate > 0 and seconds > 0:
+        return int(round(rate * seconds)), True
+    return 0, False
+
+
 def _normalise_group(group: Mapping[str, Any], *, stage: str,
                      build_lookup: Mapping[str, Mapping[str, Any]] | None = None,
                      ) -> dict[str, Any]:
@@ -113,6 +130,7 @@ def _normalise_group(group: Mapping[str, Any], *, stage: str,
     crashes = list(crashes) if isinstance(crashes, list) else []
     findings = list(findings) if isinstance(findings, list) else []
     status = _status(group)
+    execs, execs_estimated = _execs_of(group)
     return {
         "stage": stage,
         "target": name,
@@ -123,7 +141,8 @@ def _normalise_group(group: Mapping[str, Any], *, stage: str,
         "timed_out": bool(group.get("timed_out")),
         "crashed": status == "crashed",
         "duration_sec": round(_float(group.get("duration_sec")), 3),
-        "execs": _int(group.get("execs")),
+        "execs": execs,
+        "execs_estimated": execs_estimated,
         "exec_per_sec": _float(group.get("exec_per_sec")),
         "coverage": _number(group.get("coverage"), 0),
         "crash_count": len(crashes),
@@ -413,6 +432,7 @@ def _normalise_build_units(
                 "crashes": 0,
                 "sanitizer_findings": 0,
                 "execs": 0,
+                "execs_estimated": False,
                 "duration_sec": 0.0,
                 "coverage": 0,
             }
@@ -448,6 +468,7 @@ def _normalise_build_units(
         entry["crashes"] += group["crash_count"]
         entry["sanitizer_findings"] += group["sanitizer_count"]
         entry["execs"] += group["execs"]
+        entry["execs_estimated"] = entry["execs_estimated"] or group["execs_estimated"]
         entry["duration_sec"] += group["duration_sec"]
         coverage = group.get("coverage")
         if isinstance(coverage, (int, float)) and coverage > entry["coverage"]:
@@ -497,7 +518,7 @@ def render_build_units_markdown(data: Mapping[str, Any]) -> str:
                 unit.get("run_status"),
                 unit.get("crashes"),
                 unit.get("sanitizer_findings"),
-                unit.get("execs"),
+                f"~{unit.get('execs')}" if unit.get("execs_estimated") else unit.get("execs"),
                 unit.get("coverage"),
             )
         )
