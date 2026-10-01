@@ -22,6 +22,7 @@ from logosfuzz.reporting.summary import (
     ValidationSummaryError,
     build_validation_summary,
     load_json,
+    render_build_units_markdown,
     write_validation_summary,
 )
 
@@ -91,6 +92,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="GEN-03-04 gen_validation_summary.json 경로")
     s.add_argument("--selection", type=Path, default=None,
                    help="EXT/SCH 대상 선정·제약 조건 결과 JSON 경로")
+    s.add_argument("--build", type=Path, default=None,
+                   help="CTR-06-01 BUILD 단계 build_summary.json 경로(빌드 단위 집계)")
+    s.add_argument("--markdown", type=Path, default=None,
+                   help="빌드 단위 집계 표를 Markdown 으로도 저장할 경로")
     s.add_argument("--output", "-o", type=Path, required=True,
                    help="표준 검증 결과 JSON 저장 경로")
     s.add_argument("--project", default="", help="프로젝트 또는 대상 이름")
@@ -120,6 +125,7 @@ def main(argv: list | None = None) -> int:
             analysis = load_json(args.analysis) if args.analysis else None
             generation = load_json(args.generation) if args.generation else None
             selection = load_json(args.selection) if args.selection else None
+            build = load_json(args.build) if args.build else None
             metadata = {
                 key: value for key, value in {
                     "project": args.project,
@@ -134,8 +140,13 @@ def main(argv: list | None = None) -> int:
                 metadata=metadata,
                 generation_summary=generation,
                 selection_summary=selection,
+                build_summary=build,
             )
             path = write_validation_summary(args.output, result)
+            if args.markdown:
+                args.markdown.parent.mkdir(parents=True, exist_ok=True)
+                args.markdown.write_text(render_build_units_markdown(result),
+                                         encoding="utf-8")
         except (OSError, ValidationSummaryError) as e:
             print(f"[SUMMARY 오류] {e}", file=sys.stderr)
             return 1
@@ -146,7 +157,16 @@ def main(argv: list | None = None) -> int:
             f"오탐 {result['metrics']['false_positive']} | "
             f"검토필요 {result['metrics']['needs_review']}"
         )
+        units = result["build_units"]
+        if units["status"] == "completed":
+            print(
+                f"[SUMMARY] 빌드 단위 {units['total_units']}개 | "
+                f"빌드 성공 {units['built_units']} (자가치유 {units['repaired_units']}) | "
+                f"빌드 실패 {units['failed_units']} | 크래시 발생 {units['crashed_units']}"
+            )
         print(f"  -> {path}")
+        if args.markdown:
+            print(f"  -> {args.markdown}")
         return 0
 
     if args.command == "analyze":

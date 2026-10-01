@@ -15,6 +15,7 @@ CMake 든 동일하다. 그래서 `build()` 는 **바이너리 경로**를 돌�
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import time
@@ -33,6 +34,10 @@ DEFAULT_FUZZ_CONFIG = "fuzz"
 REGRESSION_CONFIG = "bl-x86_64-linux"
 
 
+# clang/gcc 진단: harness.cc:12:5: error: ... / fatal error: ... (색 제어문자가 섞여도 잡는다)
+_COMPILER_DIAGNOSTIC_RE = re.compile(r":\d+:\d+: (?:\x1b\[[0-9;]*m)*(?:fatal )?error")
+
+
 @dataclass
 class BuildResult:
     """빌드 1회 시도의 결과."""
@@ -46,8 +51,18 @@ class BuildResult:
 
     @property
     def short_log(self) -> str:
-        lines = [ln for ln in self.log.splitlines() if ln.startswith("ERROR")]
-        return "\n".join(lines[:5]) or self.log[-500:]
+        """실패 원인 요약: Bazel ``ERROR`` 줄 + 컴파일러 진단(``file:line:col: error:``).
+
+        Bazel 의 ``ERROR`` 줄은 "컴파일 실패" 까지만 말하고 뒤의 clang 인자를 생략한다
+        ("... (remaining 47 arguments skipped)"). 진짜 원인(없는 멤버, 헤더 가시성 등)은
+        그 아래 clang 진단에 있으므로 같이 싣지 않으면 build_summary.json 만 봐서는
+        왜 실패했는지 알 수 없다.
+        """
+        lines = self.log.splitlines()
+        picked = [ln for ln in lines if ln.startswith("ERROR")][:5]
+        picked += [ln for ln in lines
+                   if _COMPILER_DIAGNOSTIC_RE.search(ln) and ln not in picked][:12]
+        return "\n".join(picked) or self.log[-500:]
 
 
 class BuildAdapter(Protocol):
@@ -165,6 +180,10 @@ class BazelAdapter:
             duration_s=elapsed,
             command=cmd,
         )
+
+    def binary_path(self, spec: FuzzTargetSpec) -> Optional[Path]:
+        """설정에 맞는 퍼저 바이너리 경로(cquery 기반). 소스 자가치유 후 재조회용."""
+        return self._binary_path(spec)
 
     def _binary_path(self, spec: FuzzTargetSpec) -> Optional[Path]:
         """설정에 고정된 퍼저 바이너리 경로를 돌려준다.

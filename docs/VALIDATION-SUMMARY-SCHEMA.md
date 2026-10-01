@@ -116,6 +116,39 @@ python -m logosfuzz.cli summary \
 
 그룹에는 `target`, `harness_name`, `exit_code`, `duration_sec`, `execs`, `exec_per_sec`, `coverage`, `crash_count`, `sanitizer_count`, `compile_error_count`, `crashes`, `sanitizer_findings`, `coverage_report`, `notes`가 포함된다. ANA의 각 finding에는 판별 결과와 함께 선택적인 `reachability` 증거가 포함된다.
 
+## 빌드 단위 집계 (4주차)
+
+3주차부터 Logic Group 경계와 하네스 배치가 빌드 단위(Bazel 타깃) 기준이므로,
+리포트도 빌드 단위를 키로 집계한다. CTR-06-01 BUILD 단계가 쓴
+`build_summary.json`을 `--build`로 넘긴다.
+
+```bash
+python -m logosfuzz.cli summary \
+  --run out/fuzz_summary.json \
+  --build out/build_summary.json \
+  --output out/validation-summary.json \
+  --markdown out/build_units.md
+```
+
+- `run.groups[*]`에 선택 필드 `build_target`, `build_system`, `fuzz_target`, `binary`가 붙는다.
+  그룹 이름·`cc_fuzz_test` 이름·`_bin` 바이너리 이름 중 무엇으로 기록돼도 조인된다.
+  그룹 자체에 `build_target`이 있으면 그 값이 우선한다.
+- 최상위 `build_units`: `status`(`completed`|`not_run`), `total_units`, `built_units`,
+  `repaired_units`, `failed_units`, `crashed_units`, `units[]`.
+- `units[*]`: `build_target`, `build_system`, `groups`, `fuzz_targets`, `binaries`,
+  `build_status`(`failed` > `repaired` > `built` > `emitted` > `not_built`),
+  `rounds_used`, `run_status`(`crashed` > `timeout` > `failed` > `passed` > `not_run`),
+  `run_groups`, `crashes`, `sanitizer_findings`, `execs`, `duration_sec`, `coverage`(최댓값).
+- `units[*].groups`는 **Logic Group 이름**으로 통일된다. EXE가 `cc_fuzz_test` 이름이나
+  `_bin` 바이너리 이름으로 그룹을 기록해도 같은 빌드 결과로 합쳐져 중복 등장하지 않는다.
+  처음부터 이름을 맞추려면 BUILD 단계의 `--groups-out`으로 만든 groups JSON(`name` =
+  Logic Group 이름)을 `logosfuzz fuzz --groups`에 넘긴다.
+- 소스(.cc) 자가치유(`--heal-rounds`)로 복구된 단위는 `build_status`가 `repaired`이다.
+  `build_summary.json`의 `units[*].heal`(`attempted`, `ok`, `outcome`, `rounds_used`,
+  `reason`)과 최상위 `healed_units`에 기록되며, 이 요약 JSON의 필드는 늘지 않는다.
+- 빌드 정보가 없는 그룹은 `(unassigned)` 단위로 모이며 집계 수에서는 빠진다.
+- 선택 필드 추가이므로 `schema_version`은 `1.0` 그대로이고 `metrics`는 바뀌지 않는다.
+
 ## 호환성 규칙
 
 - `schema_version`이 같은 동안 기존 필드의 의미를 바꾸지 않는다.
