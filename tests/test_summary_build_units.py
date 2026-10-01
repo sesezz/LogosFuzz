@@ -210,3 +210,38 @@ def test_markdown_marks_estimated_execs():
     text = render_build_units_markdown(build_validation_summary(run, build_summary=_build()))
     assert "| ~10000 |" in text
 
+
+STARTUP_FAILURE = {"group": "lg_json", "exit_code": 1, "crashed": True, "timed_out": False,
+                   "duration_sec": 1.3, "exec_per_sec": 0, "coverage": 0,
+                   "crashes": [], "sanitizer_findings": []}
+
+
+def test_startup_failure_is_not_reported_as_a_crash():
+    """로더가 종료해 한 번도 실행되지 못한 그룹(EXE 는 crashed=true 를 붙인다)은 크래시가 아니다."""
+    result = build_validation_summary({"groups": [dict(STARTUP_FAILURE)]}, build_summary=_build())
+
+    group = result["run"]["groups"][0]
+    assert group["status"] == "failed" and group["crashed"] is False
+    assert result["metrics"]["crashed_groups"] == 0 and result["metrics"]["failed_groups"] == 1
+    assert _units(result)[JSON_UNIT]["run_status"] == "failed"
+    assert result["build_units"]["crashed_units"] == 0
+
+
+@pytest.mark.parametrize("override", [
+    {"crashes": ["crashes/crash-1"]},                                   # 크래시 산출물이 있다
+    {"sanitizer_findings": [{"category": "heap-buffer-overflow"}]},     # sanitizer 가 잡았다
+    {"exec_per_sec": 120.0},                                            # 한참 실행하다 죽었다
+    {"coverage": 7},
+    {"execs": 5},
+])
+def test_crash_with_evidence_or_progress_is_still_a_crash(override):
+    result = build_validation_summary({"groups": [{**STARTUP_FAILURE, **override}]})
+    assert result["run"]["groups"][0]["status"] == "crashed"
+
+
+def test_clean_exit_with_no_progress_is_still_passed_and_timeout_keeps_priority():
+    clean = {**STARTUP_FAILURE, "exit_code": 0, "crashed": False}
+    assert build_validation_summary({"groups": [clean]})["run"]["groups"][0]["status"] == "passed"
+    timeout = {**STARTUP_FAILURE, "timed_out": True}
+    assert build_validation_summary({"groups": [timeout]})["run"]["groups"][0]["status"] == "timeout"
+

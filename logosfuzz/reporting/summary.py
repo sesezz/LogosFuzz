@@ -91,16 +91,28 @@ def _status(group: Mapping[str, Any]) -> str:
     if bool(group.get("timed_out")):
         return "timeout"
     findings = group.get("sanitizer_findings")
-    if (
-        bool(group.get("crashed"))
-        or bool(group.get("crashes"))
-        or (isinstance(findings, list) and bool(findings))
-    ):
-        return "crashed"
     exit_code = group.get("exit_code")
+    has_evidence = bool(group.get("crashes")) or (isinstance(findings, list) and bool(findings))
+    if bool(group.get("crashed")) and not has_evidence and exit_code not in (None, 0) \
+            and _never_ran(group):
+        # 크래시는 최소 한 번은 실행돼야 나온다. 증거(산출물·sanitizer)도 없고 처리량·커버리지가
+        # 모두 0 이면 퍼저가 시작하지 못한 것이다(예: 컨테이너의 glibc 가 낮아 로더가 종료).
+        # EXE 가 비정상 종료에 붙인 crashed 플래그를 그대로 믿으면 "크래시 발생" 으로 집계된다.
+        return "failed"
+    if bool(group.get("crashed")) or has_evidence:
+        return "crashed"
     if exit_code not in (None, 0):
         return "failed"
     return "passed"
+
+
+def _never_ran(group: Mapping[str, Any]) -> bool:
+    """처리량·커버리지·실행 횟수가 모두 0 — 퍼징이 한 번도 진행되지 않았다."""
+    return (
+        _float(group.get("exec_per_sec")) == 0
+        and _number(group.get("coverage"), 0) == 0
+        and _int(group.get("execs")) == 0
+    )
 
 
 def _execs_of(group: Mapping[str, Any]) -> tuple[int, bool]:

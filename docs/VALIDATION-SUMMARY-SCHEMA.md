@@ -116,6 +116,14 @@ python -m logosfuzz.cli summary \
 
 그룹에는 `target`, `harness_name`, `exit_code`, `duration_sec`, `execs`, `exec_per_sec`, `coverage`, `crash_count`, `sanitizer_count`, `compile_error_count`, `crashes`, `sanitizer_findings`, `coverage_report`, `notes`가 포함된다. ANA의 각 finding에는 판별 결과와 함께 선택적인 `reachability` 증거가 포함된다.
 
+## 시작 실패와 크래시의 구분
+
+EXE 가 비정상 종료에 `crashed: true` 를 붙이더라도, **크래시 산출물·sanitizer 증거가 없고 처리량·
+커버리지·실행 횟수가 모두 0** 이면 `status` 는 `failed` 다(`crashed` 가 아니다). 퍼저가 한 번도
+실행되지 못한 것이다 — 예: 컨테이너의 glibc/libstdc++ 가 바이너리 요구보다 낮아 로더가 종료
+(`version 'GLIBC_2.38' not found`). 증거가 있거나 한 번이라도 실행됐다면 기존대로 `crashed` 다.
+타임아웃 우선 계약은 그대로다.
+
 ## 빌드 단위 집계 (4주차)
 
 3주차부터 Logic Group 경계와 하네스 배치가 빌드 단위(Bazel 타깃) 기준이므로,
