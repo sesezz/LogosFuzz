@@ -180,3 +180,77 @@ def test_run_group_saves_stdout_and_stderr_logs(tmp_path):
     assert result.stderr_log == str(stderr_path)
     assert stdout_path.read_text(encoding="utf-8") == "normal output line"
     assert "heap-use-after-free" in stderr_path.read_text(encoding="utf-8")
+
+
+# --- Bazel 산출물 직접 실행 (EXE-04-01, GEN 파트 결정사항 ④) ---------------
+#
+# cc_fuzz_test 는 `<name>_bin`(계측된 퍼저 바이너리)을 워크스페이스의 bazel
+# 출력 트리에 떨군다. harness_dir 밖이므로, 그 바이너리가 있는 디렉토리를
+# /harness 로 마운트해야 컨테이너 안에서 실행할 수 있다.
+def _make_bazel_binary(tmp_path, name="json_parser_fuzz_test_bin"):
+    out = tmp_path / "ws" / "bazel-out" / "fuzz-opt" / "bin" / "score" / "json" / "fuzz"
+    out.mkdir(parents=True, exist_ok=True)
+    binary = out / name
+    binary.write_text("#!/bin/sh\n")
+    return binary
+
+
+def test_harness_binary_path_uses_explicit_path(tmp_path):
+    cfg = _config(tmp_path)
+    binary = _make_bazel_binary(tmp_path)
+    grp = LogicGroup(name="json", harness_path=binary)
+    assert DockerIsolationRunner(cfg).harness_binary_path(grp) == binary.resolve()
+
+
+def test_harness_binary_path_resolves_bare_name_against_harness_dir(tmp_path):
+    cfg = _config(tmp_path)
+    grp = _make_harness(cfg)
+    runner = DockerIsolationRunner(cfg)
+    assert runner.harness_binary_path(grp) == (cfg.harness_dir / grp.name).resolve()
+
+
+def test_build_run_argv_mounts_bazel_output_dir(tmp_path):
+    """하네스가 harness_dir 밖에 있으면 그 디렉토리를 /harness 로 마운트한다."""
+    cfg = _config(tmp_path)
+    binary = _make_bazel_binary(tmp_path)
+    grp = LogicGroup(name="json", harness_path=binary)
+    joined = " ".join(DockerIsolationRunner(cfg).build_run_argv(grp))
+    assert f"{binary.parent.resolve()}:/harness:ro" in joined
+    # 컨테이너 안 경로는 두 경우 모두 /harness/<파일명> 이라 내부 커맨드는 동일하다.
+    assert "/harness/json_parser_fuzz_test_bin" in joined
+    # harness_dir 은 이 경우 마운트되지 않아야 한다(엉뚱한 디렉토리 노출 방지).
+    assert f"{cfg.harness_dir.resolve()}:/harness:ro" not in joined
+
+
+def test_build_run_argv_still_mounts_harness_dir_for_bare_name(tmp_path):
+    """기존 흐름(GEN이 harness_dir에 바이너리를 두는 경우)은 그대로 동작한다."""
+    cfg = _config(tmp_path)
+    grp = _make_harness(cfg)
+    joined = " ".join(DockerIsolationRunner(cfg).build_run_argv(grp))
+    assert f"{cfg.harness_dir.resolve()}:/harness:ro" in joined
+    assert "/harness/grp1" in joined
+
+
+def test_local_argv_uses_explicit_binary_path(tmp_path):
+    cfg = _config(tmp_path, use_docker=False)
+    binary = _make_bazel_binary(tmp_path)
+    grp = LogicGroup(name="json", harness_path=binary)
+    argv = DockerIsolationRunner(cfg)._local_argv(grp)
+    # argv 앞에는 env 프리픽스(ASAN_OPTIONS 등)가 붙으므로 위치가 아니라
+    # 포함 여부로 확인한다.
+    assert str(binary.resolve()) in argv
+
+
+def test_run_group_finds_harness_outside_harness_dir(tmp_path):
+    """harness_dir 밖 바이너리를 '하네스 없음'으로 오판하지 않아야 한다."""
+    cfg = _config(tmp_path, timeout_sec=1)
+    binary = _make_bazel_binary(tmp_path)
+    grp = LogicGroup(name="json", harness_path=binary)
+
+    def fake_executor(argv, timeout, on_line):
+        on_line("#1 pulse exec/s: 10")
+        return ProcResult(exit_code=0, timed_out=False)
+
+    runner = DockerIsolationRunner(cfg, executor=fake_executor)
+    result = runner.run_group(grp)   # HarnessNotFoundError 가 나면 실패
+    assert result.exit_code == 0

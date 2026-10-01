@@ -54,6 +54,7 @@ from .regenerate import draft_via_llm, trigger_regeneration
 from .rootcause import analyze_false_positive
 from .signature import (
     application_frames,
+    collapse_repeated_frames,
     cluster_id_for,
     has_application_frame,
     signature_key,
@@ -66,6 +67,7 @@ __all__ = [
     "CrashRecord",
     "Frame",
     "application_frames",
+    "collapse_repeated_frames",
     "cluster_id_for",
     "has_application_frame",
     "signature_key",

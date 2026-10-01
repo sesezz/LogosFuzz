@@ -273,6 +273,109 @@ def test_return_value_null_for_pointer_return():
     assert "NULL" in returns[0].description
 
 
+def test_extract_score_result_make_unexpected_contracts():
+    facts = extract_from_text(
+        "score::Result<int> Parse(int value) {"
+        "  if (value < 0) { return score::MakeUnexpected(Error::kNegative); }"
+        "  if (value > 10) { return MakeUnexpected(Error::kTooLarge, \"too large\"); }"
+        "  return value;"
+        "}"
+    )
+    errors = _find(facts[0].constraints, "error_contract", "return")
+
+    assert len(errors) == 2
+    assert any("Error::kNegative" in constraint.description for constraint in errors)
+    assert any("Error::kTooLarge" in constraint.description for constraint in errors)
+    assert all("has_value()" in constraint.description for constraint in errors)
+    assert all(constraint.confidence == 0.95 for constraint in errors)
+
+
+def test_extract_unqualified_result_used_inside_score_namespace():
+    facts = extract_from_text(
+        "Result<void> Update(void) { return MakeUnexpected(ErrorCode::kInvalid); }"
+    )
+
+    errors = _find(facts[0].constraints, "error_contract")
+    assert errors and "ErrorCode::kInvalid" in errors[0].description
+
+
+def test_extract_result_contract_from_qualified_cpp_method():
+    facts = extract_from_text(
+        "Result<void> Digest::Update(int value) noexcept {"
+        "  if (value < 0) { return MakeUnexpected(ErrorCode::kInvalid); }"
+        "  return {};"
+        "}"
+    )
+
+    assert [fact.name for fact in facts] == ["Update"]
+    assert facts[0].return_type == "Result<void>"
+    assert "ErrorCode::kInvalid" in \
+        _find(facts[0].constraints, "error_contract")[0].description
+
+
+def test_extract_score_result_unexpected_and_unexpect_constructors():
+    facts = extract_from_text(
+        "score::Result<void> First(void) { return score::Unexpected{Error::kFirst}; }\n"
+        "score::Result<void> Second(void) {"
+        "  return score::Result<void>{score::unexpect, Error::kSecond};"
+        "}"
+    )
+
+    first = _find(facts[0].constraints, "error_contract")
+    second = _find(facts[1].constraints, "error_contract")
+    assert first and "Error::kFirst" in first[0].description
+    assert second and "Error::kSecond" in second[0].description
+
+
+def test_extract_score_result_propagated_error_contract():
+    facts = extract_from_text(
+        "score::Result<int> Parent(void) {"
+        "  auto child = Child();"
+        "  if (!child.has_value()) { return score::MakeUnexpected(child.error()); }"
+        "  return child.value();"
+        "}"
+    )
+    errors = _find(facts[0].constraints, "error_contract")
+
+    assert len(errors) == 1
+    assert "propagates error `child.error()`" in errors[0].description
+    assert errors[0].confidence == 0.9
+
+
+def test_trailing_score_result_return_type_is_parsed_and_extracted():
+    facts = extract_from_text(
+        "auto Parse(int value) noexcept -> ::score::Result<int> {"
+        "  if (value == 0) { return ::score::MakeUnexpected(Error::kZero); }"
+        "  return value;"
+        "}"
+    )
+
+    assert [fact.name for fact in facts] == ["Parse"]
+    assert facts[0].return_type == "::score::Result<int>"
+    assert "Error::kZero" in _find(facts[0].constraints, "error_contract")[0].description
+
+
+def test_score_result_error_exit_strengthens_argument_precondition():
+    facts = extract_from_text(
+        "score::Result<int> Parse(int value) {"
+        "  if (value <= 0) { return score::MakeUnexpected(Error::kInvalid); }"
+        "  return value;"
+        "}"
+    )
+    checks = _find(facts[0].constraints, "range_check", "value")
+
+    assert checks[0].confidence == 0.8
+    assert "value > 0" in checks[0].description
+
+
+def test_make_unexpected_is_not_a_result_contract_for_other_return_types():
+    facts = extract_from_text(
+        "int Legacy(void) { return MakeUnexpected(Error::kInvalid); }"
+    )
+
+    assert _find(facts[0].constraints, "error_contract") == []
+
+
 def test_extract_doc_param_constraint():
     decode = extract_from_text(SAMPLE)[0]
     docs = _find(decode.constraints, "doc", "buf")

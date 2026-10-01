@@ -1,0 +1,67 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: <SEED>
+INFO: Loaded 1 modules   (28 inline 8-bit counters): 28 [<ADDR>, <ADDR>), 
+INFO: Loaded 1 PC tables (28 PCs): 28 [<ADDR>,<ADDR>), 
+<WORKSPACE>/bazel-bin/harness/json_fuzzer: Running 1 inputs 1 time(s) each.
+Running: <SCRATCH>/seeds/asan_heap_overflow.bin
+=================================================================
+==<PID>==ERROR: AddressSanitizer: heap-buffer-overflow on address <ADDR> at pc <ADDR> bp <ADDR> sp <ADDR>
+READ of size 1 at <ADDR> thread T0
+    #0 <ADDR> in score::json::Dispatch(unsigned char const*, unsigned long) /proc/self/cwd/score/json/json.cc:107:16
+    #1 <ADDR> in LLVMFuzzerTestOneInput /proc/self/cwd/harness/json_fuzzer.cc:10:3
+    #2 <ADDR> in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) crtstuff.c
+    #3 <ADDR> in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) crtstuff.c
+    #4 <ADDR> in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) crtstuff.c
+    #5 <ADDR> in main (<OUTPUT_BASE>/execroot/_main/bazel-out/k8-fastbuild/bin/harness/json_fuzzer+<ADDR>) (BuildId: <BUILDID>)
+    #6 <ADDR>  (/lib/x86_64-linux-gnu/libc.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #7 <ADDR> in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #8 <ADDR> in _start (<OUTPUT_BASE>/execroot/_main/bazel-out/k8-fastbuild/bin/harness/json_fuzzer+<ADDR>) (BuildId: <BUILDID>)
+
+<ADDR> is located 1 bytes after 16-byte region [<ADDR>,<ADDR>)
+allocated by thread T0 here:
+    #0 <ADDR> in malloc (<OUTPUT_BASE>/execroot/_main/bazel-out/k8-fastbuild/bin/harness/json_fuzzer+<ADDR>) (BuildId: <BUILDID>)
+    #1 <ADDR> in score::json::Dispatch(unsigned char const*, unsigned long) /proc/self/cwd/score/json/json.cc:102:47
+    #2 <ADDR> in LLVMFuzzerTestOneInput /proc/self/cwd/harness/json_fuzzer.cc:10:3
+    #3 <ADDR> in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) crtstuff.c
+    #4 <ADDR> in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) crtstuff.c
+    #5 <ADDR> in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) crtstuff.c
+    #6 <ADDR> in main (<OUTPUT_BASE>/execroot/_main/bazel-out/k8-fastbuild/bin/harness/json_fuzzer+<ADDR>) (BuildId: <BUILDID>)
+    #7 <ADDR>  (/lib/x86_64-linux-gnu/libc.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #8 <ADDR> in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #9 <ADDR> in _start (<OUTPUT_BASE>/execroot/_main/bazel-out/k8-fastbuild/bin/harness/json_fuzzer+<ADDR>) (BuildId: <BUILDID>)
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow /proc/self/cwd/score/json/json.cc:107:16 in score::json::Dispatch(unsigned char const*, unsigned long)
+Shadow bytes around the buggy address:
+  <ADDR>: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  <ADDR>: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  <ADDR>: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  <ADDR>: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  <ADDR>: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=><ADDR>: fa fa 05 fa fa fa 05 fa fa fa 00 00[fa]fa fa fa
+  <ADDR>: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  <ADDR>: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  <ADDR>: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  <ADDR>: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  <ADDR>: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==<PID>==ABORTING
+
+[exit code] 1

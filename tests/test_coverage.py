@@ -12,6 +12,11 @@ from logosfuzz.execute.coverage import (
     CmdResult,
     CoverageCollector,
     CoverageMetric,
+    bazel_coverage_configs,
+    bazel_fuzz_coverage_build_argv,
+    bazel_llvm_tool,
+    extract_bazel_lcov,
+    harness_binary_path,
     instrumentation_flags,
     parse_llvm_cov_export,
     profile_env,
@@ -60,6 +65,80 @@ def test_instrumentation_flags():
     assert "-fprofile-instr-generate" in llvm and "-fcoverage-mapping" in llvm
     assert "-fsanitize-coverage=trace-pc-guard" in instrumentation_flags(CoverageMode.SANITIZER_COV)
     assert instrumentation_flags(CoverageMode.NONE) == ()
+
+
+# --- Bazel 경로의 계측 수급 (3주차) ---------------------------------------
+def test_bazel_coverage_config_for_llvm_cov():
+    """Bazel 빌드는 개별 -f 플래그가 아니라 대상 저장소가 주는 config를 쓴다."""
+    assert bazel_coverage_configs(CoverageMode.LLVM_COV) == ("llvm_cov",)
+
+
+def test_bazel_coverage_config_empty_for_sancov():
+    """엣지 계측은 퍼징 config(cc_engine_instrumentation)가 이미 켜 준다."""
+    assert bazel_coverage_configs(CoverageMode.SANITIZER_COV) == ()
+
+
+def test_bazel_coverage_config_empty_when_disabled():
+    assert bazel_coverage_configs(CoverageMode.NONE) == ()
+
+
+# --- 퍼징 쪽 커버리지 빌드 (5주차 실측) ---------------------------------------
+def test_fuzz_coverage_build_does_not_use_llvm_cov_config():
+    """llvm_cov 는 coverage: 전용이라 bazel build 에 붙이면 정의 안 됨으로 죽는다."""
+    argv = bazel_fuzz_coverage_build_argv("//score/json/fuzz:json_parser_fuzz_test")
+    assert argv[:3] == ["bazel", "build", "--config=fuzz"]
+    assert "--config=llvm_cov" not in argv
+    assert "--config=bl-x86_64-linux" not in argv
+
+
+def test_fuzz_coverage_build_adds_source_based_instrumentation():
+    argv = bazel_fuzz_coverage_build_argv("//score/json/fuzz:json_parser_fuzz_test")
+    assert "--copt=-fprofile-instr-generate" in argv
+    assert "--copt=-fcoverage-mapping" in argv
+    assert "--linkopt=-fprofile-instr-generate" in argv
+
+
+def test_fuzz_coverage_build_is_separated_from_fuzz_outputs():
+    """계측 빌드가 퍼징 본 빌드 산출물(k8-fastbuild-fuzz)을 덮어쓰면 안 된다."""
+    argv = bazel_fuzz_coverage_build_argv("//score/json/fuzz:json_parser_fuzz_test")
+    assert "--platform_suffix=fuzz_cov" in argv
+    assert argv[-1] == "//score/json/fuzz:json_parser_fuzz_test_bin"
+
+
+def test_bazel_llvm_tool_finds_toolchain_binary(tmp_path):
+    """시스템 llvm-profdata(18)는 clang 22 profraw 를 못 읽는다. 툴체인 쪽을 찾는다."""
+    bin_dir = tmp_path / "external" / "toolchains_llvm++llvm+llvm_toolchain_llvm" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "llvm-profdata").write_text("")
+    assert bazel_llvm_tool(tmp_path, "llvm-profdata") == bin_dir / "llvm-profdata"
+
+
+def test_bazel_llvm_tool_none_before_toolchain_is_fetched(tmp_path):
+    assert bazel_llvm_tool(tmp_path, "llvm-profdata") is None
+
+
+def test_extract_bazel_lcov_from_baselibs_zip(tmp_path):
+    """baselibs 리포터는 _coverage_report.dat 를 zip 으로 낸다."""
+    import zipfile
+
+    report = tmp_path / "_coverage_report.dat"
+    with zipfile.ZipFile(report, "w") as bundle:
+        bundle.writestr("html_report/index.html", "<html/>")
+        bundle.writestr("lcov_report/lcov.dat", "SF:a.cc\nDA:1,1\nend_of_record\n")
+    out = extract_bazel_lcov(report, tmp_path / "unit.lcov")
+    assert out.read_text() == "SF:a.cc\nDA:1,1\nend_of_record\n"
+
+
+def test_extract_bazel_lcov_passes_plain_lcov_through(tmp_path):
+    report = tmp_path / "_coverage_report.dat"
+    report.write_text("SF:a.cc\nend_of_record\n")
+    out = extract_bazel_lcov(report, tmp_path / "unit.lcov")
+    assert out.read_text() == "SF:a.cc\nend_of_record\n"
+
+
+def test_instrumentation_flags_still_available_for_non_bazel_path():
+    """CMake 대상·빠른 컴파일 검증 경로는 여전히 플래그를 직접 쓴다."""
+    assert "-fprofile-instr-generate" in instrumentation_flags(CoverageMode.LLVM_COV)
 
 
 # --- 환경변수 계산 ---------------------------------------------------------
@@ -118,6 +197,40 @@ def test_build_export_argv_docker(tmp_path):
     assert "llvm-cov export -format=text" in joined
     assert "-instr-profile=/out/coverage/grpA.profdata" in joined
     assert "/harness/grpA" in joined
+
+
+# --- 하네스 바이너리 위치 해석 (EXE-04-01 Bazel 전환 대응) -----------------
+#
+# GEN 어댑터가 cquery 로 질의해 돌려준 실제 바이너리 경로를 harness_path 에
+# 담아 넘기는 구조다. 경로를 조립하지 않는다 - bazel-bin 심링크는 직전 빌드
+# 설정을 가리켜서 config 가 섞이면 무효가 되기 때문(GEN 파트 실측).
+def test_harness_binary_path_uses_explicit_path_as_is(tmp_path):
+    cfg = _cfg(tmp_path)
+    binary = tmp_path / "ws" / "bazel-out" / "fuzz" / "json_parser_fuzz_test_bin"
+    group = LogicGroup(name="grpA", harness_path=binary)
+    assert harness_binary_path(group, cfg) == binary.resolve()
+
+
+def test_harness_binary_path_falls_back_to_harness_dir_for_bare_name(tmp_path):
+    cfg = _cfg(tmp_path)
+    group = LogicGroup(name="grpA", harness_path="grpA")
+    assert harness_binary_path(group, cfg) == (cfg.harness_dir / "grpA").resolve()
+
+
+def test_export_argv_host_uses_explicit_binary_path(tmp_path):
+    cfg = _cfg(tmp_path, coverage=CoverageMode.LLVM_COV, use_docker=False,
+               coverage_in_docker=False)
+    binary = tmp_path / "ws" / "bazel-out" / "fuzz" / "json_parser_fuzz_test_bin"
+    group = LogicGroup(name="grpA", harness_path=binary)
+    export = CoverageCollector(cfg).build_export_argv(group)
+    assert export[4] == str(binary.resolve())
+
+
+def test_export_argv_host_falls_back_to_harness_dir(tmp_path):
+    cfg = _cfg(tmp_path, coverage=CoverageMode.LLVM_COV, use_docker=False,
+               coverage_in_docker=False)
+    export = CoverageCollector(cfg).build_export_argv(_group())
+    assert str(cfg.harness_dir.resolve()) in export[4]
 
 
 def test_build_argv_host(tmp_path):

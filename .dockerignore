@@ -1,0 +1,16 @@
+# docker/Dockerfile.selfheal 은 COPY 를 쓰지 않는다(소스는 런타임에 -v 로 마운트).
+# 그래도 컨텍스트는 통째로 전송되므로 무거운 것들을 빼 둔다.
+.git
+.claude
+**/__pycache__
+**/*.pyc
+.pytest_cache
+build/
+report/
+out/
+output/
+third_party/
+vector_db/
+*.faiss
+*.index
+validation-summary-*.json

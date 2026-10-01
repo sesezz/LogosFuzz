@@ -6,6 +6,7 @@ from logosfuzz.analyze.models import CrashRecord, Frame
 from logosfuzz.analyze.signature import (
     application_frames,
     cluster_id_for,
+    collapse_repeated_frames,
     has_application_frame,
     is_harness_frame,
     is_runtime_frame,
@@ -94,3 +95,62 @@ def test_fallback_to_base_signature_when_no_frames():
     assert signature_key(rec) == "unknown@unknown_x_0"
     empty = _rec("unknown", [])
     assert signature_key(empty) == "unknown@unknown"
+
+
+# --- UBSan 시그니처 (ANA-05-04, 4주차) --------------------------------------
+#
+# UBSan 진단은 헤더 줄과 스택 프레임 #0 이 같은 위치를 가리킨다. 경로 접두사만
+# 달라서 전체 경로로는 다른 프레임처럼 보이지만 실제로는 한 지점이다.
+# 합치지 않으면 시그니처 depth 한 칸을 중복이 먹는다.
+
+_UBSAN_TRACEBACK = [
+    # UBSan "runtime error:" 헤더 줄에서 뽑힌 위치
+    ("score/json/json.cc", 38),
+    # 스택 프레임 #0 - 같은 지점인데 경로 접두사가 붙어 있다
+    ("/proc/self/cwd/score/json/json.cc", 38),
+    ("/proc/self/cwd/harness/json_fuzzer.cc", 10),
+]
+
+
+def test_collapses_same_location_with_different_path_prefix():
+    frames = [Frame(f, ln) for f, ln in _UBSAN_TRACEBACK]
+    collapsed = collapse_repeated_frames(frames)
+    assert [(f.basename, f.line) for f in collapsed] == [
+        ("json.cc", 38),
+        ("json_fuzzer.cc", 10),
+    ]
+
+
+def test_ubsan_signature_does_not_waste_depth_on_duplicate():
+    rec = _rec("integer-overflow", _UBSAN_TRACEBACK)
+    assert signature_key(rec) == "integer-overflow@json.cc:38|json_fuzzer.cc:10"
+
+
+def test_collapses_recursion():
+    """재귀 깊이는 입력에 따라 달라진다. 합치지 않으면 같은 버그가 흩어진다."""
+    shallow = _rec("buffer-overflow", [("/src/parse.c", 10), ("/src/main.c", 3)])
+    deep = _rec("buffer-overflow", [
+        ("/src/parse.c", 10), ("/src/parse.c", 10), ("/src/parse.c", 10),
+        ("/src/main.c", 3),
+    ])
+    assert signature_key(shallow) == signature_key(deep)
+
+
+def test_does_not_collapse_non_adjacent_repeats():
+    """떨어져 있는 같은 위치는 다른 호출 경로로 다시 도달한 것이라 의미가 있다."""
+    rec = _rec("use-after-free", [
+        ("/src/util.c", 7), ("/src/mid.c", 20), ("/src/util.c", 7),
+    ])
+    assert signature_key(rec) == "use-after-free@util.c:7|mid.c:20|util.c:7"
+
+
+def test_asan_signature_is_unchanged_by_collapsing():
+    """ASan 은 헤더 줄에 위치가 없어 중복이 애초에 없다. 회귀가 없어야 한다."""
+    rec = _rec("buffer-overflow", [
+        ("/proc/self/cwd/score/json/json.cc", 107),
+        ("/proc/self/cwd/harness/json_fuzzer.cc", 10),
+        ("/proc/self/cwd/score/json/json.cc", 102),
+    ])
+    assert signature_key(rec) == (
+        "buffer-overflow@json.cc:107|json_fuzzer.cc:10|json.cc:102"
+    )

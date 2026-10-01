@@ -6,10 +6,10 @@
 
 ```
 logosfuzz/
-  extract/      EXT-01 : 소스/컴파일 DB 파싱, AST·제약조건 추출
+  extract/      EXT-01 : Bazel 그래프, C/C++ AST·제약조건 추출
   knowledge/    EXT-01-04 : 통합 지식베이스 + RAG 색인/검색, KB 어댑터·평가
   schedule/     SCH-02 : Logic Group 추출, 시너지 우선순위, 자원 할당
-  generate/     GEN-03 : 하네스 생성·컴파일 자가치유·검증, Mock 주입
+  generate/     GEN-03 : 하네스 생성, 빌드 에러 분류·자가치유, 하네스 검증
   execute/      EXE-04 : 격리 퍼징 실행, 커버리지·크래시 수집, 코퍼스 관리
   analyze/      ANA-05 : 크래시 트리아지·근본원인·KB 피드백
     cve_reporting/  ANA-05-02 : 크래시 -> CVE 리포트 생성
@@ -36,14 +36,36 @@ S-CORE 는 Bazel 로 빌드하며 strict deps·visibility 를 강제한다. 이 
 | 모듈 | 대체 |
 | --- | --- |
 | `logosfuzz/extract/bear_integration.py` | 없음 (Bazel 이 빌드를 소유) |
-| `logosfuzz/extract/compile_commands.py` | 2주차 `extract/bazel_query.py` |
-| `logosfuzz/extract/compile_db_analyzer.py` | 2주차 `extract/bazel_query.py` |
+| `logosfuzz/extract/compile_commands.py` | `extract/bazel_query.py` |
+| `logosfuzz/extract/compile_db_analyzer.py` | `extract/bazel_query.py` |
 | `examples/run_bear_example.py` | 없음 |
 
 `KnowledgeBase.build()` / `rag_constraints.build_kb()` / `kb_eval.evaluate()` /
-`logic_groups` 의 `--compile-db` 옵션도 함께 없앴다. `FileInfo.flags` 와 문서의
-`compile_flags` 필드는 **남겨 뒀다** — 2주차에 Bazel 타깃에서 받은 값으로 채우기
-위해서다. 그때까지는 빈 리스트로 나간다.
+`logic_groups` 의 `--compile-db` 옵션도 함께 없앴다. 이제
+`logosfuzz.extract.bazel_query`가 Bazel 타깃의 deps·include·copts를 추출하고,
+`KnowledgeBase.build()`가 파일/API별 `build_system`, `build_target`, `build_deps`,
+`compile_flags`와 최상위 `build_units` 스키마에 기록한다.
+
+```bash
+# Bazel 타깃 의존 그래프(JSON)
+python -m logosfuzz.extract.bazel_query \
+  --workspace third_party/score-baselibs \
+  --target //score/json:json \
+  --output build/score-json-graph.json
+
+# 같은 그래프에서 받은 -I/-D 플래그로 C++ AST 분석
+python -m logosfuzz.extract.ast_analyzer \
+  --bazel-workspace third_party/score-baselibs \
+  --bazel-target //score/json:json \
+  --output build/score-json-ast.json
+
+# 빌드 단위 메타데이터가 포함된 통합 KB
+python -m logosfuzz.knowledge.knowledge_base build \
+  --paths third_party/score-baselibs/score/json \
+  --bazel-workspace third_party/score-baselibs \
+  --bazel-target //score/json:json \
+  --output build/score-json-kb.json
+```
 
 ### 예제 스크립트
 
@@ -52,9 +74,10 @@ S-CORE 는 Bazel 로 빌드하며 strict deps·visibility 를 강제한다. 이 
 
 ## EXT-01-01 `//score/json` C++ 파싱 실패 케이스
 
-현행 `logosfuzz/extract/ast_analyzer.py` 는 C 전용이다. `//score/json` 106개 파일에
-그대로 돌린 결과와 실패 분류는
+1주차 당시 C 전용 분석기를 `//score/json` 106개 파일에 돌린 실패 분류는
 [docs/EXT-01-01-SCORE-JSON-CPP-FAILURES.md](docs/EXT-01-01-SCORE-JSON-CPP-FAILURES.md) 에 있다.
+2주차 구현은 확장자로 C/C++17을 자동 선택하고, 클래스·네임스페이스·메서드·생성자·
+함수 템플릿과 완전 한정 이름을 보존한다.
 재현:
 
 ```bash
@@ -146,6 +169,160 @@ from logosfuzz.knowledge.kb_adapters import api_reference, constraints_for_triag
 api_reference(kb, "uds_read_did")                                  # api_id/시그니처/헤더
 constraints_for_triage(kb, "uds_read_did", min_confidence=0.7)     # 신뢰도 높은 제약조건
 ```
+
+## GEN-03-02 자가치유 에러 코퍼스 (D 파트)
+
+2주차 `generate/bazel_errors.py` 분류기를 추측으로 짜지 않기 위해, **실제로 빌드를
+깨뜨려서** Bazel 에러와 sanitizer 출력 원문을 모아 뒀다. 대응표와 분석은
+[docs/GEN-03-02-ERROR-CORPUS.md](docs/GEN-03-02-ERROR-CORPUS.md) 에 있다.
+
+| 경로 | 내용 |
+| --- | --- |
+| `tests/fixtures/bazel_repro/` | 고의 파손용 최소 Bazel 워크스페이스 (+ `breaks/` 오버레이 10종) |
+| `tests/fixtures/bazel_errors/` | deps·visibility·구문 오류 등 Bazel 에러 원문 |
+| `tests/fixtures/sanitizer_logs/` | UBSan/ASan/LSan 출력 원문 (설정 2종 × 케이스 11종) |
+| `scripts/collect_selfheal_corpus.sh` | 수집기 (리눅스 전용) |
+| `docker/Dockerfile.selfheal` | 수집 환경 이미지 (bazelisk + clang 18 / Ubuntu 24.04) |
+
+재수집(툴체인을 바꿨을 때만 필요하다 — 코퍼스는 커밋되어 있다):
+
+```bash
+bash scripts/collect_selfheal_corpus.sh --out-root .
+```
+
+```bash
+docker build -f docker/Dockerfile.selfheal -t logosfuzz-selfheal . && docker run --rm -v "$PWD":/repo logosfuzz-selfheal
+```
+
+`tests/test_selfheal_corpus.py` 가 코퍼스와 문서 대응표의 일치를 지킨다. Bazel 없이
+도는 순수 픽스처 테스트라 CI 에서 툴체인이 필요 없다.
+
+### 에러 분류기 `generate/bazel_errors.py`
+
+위 코퍼스를 정답지로 만든 분류기다. 빌드 로그 원문을 받아 "무엇이 잘못됐고 무엇을
+고쳐야 하는지"를 구조화해 돌려준다. 3주차에 `selfheal.py` 가 이 결과를 리페어
+프롬프트에 주입한다.
+
+```python
+from logosfuzz.generate.bazel_errors import classify, prompt_hint
+
+report = classify(build_log, requested_target="//harness:json_fuzzer")
+
+report.primary.kind      # BazelErrorKind.NOT_VISIBLE
+report.primary.action    # FixAction.EXPAND_VISIBILITY
+report.primary.detail    # {"label": "//score/internal:helper", "from": "//harness:json_fuzzer"}
+report.needs_human       # 순환 의존처럼 LLM 재시도로 못 고치는 경우 True
+print(prompt_hint(report))   # LLM 프롬프트에 넣을 텍스트
+```
+
+결과 타입(`BazelErrorKind` / `FixAction` / `BazelDiagnostic` / `BazelErrorReport`)은
+`generate/errors.py` 에 있다. 분류기를 쓰지 않는 모듈이 결과 타입만 가져다 쓸 수 있게
+분리해 뒀다.
+
+| 분류 | 처방 | 판별 신호 |
+| --- | --- | --- |
+| `missing_load` | `add_load` | `This rule has been removed from Bazel` |
+| `build_syntax_error` | `fix_build_syntax` | `syntax error at` |
+| `not_visible` | `expand_visibility` | `is not visible from` (ERROR 줄 **다음** 줄) |
+| `no_such_package` | `fix_dep_label` | `no such package '<경로>'` |
+| `no_such_target` | `fix_dep_label` | `no such target` + 레이블이 **의존 대상** |
+| `target_not_defined` | `define_target` | `no such target` + 레이블이 **하네스 자신** |
+| `missing_dep` | `add_deps` | clang 의 `fatal error: '<헤더>' file not found` |
+| `missing_srcs_file` | `add_srcs_file` | `missing input file` |
+| `dep_cycle` | `escalate` | `cycle in dependency graph` |
+| `undefined_symbol` | `resolve_symbol` | `undefined symbol:` |
+
+주의할 점 셋은 전부 1주차 코퍼스에서 나왔다 —
+`no such target` 은 단독 분류 키로 쓸 수 없고(BUILD 파싱 실패도 같은 문장을 낸다),
+deps 누락의 입구는 `no such target` 이 아니라 clang 의 `file not found` 이며,
+visibility 문구는 `ERROR:` 줄에 없다. 근거는
+[docs/GEN-03-02-ERROR-CORPUS.md](docs/GEN-03-02-ERROR-CORPUS.md) 의 발견 A·B·C 다.
+
+### 자가치유 루프에 붙은 분류기 `generate/selfheal.py`
+
+루프는 실패한 빌드 로그를 **전문 그대로** 프롬프트에 싣고, 그 앞에 분류 결과를
+먼저 붙인다. 모델이 원인을 스스로 추론하기 전에 분류를 보게 하려는 것이다.
+
+```python
+loop = SelfHealLoop(compiler, llm, max_round=3)   # classifier 는 기본으로 붙는다
+report = loop.run(draft)
+report.rounds[-1].diagnosis       # "not_visible/expand_visibility"
+```
+
+분류기를 붙이면서 **고칠 수 없는 결함에서 라운드를 태우지 않도록** 두 가지 조기
+중단을 같이 넣었다. 분류가 정확할수록 루프가 더 확신에 차서 헛돌기 때문이다.
+
+| 상황 | 동작 | 이유 |
+| --- | --- | --- |
+| `dep_cycle` 등 `escalate` 처방 | `HealOutcome.ESCALATED`, LLM 호출 0회 | 타깃을 쪼개야 풀린다 |
+| `add_load`·`add_deps`·`expand_visibility` 등 BUILD 처방 | 같음 | 루프는 하네스 **소스**만 다시 쓴다 |
+
+두 번째는 `SelfHealLoop(can_edit_build=True)` 로 끌 수 있다. B 파트의
+`build_file_generator` 가 컨트롤러에 편입돼 BUILD 재생성까지 한 몸으로 돌게 되면
+그때 올린다. 분류기 자체는 `classifier=` 로 교체 가능하고, 분류기가 예외를 던져도
+루프는 힌트 없이 예전처럼 계속 돈다.
+
+### Bazel 빌드 백엔드 `generate/bazel_compiler.py`
+
+자가치유 루프가 **실제 `bazel build`** 로 하네스를 검증하게 하는 컴파일러 구현이다.
+`SubprocessCompiler`(clang)로는 `no such target`·`is not visible from` 같은
+**Bazel 이 내는 문장**을 만들 수 없어서, 이게 없으면 2주차 분류기와 3주차 프롬프트
+주입이 실제로는 한 번도 검증되지 않는다.
+
+```python
+from logosfuzz.generate.bazel_compiler import BazelCompiler
+
+compiler = BazelCompiler(
+    workspace="tests/fixtures/bazel_repro",
+    target="//harness:json_fuzzer",
+    source_path="harness/json_fuzzer.cc",   # BUILD 의 srcs 와 일치해야 한다
+    config="asan_ubsan_lsan",
+)
+SelfHealLoop(compiler, llm, max_round=3).run(draft)
+```
+
+하네스 소스를 워크스페이스에 써 넣고 빌드한 뒤, stdout+stderr 를 **자르지 않고**
+`CompileResult` 에 싣는다. `requested_target` 을 노출해서 루프가 분류기에 넘긴다 —
+`no such target` 이 자기 타깃인지 의존 대상인지 가르는 값이다(발견 A).
+
+**실제 복구 증명.** `tests/test_bazel_compiler.py` 의 통합 테스트 3개가 진짜 Bazel 로
+돈다(`bazel` 이 PATH 에 없으면 skip). 2주차 완료 기준 "실패 시 자가치유가 1회 이상
+복구"를 스텁이 아니라 실제 툴체인으로 통과한 기록:
+
+```
+최종 결과  : success   (LLM 수정 라운드 1회)
+  라운드 0: 빌드 실패   진단=undefined_symbol/resolve_symbol
+            ld.lld: error: undefined symbol: score::json::ParseStrict(unsigned char const*, ...)
+  라운드 1: 빌드 성공
+  산출물   : .../bazel-bin/harness/json_fuzzer   (실제 존재: True)
+```
+
+Windows 에는 bazel 이 없으므로 통합 테스트는 WSL/컨테이너에서 돌린다:
+
+```bash
+python -m pytest tests/test_bazel_compiler.py -v
+```
+
+### GEN-03-04 입력 소비 검증 `generate/validation.py`
+
+하네스가 퍼즈 입력을 실제로 쓰는지 정적으로 판정한다. `LLVMFuzzerTestOneInput`
+본문이 제 인자를 한 번도 참조하지 않으면 무엇을 넣든 같은 경로만 돈다.
+
+```python
+from logosfuzz.generate.validation import check_input_consumption
+check_input_consumption(source, dry_run_log).passed
+```
+
+커버리지 검사와 무엇이 다른가 — 커버리지가 0이면 "타겟에 못 닿았다"이고, 커버리지는
+나오는데 입력을 안 쓰면 "닿긴 했는데 항상 같은 값으로 닿는다"이다. **후자는 커버리지
+임계치를 통과**하므로 기존 단계로는 걸리지 않는데, 캠페인을 몇 시간 돌려도 새 경로가
+하나도 안 나온다. LLM 이 대상 API 를 부르면서 인자를 하드코딩할 때 생긴다.
+
+게이트는 **증명 가능한 경우에만** 실패시킨다. 진입점을 파싱하지 못하면 통과시키되
+`checked=False` 로 "근거 없이 통과시켰다"를 남긴다 — 검사기의 빈틈 때문에 멀쩡한
+하네스를 막으면 안 되기 때문이다. `(void)data;` 같은 명시적 버림, 주석·문자열
+리터럴에만 등장하는 경우는 사용으로 세지 않는다. 길이만 쓰고 버퍼는 안 쓰면
+통과시키되 경고(`report.warnings`)로 남긴다.
 
 ## 커밋 메시지 규칙
 

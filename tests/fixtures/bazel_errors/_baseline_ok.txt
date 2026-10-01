@@ -1,0 +1,8 @@
+
+INFO: Analyzed target //harness:json_fuzzer (<N> packages loaded, <N> targets configured).
+INFO: Found 1 target...
+Target //harness:json_fuzzer up-to-date:
+  bazel-bin/harness/json_fuzzer
+INFO: Elapsed time: <T>s, Critical Path: <T>s
+INFO: <N> processes: <STRATEGY>
+INFO: Build completed successfully, <N> total actions

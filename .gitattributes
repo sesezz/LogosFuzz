@@ -1,0 +1,19 @@
+# 리눅스에서 실행되는 파일은 체크아웃 OS 와 무관하게 LF 를 강제한다.
+#
+# 왜 필요한가 — 팀원 다수가 Windows 로 작업하고 git 의 core.autocrlf=true 가
+# 체크아웃 시 CRLF 로 바꾼다. 그 상태로 WSL/Docker 에 스크립트를 넘기면 줄 끝의
+# \r 이 인자에 붙어서(`mkdir lib` -> `mkdir "lib\r"`) 엉뚱한 곳에서 깨진다.
+# Bazel 은 BUILD/.bazelrc 의 CRLF 를 견디지만, 수집한 에러 원문이 CRLF 로 바뀌면
+# 픽스처 diff 가 통째로 뒤집힌다.
+
+*.sh            text eol=lf
+*.bazel         text eol=lf
+*.bzl           text eol=lf
+.bazelrc        text eol=lf
+.bazelversion   text eol=lf
+docker/entrypoint.sh text eol=lf
+
+# 자가치유 에러 코퍼스 — 실행해서 받아 온 원문이므로 한 바이트도 바뀌면 안 된다.
+tests/fixtures/bazel_errors/**    text eol=lf
+tests/fixtures/sanitizer_logs/**  text eol=lf
+tests/fixtures/bazel_repro/**     text eol=lf
