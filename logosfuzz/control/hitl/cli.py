@@ -9,6 +9,7 @@ CTR-06-02 HITL 인터페이스 - CLI (`logosfuzz review`)
     logosfuzz review show <id>
     logosfuzz review approve <id> [-m "코멘트"]
     logosfuzz review reject  <id> [-m "..."]
+    logosfuzz review edit    <id> --set llm_verdict=true_positive [-m "..."]
     logosfuzz review skip    <id>
     logosfuzz review stats
 
@@ -111,6 +112,30 @@ def _decide(args: argparse.Namespace, dtype: DecisionType) -> int:
     return 0
 
 
+def _cmd_edit(args: argparse.Namespace) -> int:
+    """payload 일부를 고쳐 승인(EDIT). 크래시 게이트에서 정/오탐을 뒤집을 때 쓴다."""
+    m = _manager(args)
+    it = m.get(args.id)
+    if it is None:
+        print(f"항목을 찾을 수 없음: {args.id}", file=sys.stderr)
+        return 1
+    edited = dict(it.payload)
+    for pair in args.set or []:
+        key, sep, value = pair.partition("=")
+        if not sep or not key:
+            print(f"오류: --set 은 KEY=VALUE 형식이어야 한다: {pair}", file=sys.stderr)
+            return 1
+        edited[key.strip()] = value.strip()
+    try:
+        it = m.decide(args.id, DecisionType.EDIT, comment=args.message or "",
+                      edited_payload=edited)
+    except (KeyError, ValueError) as e:
+        print(f"오류: {e}", file=sys.stderr)
+        return 1
+    print(f"#{it.id} → {it.status.value}")
+    return 0
+
+
 def _cmd_stats(args: argparse.Namespace) -> int:
     m = _manager(args)
     st = m.stats()
@@ -154,6 +179,13 @@ def register(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         p.add_argument("id")
         p.add_argument("-m", "--message", default="", help="코멘트")
         p.set_defaults(func=lambda a, _d=dtype: _decide(a, _d))
+
+    p_edit = rsub.add_parser("edit", help="payload 를 고쳐 승인(예: 크래시 판정 뒤집기)")
+    p_edit.add_argument("id")
+    p_edit.add_argument("--set", action="append", metavar="KEY=VALUE",
+                        help="고칠 필드(여러 번 지정 가능). 예: llm_verdict=true_positive")
+    p_edit.add_argument("-m", "--message", default="", help="코멘트")
+    p_edit.set_defaults(func=_cmd_edit)
 
     p_stats = rsub.add_parser("stats", help="상태별 집계")
     p_stats.set_defaults(func=_cmd_stats)

@@ -1,0 +1,32 @@
+terminate called after throwing an instance of 'std::bad_variant_access'
+  what():  std::get: wrong index for variant
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==<PID>==ERROR: AddressSanitizer: ABRT on unknown address <ADDR> (pc <ADDR> bp <ADDR> sp <ADDR> T0)
+    #0 <ADDR> in __pthread_kill_implementation nptl/pthread_kill.c:44
+    #1 <ADDR> in __pthread_kill_internal nptl/pthread_kill.c:78
+    #2 <ADDR> in __GI___pthread_kill nptl/pthread_kill.c:89
+    #3 <ADDR> in __GI_raise ../sysdeps/posix/raise.c:26
+    #4 <ADDR> in __GI_abort stdlib/abort.c:79
+    #5 <ADDR>  (/lib/x86_64-linux-gnu/libstdc++.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #6 <ADDR>  (/lib/x86_64-linux-gnu/libstdc++.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #7 <ADDR> in __cxa_call_terminate (/lib/x86_64-linux-gnu/libstdc++.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #8 <ADDR> in __gxx_personality_v0 (/lib/x86_64-linux-gnu/libstdc++.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #9 <ADDR>  (/lib/x86_64-linux-gnu/libgcc_s.so.1+<ADDR>) (BuildId: <BUILDID>)
+    #10 <ADDR> in _Unwind_RaiseException (/lib/x86_64-linux-gnu/libgcc_s.so.1+<ADDR>) (BuildId: <BUILDID>)
+    #11 <ADDR> in __cxa_throw (/lib/x86_64-linux-gnu/libstdc++.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #12 <ADDR> in std::__throw_bad_variant_access(char const*) /usr/include/c++/13/variant:1349
+    #13 <ADDR> in std::__throw_bad_variant_access(bool) /usr/include/c++/13/variant:1357
+    #14 <ADDR> in std::variant_alternative<0ul, std::variant<unsigned short, score::result::Error> >::type const& std::get<0ul, unsigned short, score::result::Error>(std::variant<unsigned short, score::result::Error> const&) /usr/include/c++/13/variant:1738
+    #15 <ADDR> in score::details::expected<unsigned short, score::result::Error>::value() const & <BASELIBS>/score/result/details/expected/expected.h:503
+    #16 <ADDR> in score::details::expected<unsigned short, score::result::Error>::operator*() const & <BASELIBS>/score/result/details/expected/expected.h:450
+    #17 <ADDR> in score::demo::PayloadEnd(unsigned char const*, unsigned long) score/demo/length.cc:35
+    #18 <ADDR> in LLVMFuzzerTestOneInput harness/length_fuzzer.cc:22
+    #19 <ADDR> in main harness/standalone_main.cc:24
+    #20 <ADDR> in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #21 <ADDR> in __libc_start_main_impl ../csu/libc-start.c:360
+    #22 <ADDR> in _start (<SCRATCH>/length_fuzzer+<ADDR>) (BuildId: <BUILDID>)
+
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: ABRT nptl/pthread_kill.c:44 in __pthread_kill_implementation
+==<PID>==ABORTING

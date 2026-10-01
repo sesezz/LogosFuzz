@@ -66,6 +66,12 @@ class AuditTrailStore:
             self._ensure_loaded()
             return [e for e in self._entries if e.get("api_id") == api_id]
 
+    def for_build_target(self, build_target: str) -> List[dict]:
+        """한 Bazel 타깃에 반영된(또는 제안된) 역피드백과 그 재생성 전부."""
+        with self._lock:
+            self._ensure_loaded()
+            return [e for e in self._entries if e.get("build_target") == build_target]
+
     def for_harness(self, harness_id: str) -> List[dict]:
         with self._lock:
             self._ensure_loaded()

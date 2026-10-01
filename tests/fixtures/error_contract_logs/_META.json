@@ -1,0 +1,36 @@
+{
+  "purpose": "score::Result 오류 대안을 확인하지 않고 값을 꺼낼 때의 크래시 원문. D(김민주) 4주차 analyze/error_contract.py(triage 정탐 근거: 에러계약 위반)의 정답지.",
+  "collected_at": "2026-10-01",
+  "collector": "scripts/collect_error_contract_corpus.sh",
+  "baselibs_commit": "ee40fec",
+  "baselibs_sources": [
+    "score/result/result.h",
+    "score/result/details/expected/expected.h",
+    "score/result/error.cpp",
+    "score/result/error_domain.cpp"
+  ],
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "flags": "-std=c++17 -g -O0 -fno-omit-frame-pointer -fsanitize=address,undefined",
+  "runtime_env": {
+    "ASAN_OPTIONS": "symbolize=1:handle_abort=1:detect_leaks=0"
+  },
+  "why_handle_abort": "오류 상태 value() 는 std::get<0> 이 bad_variant_access 를 던지고(operator* 는 noexcept 라 즉시) std::terminate -> SIGABRT 로 끝난다. handle_abort=1 이어야 ASan 이 스택을 찍는다. libFuzzer 는 자체 SIGABRT 핸들러로 'deadly signal' 스택을 찍는다.",
+  "driver": "이 환경 clang 에 libFuzzer 런타임이 없어 harness/standalone_main.cc 로 LLVMFuzzerTestOneInput 을 직접 호출했다(LLVM StandaloneFuzzTargetMain 과 같은 역할). 스택의 하네스·대상 프레임은 libFuzzer 실행과 동일하다.",
+  "cases": {
+    "harness_unchecked.txt": {
+      "input": "00 07",
+      "expected": "하네스가 ParseLength(...).value() 를 has_value() 없이 호출 -> error-contract-violated-by-harness (오탐)"
+    },
+    "library_unchecked.txt": {
+      "input": "01 07",
+      "expected": "공개 API PayloadEnd 내부가 *ParseLength(...) 를 확인 없이 꺼냄 -> error-contract-violated-by-target (정탐)"
+    }
+  },
+  "normalization": [
+    "스크래치 빌드 경로 -> <SCRATCH>",
+    "baselibs 체크아웃 경로 -> <BASELIBS>",
+    "PID -> <PID>",
+    "16진 주소(0x....) -> <ADDR>",
+    "BuildId -> <BUILDID>"
+  ]
+}
