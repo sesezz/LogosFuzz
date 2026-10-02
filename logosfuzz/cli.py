@@ -202,7 +202,11 @@ def main(argv: list | None = None) -> int:
 
         session = FuzzSession(config)
         summary = session.run(groups, ensure_image=not args.no_build)
-        return 0 if summary.total_crashes == 0 else 3  # 3: 크래시 발견(analyze 필요)
+        if summary.total_crashes:
+            return 3  # 3: 크래시 발견(analyze 필요)
+        if summary.failed_groups:
+            return 4  # 4: 하네스가 실행되지 못한 그룹이 있음(퍼징이 실제로 안 돎)
+        return 0
     except ExecuteError as e:
         print(f"[EXE 오류] {e}", file=sys.stderr)
         return 1
