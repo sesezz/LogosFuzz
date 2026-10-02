@@ -36,6 +36,11 @@ class SessionSummary:
     def total_crashes(self) -> int:
         return sum(len(g.crashes) for g in self.groups)
 
+    @property
+    def failed_groups(self) -> list:
+        """하네스가 한 번도 실행되지 못한 그룹 이름들."""
+        return [g.group for g in self.groups if g.failed_to_start]
+
     def to_dict(self) -> dict:
         return {
             "engine": self.engine,
@@ -44,13 +49,16 @@ class SessionSummary:
             "finished_at": self.finished_at,
             "total_groups": len(self.groups),
             "total_crashes": self.total_crashes,
+            "failed_groups": self.failed_groups,
             "groups": [
                 {
                     "group": g.group,
                     "exit_code": g.exit_code,
                     "timed_out": g.timed_out,
                     "crashed": g.crashed,
+                    "failed_to_start": g.failed_to_start,
                     "duration_sec": round(g.duration_sec, 2),
+                    "execs": g.stats.execs,
                     "exec_per_sec": g.stats.exec_per_sec,
                     "coverage": g.stats.coverage,
                     "crashes": [str(p) for p in g.crashes],
@@ -151,15 +159,23 @@ class FuzzSession:
             if saved:
                 self._log(f"  >>> [CRASH] '{group.name}'에서 새 크래시 {len(saved)}건 저장: "
                           f"{self.config.crashes_dir / group.name}")
-            if result.timed_out:
+            if result.failed_to_start:
+                self._log(f"  >>> [실행 실패] '{group.name}' 하네스가 한 번도 실행되지 않음 "
+                          f"(exit={result.exit_code}, execs=0). 로그: {result.stderr_log}")
+            elif result.timed_out:
                 self._log(f"  - 타임아웃 도달, 다음 그룹으로 진행")
 
             summary.groups.append(result)
 
         summary.finished_at = time.time()
         self._write_summary(summary)
-        self._log(f"\n=== 완료: 그룹 {len(summary.groups)}개, "
-                  f"총 크래시 {summary.total_crashes}건 → analyze 단계로 전달 ===")
+        failed = summary.failed_groups
+        if failed:
+            self._log(f"\n=== 실행 실패: 그룹 {len(summary.groups)}개 중 {len(failed)}개가 "
+                      f"시작하지 못함 ({', '.join(failed)}). 크래시 {summary.total_crashes}건 ===")
+        else:
+            self._log(f"\n=== 완료: 그룹 {len(summary.groups)}개, "
+                      f"총 크래시 {summary.total_crashes}건 → analyze 단계로 전달 ===")
         return summary
 
     def _write_summary(self, summary: SessionSummary) -> Path:

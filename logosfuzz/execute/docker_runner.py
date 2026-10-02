@@ -74,9 +74,34 @@ class GroupResult:
     stderr_log: Optional[str] = None  # 표준 오류 로그 파일 경로
 
     @property
+    def failed_to_start(self) -> bool:
+        """하네스가 입력을 한 번도 실행하지 못하고 죽었는가.
+
+        컨테이너 안에서 공유 라이브러리를 못 찾거나(libatomic.so.1, GLIBC_2.38
+        - 5주차 실측) 바이너리가 아예 실행되지 않으면 종료코드는 0 이 아닌데
+        실행 횟수는 0 이다. 이걸 크래시로 세면 "크래시 0건, 완료" 또는 가짜
+        크래시로 보고돼 퍼징이 실제로는 안 돌았다는 사실이 가려진다.
+
+        첫 입력에서 바로 크래시한 경우와 구분하기 위해 크래시 산출물이나
+        새니타이저 결함이 있으면 실행 실패로 보지 않는다.
+        """
+        return (
+            self.exit_code not in (0, None)
+            and self.stats.execs == 0
+            and not self.crashes
+            and not self.sanitizer_findings
+        )
+
+    @property
     def crashed(self) -> bool:
         # libFuzzer는 크래시 시 non-zero 종료, 크래시 산출물도 남긴다.
-        return bool(self.crashes) or (self.exit_code not in (0, None) and not self.timed_out)
+        if self.crashes:
+            return True
+        return (
+            self.exit_code not in (0, None)
+            and not self.timed_out
+            and not self.failed_to_start
+        )
 
 
 def _default_executor(argv: list, timeout: float, on_line: OnLine) -> ProcResult:
