@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 
 SUMMARY_SCHEMA_VERSION = "1.0"
@@ -91,35 +91,70 @@ def _status(group: Mapping[str, Any]) -> str:
     if bool(group.get("timed_out")):
         return "timeout"
     findings = group.get("sanitizer_findings")
-    if (
-        bool(group.get("crashed"))
-        or bool(group.get("crashes"))
-        or (isinstance(findings, list) and bool(findings))
-    ):
-        return "crashed"
     exit_code = group.get("exit_code")
+    has_evidence = bool(group.get("crashes")) or (isinstance(findings, list) and bool(findings))
+    if bool(group.get("crashed")) and not has_evidence and exit_code not in (None, 0) \
+            and _never_ran(group):
+        # 크래시는 최소 한 번은 실행돼야 나온다. 증거(산출물·sanitizer)도 없고 처리량·커버리지가
+        # 모두 0 이면 퍼저가 시작하지 못한 것이다(예: 컨테이너의 glibc 가 낮아 로더가 종료).
+        # EXE 가 비정상 종료에 붙인 crashed 플래그를 그대로 믿으면 "크래시 발생" 으로 집계된다.
+        return "failed"
+    if bool(group.get("crashed")) or has_evidence:
+        return "crashed"
     if exit_code not in (None, 0):
         return "failed"
     return "passed"
 
 
-def _normalise_group(group: Mapping[str, Any], *, stage: str) -> dict[str, Any]:
+def _never_ran(group: Mapping[str, Any]) -> bool:
+    """처리량·커버리지·실행 횟수가 모두 0 — 퍼징이 한 번도 진행되지 않았다."""
+    return (
+        _float(group.get("exec_per_sec")) == 0
+        and _number(group.get("coverage"), 0) == 0
+        and _int(group.get("execs")) == 0
+    )
+
+
+def _execs_of(group: Mapping[str, Any]) -> tuple[int, bool]:
+    """(총 실행 횟수, 추정 여부).
+
+    EXE 의 ``fuzz_summary.json`` 은 그룹별로 ``exec_per_sec``/``duration_sec`` 만 쓰고 총
+    실행 횟수는 기록하지 않는다(화면 출력에만 나온다). ``execs`` 가 없으면 0 으로 채워
+    "한 번도 안 돌았다"고 읽히게 하지 말고 ``exec_per_sec × duration_sec`` 로 추정하고
+    추정치임을 표시한다. 실측 대비 호스트 실행은 약 0.5%(743,036회 실측 vs 추정 747,801회), Docker 실행은 약 4%(278,556회 vs 289,695회) 높게 나온다 — Docker 의 ``duration_sec`` 에는 컨테이너 시작 시간이 들어간다.
+    """
+    execs = group.get("execs")
+    if execs is not None:
+        return _int(execs), False
+    rate, seconds = _float(group.get("exec_per_sec")), _float(group.get("duration_sec"))
+    if rate > 0 and seconds > 0:
+        return int(round(rate * seconds)), True
+    return 0, False
+
+
+def _normalise_group(group: Mapping[str, Any], *, stage: str,
+                     build_lookup: Mapping[str, Mapping[str, Any]] | None = None,
+                     ) -> dict[str, Any]:
     name = str(group.get("group") or group.get("target") or "unknown")
+    harness_name = str(group.get("harness_name") or name)
     crashes = group.get("crashes")
     findings = group.get("sanitizer_findings")
     crashes = list(crashes) if isinstance(crashes, list) else []
     findings = list(findings) if isinstance(findings, list) else []
     status = _status(group)
+    execs, execs_estimated = _execs_of(group)
     return {
         "stage": stage,
         "target": name,
-        "harness_name": str(group.get("harness_name") or name),
+        "harness_name": harness_name,
+        **_build_fields(group, build_lookup or {}, name, harness_name),
         "status": status,
         "exit_code": group.get("exit_code"),
         "timed_out": bool(group.get("timed_out")),
         "crashed": status == "crashed",
         "duration_sec": round(_float(group.get("duration_sec")), 3),
-        "execs": _int(group.get("execs")),
+        "execs": execs,
+        "execs_estimated": execs_estimated,
         "exec_per_sec": _float(group.get("exec_per_sec")),
         "coverage": _number(group.get("coverage"), 0),
         "crash_count": len(crashes),
@@ -298,6 +333,217 @@ def _normalise_selection(selection: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------
+# 빌드 단위 키 (4주차, B 송서원)
+# ---------------------------------------------------------------------
+# 3주차부터 Logic Group 경계가 빌드 단위(Bazel 타깃)이고, 하네스도
+# "빌드 단위 하위 패키지의 cc_fuzz_test" 로 만들어진다. 그런데 리포트는 여전히
+# 그룹 이름으로만 집계돼서 "//score/json:json 을 퍼징한 결과가 어떤가" 를
+# 한눈에 볼 수 없었다. 여기서 빌드 단위를 1급 키로 올린다.
+#
+# 호환성: schema_version 1.0 을 유지한다. 기존 필드(run.groups, metrics)의
+# 의미는 그대로이고, 아래 두 가지를 **선택 필드로 추가**만 한다.
+#   - run.groups[*].build_target / build_system / fuzz_target / binary
+#   - 최상위 build_units  (빌드 단위별 집계)
+# 빌드 정보를 모르는 그룹은 UNASSIGNED_BUILD_TARGET 아래로 모은다.
+
+UNASSIGNED_BUILD_TARGET = "(unassigned)"
+
+# 빌드 단위 안에 그룹이 여럿일 때 대표 상태를 고르는 우선순위(앞이 우선).
+# 실행 결과는 "무엇이 터졌나" 가 중요하므로 crashed 를 가장 앞에 둔다.
+_RUN_STATUS_ORDER = ("crashed", "timeout", "failed", "passed", "not_run")
+_BUILD_STATUS_ORDER = ("failed", "repaired", "built", "emitted", "not_built")
+
+
+def _pick(statuses: Sequence[str], order: Sequence[str]) -> str:
+    present = set(statuses)
+    for status in order:
+        if status in present:
+            return status
+    return order[-1]
+
+
+def _build_lookup(build_summary: Mapping[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """BUILD 단계 결과(``build_summary.json``)를 그룹 조인용 사전으로 만든다.
+
+    EXE 가 그룹을 어떤 이름으로 기록하느냐는 실행 방식에 따라 다르다 —
+    Logic Group 이름, cc_fuzz_test 이름, ``_bin`` 바이너리 이름 중 하나다.
+    어느 쪽으로 와도 붙도록 세 이름을 모두 키로 넣는다.
+    """
+    lookup: dict[str, dict[str, Any]] = {}
+    if not isinstance(build_summary, Mapping):
+        return lookup
+    units = build_summary.get("units")
+    for unit in units if isinstance(units, list) else []:
+        if not isinstance(unit, Mapping):
+            continue
+        record = dict(unit)
+        keys = [str(unit.get("group") or "")]
+        fuzz_target = str(unit.get("fuzz_target") or "")
+        if fuzz_target:
+            name = fuzz_target.rsplit(":", 1)[-1]
+            keys += [name, f"{name}_bin"]
+        binary = unit.get("binary")
+        if binary:
+            keys.append(Path(str(binary)).name)
+        for key in keys:
+            if key:
+                lookup.setdefault(key, record)
+    return lookup
+
+
+def _build_fields(group: Mapping[str, Any], lookup: Mapping[str, Mapping[str, Any]],
+                  name: str, harness_name: str) -> dict[str, Any]:
+    """그룹에 붙일 빌드 단위 필드. 그룹 자체 값이 BUILD 결과보다 우선한다."""
+    raw_binary = group.get("binary")
+    unit = (lookup.get(name) or lookup.get(harness_name)
+            or (lookup.get(Path(str(raw_binary)).name) if raw_binary else None) or {})
+    build_target = str(group.get("build_target") or unit.get("build_target") or "")
+    return {
+        "build_target": build_target or None,
+        "build_system": str(group.get("build_system") or unit.get("build_system") or "") or None,
+        "fuzz_target": group.get("fuzz_target") or unit.get("fuzz_target"),
+        "binary": group.get("binary") or unit.get("binary"),
+    }
+
+
+def _canonical_group_name(group: Mapping[str, Any],
+                          lookup: Mapping[str, Mapping[str, Any]]) -> str:
+    """EXE 그룹 이름을 BUILD 결과의 Logic Group 이름으로 통일한다.
+
+    EXE 가 cc_fuzz_test 이름이나 ``_bin`` 바이너리 이름으로 그룹을 기록하면, 같은
+    그룹이 build 결과의 이름(Logic Group)과 EXE 이름 두 개로 ``groups`` 에 중복
+    등장한다. 조인 사전에서 같은 빌드 결과를 찾아 그 ``group`` 이름으로 합친다.
+    (``--groups-out`` 을 쓰면 처음부터 같은 이름이라 이 경로는 폴백이다.)
+    """
+    binary = group.get("binary")
+    record = (lookup.get(group["target"]) or lookup.get(group["harness_name"])
+              or (lookup.get(Path(str(binary)).name) if binary else None))
+    return str((record or {}).get("group") or group["target"])
+
+
+def _normalise_build_units(
+    groups: Sequence[Mapping[str, Any]],
+    build_summary: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """빌드 단위별 집계. 실행 그룹 + BUILD 결과를 build_target 으로 합친다."""
+    units: dict[str, dict[str, Any]] = {}
+
+    def unit_for(target: str, build_system: str | None = None) -> dict[str, Any]:
+        entry = units.get(target)
+        if entry is None:
+            entry = units[target] = {
+                "build_target": target,
+                "build_system": build_system or None,
+                "groups": [],
+                "fuzz_targets": [],
+                "binaries": [],
+                "build_statuses": [],
+                "rounds_used": 0,
+                "run_statuses": [],
+                "crashes": 0,
+                "sanitizer_findings": 0,
+                "execs": 0,
+                "execs_estimated": False,
+                "duration_sec": 0.0,
+                "coverage": 0,
+            }
+        elif build_system and not entry["build_system"]:
+            entry["build_system"] = build_system
+        return entry
+
+    def add_unique(values: list, value: Any) -> None:
+        if value and value not in values:
+            values.append(value)
+
+    source = build_summary if isinstance(build_summary, Mapping) else {}
+    lookup = _build_lookup(source)
+    raw_units = source.get("units")
+    for unit in raw_units if isinstance(raw_units, list) else []:
+        if not isinstance(unit, Mapping):
+            continue
+        target = str(unit.get("build_target") or unit.get("target") or UNASSIGNED_BUILD_TARGET)
+        entry = unit_for(target, unit.get("build_system"))
+        add_unique(entry["groups"], str(unit.get("group") or ""))
+        add_unique(entry["fuzz_targets"], unit.get("fuzz_target"))
+        add_unique(entry["binaries"], unit.get("binary"))
+        entry["build_statuses"].append(str(unit.get("status") or "not_built"))
+        entry["rounds_used"] = max(entry["rounds_used"], _int(unit.get("rounds_used")))
+
+    for group in groups:
+        target = str(group.get("build_target") or UNASSIGNED_BUILD_TARGET)
+        entry = unit_for(target, group.get("build_system"))
+        add_unique(entry["groups"], _canonical_group_name(group, lookup))
+        add_unique(entry["fuzz_targets"], group.get("fuzz_target"))
+        add_unique(entry["binaries"], group.get("binary"))
+        entry["run_statuses"].append(group["status"])
+        entry["crashes"] += group["crash_count"]
+        entry["sanitizer_findings"] += group["sanitizer_count"]
+        entry["execs"] += group["execs"]
+        entry["execs_estimated"] = entry["execs_estimated"] or group["execs_estimated"]
+        entry["duration_sec"] += group["duration_sec"]
+        coverage = group.get("coverage")
+        if isinstance(coverage, (int, float)) and coverage > entry["coverage"]:
+            entry["coverage"] = coverage
+
+    out_units: list[dict[str, Any]] = []
+    for target in sorted(units, key=lambda t: (t == UNASSIGNED_BUILD_TARGET, t)):
+        entry = units.pop(target)
+        build_statuses = entry.pop("build_statuses")
+        run_statuses = entry.pop("run_statuses")
+        entry["build_status"] = _pick(build_statuses, _BUILD_STATUS_ORDER)
+        entry["run_status"] = _pick(run_statuses, _RUN_STATUS_ORDER)
+        entry["run_groups"] = len(run_statuses)
+        entry["duration_sec"] = round(entry["duration_sec"], 3)
+        out_units.append(entry)
+
+    assigned = [u for u in out_units if u["build_target"] != UNASSIGNED_BUILD_TARGET]
+    return {
+        "status": "completed" if source else "not_run",
+        "build_system": str(source.get("build_system") or "") or None,
+        "config": source.get("config"),
+        "total_units": len(assigned),
+        "built_units": sum(u["build_status"] in ("built", "repaired") for u in assigned),
+        "repaired_units": sum(u["build_status"] == "repaired" for u in assigned),
+        "failed_units": sum(u["build_status"] == "failed" for u in assigned),
+        "crashed_units": sum(u["run_status"] == "crashed" for u in assigned),
+        "units": out_units,
+    }
+
+
+def render_build_units_markdown(data: Mapping[str, Any]) -> str:
+    """빌드 단위 표를 Markdown 으로 만든다 (최종 리포트·발표자료 붙여넣기용)."""
+    section = data.get("build_units")
+    section = section if isinstance(section, Mapping) else {}
+    units = section.get("units") if isinstance(section.get("units"), list) else []
+    lines = [
+        "| 빌드 단위 | 그룹 | 빌드 | 라운드 | 실행 | 크래시 | sanitizer | execs | 커버리지 |",
+        "|---|---|---|---:|---|---:|---:|---:|---:|",
+    ]
+    for unit in units:
+        lines.append(
+            "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+                unit.get("build_target"),
+                ", ".join(unit.get("groups") or []) or "-",
+                unit.get("build_status"),
+                unit.get("rounds_used"),
+                unit.get("run_status"),
+                unit.get("crashes"),
+                unit.get("sanitizer_findings"),
+                f"~{unit.get('execs')}" if unit.get("execs_estimated") else unit.get("execs"),
+                unit.get("coverage"),
+            )
+        )
+    head = (
+        f"빌드 단위 {section.get('total_units', 0)}개 · "
+        f"빌드 성공 {section.get('built_units', 0)} "
+        f"(자가치유 {section.get('repaired_units', 0)}) · "
+        f"빌드 실패 {section.get('failed_units', 0)} · "
+        f"크래시 발생 {section.get('crashed_units', 0)}"
+    )
+    return head + "\n\n" + "\n".join(lines) + "\n"
+
+
 def build_validation_summary(
     run_summary: Mapping[str, Any],
     analysis_summary: Mapping[str, Any] | None = None,
@@ -307,11 +553,14 @@ def build_validation_summary(
     generated_at: str | None = None,
     generation_summary: Mapping[str, Any] | None = None,
     selection_summary: Mapping[str, Any] | None = None,
+    build_summary: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """실행 요약과 선택적인 ANA 결과를 표준 검증 결과로 묶는다.
 
     ``run_summary``는 ``FuzzSession``이 쓰는 ``fuzz_summary.json`` 형식,
     ``analysis_summary``는 ``logosfuzz analyze``의 출력 형식을 받는다.
+    ``build_summary``는 CTR-06-01 BUILD 단계의 ``build_summary.json``이며,
+    주면 그룹에 빌드 단위 필드를 붙이고 ``build_units`` 집계를 채운다.
     누락된 선택 필드는 안전한 기본값으로 채우고 원문 분석 결과는 보존한다.
     """
     if not isinstance(run_summary, Mapping):
@@ -320,8 +569,9 @@ def build_validation_summary(
     raw_groups = run_summary.get("groups")
     if not isinstance(raw_groups, list):
         raw_groups = []
+    build_lookup = _build_lookup(build_summary)
     groups = [
-        _normalise_group(group, stage=stage)
+        _normalise_group(group, stage=stage, build_lookup=build_lookup)
         for group in raw_groups
         if isinstance(group, Mapping)
     ]
@@ -350,6 +600,7 @@ def build_validation_summary(
         "analysis": analysis,
         "gen": _normalise_generation(generation_summary),
         "selection": _normalise_selection(selection_summary),
+        "build_units": _normalise_build_units(groups, build_summary),
         "metrics": {
             "groups": len(groups),
             "passed_groups": passed,
@@ -392,6 +643,15 @@ def validate_validation_summary(data: Mapping[str, Any]) -> None:
         raise ValidationSummaryError(
             f"analysis.summary 필드가 없습니다: {', '.join(missing_verdicts)}"
         )
+    build_units = data.get("build_units")
+    if build_units is not None:
+        if not isinstance(build_units, Mapping) or not isinstance(build_units.get("units"), list):
+            raise ValidationSummaryError("build_units.units는 배열이어야 합니다")
+        for index, unit in enumerate(build_units["units"]):
+            if not isinstance(unit, Mapping) or not unit.get("build_target"):
+                raise ValidationSummaryError(
+                    f"build_units.units[{index}].build_target가 비어 있습니다"
+                )
     for index, group in enumerate(run["groups"]):
         if not isinstance(group, Mapping):
             raise ValidationSummaryError(f"run.groups[{index}]는 객체여야 합니다")

@@ -1,0 +1,164 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-10-01T14:38:39+00:00",
+  "metadata": {
+    "project": "score-baselibs",
+    "environment": "wsl2-local",
+    "target": "score/json parsers (vajson, nlohmann)"
+  },
+  "run": {
+    "engine": "libfuzzer",
+    "timeout_sec": 30,
+    "started_at": 1790865229.8863587,
+    "finished_at": 1790865292.2606635,
+    "total_groups": 2,
+    "total_crashes": 0,
+    "groups": [
+      {
+        "stage": "exe_ana",
+        "target": "lg_score_json_internal_parser_nlohmann_nlohmann_parser",
+        "harness_name": "lg_score_json_internal_parser_nlohmann_nlohmann_parser",
+        "build_target": "//score/json/internal/parser/nlohmann:nlohmann_parser",
+        "build_system": "bazel",
+        "fuzz_target": "//score/json/internal/parser/nlohmann/fuzz/lg_score_json_internal_parser_nlohmann_nlohmann_parser:lg_score_json_internal_parser_nlohmann_nlohmann_parser_fuzz_test",
+        "binary": "/home/user/baselibs/bazel-out/k8-fastbuild-fuzz/bin/score/json/internal/parser/nlohmann/fuzz/lg_score_json_internal_parser_nlohmann_nlohmann_parser/lg_score_json_internal_parser_nlohmann_nlohmann_parser_fuzz_test_bin",
+        "status": "passed",
+        "exit_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 31.2,
+        "execs": 747802,
+        "execs_estimated": true,
+        "exec_per_sec": 23968.0,
+        "coverage": 2422,
+        "crash_count": 0,
+        "sanitizer_count": 0,
+        "compile_error_count": 0,
+        "crashes": [],
+        "sanitizer_findings": [],
+        "coverage_report": null,
+        "stdout_log": "out/run2/exe/logs/lg_score_json_internal_parser_nlohmann_nlohmann_parser/run.stdout.log",
+        "stderr_log": "out/run2/exe/logs/lg_score_json_internal_parser_nlohmann_nlohmann_parser/run.stderr.log",
+        "notes": ""
+      },
+      {
+        "stage": "exe_ana",
+        "target": "lg_score_json_internal_parser_vajson_vajson_parser",
+        "harness_name": "lg_score_json_internal_parser_vajson_vajson_parser",
+        "build_target": "//score/json/internal/parser/vajson:vajson_parser",
+        "build_system": "bazel",
+        "fuzz_target": "//score/json/internal/parser/vajson/fuzz/lg_score_json_internal_parser_vajson_vajson_parser:lg_score_json_internal_parser_vajson_vajson_parser_fuzz_test",
+        "binary": "/home/user/baselibs/bazel-out/k8-fastbuild-fuzz/bin/score/json/internal/parser/vajson/fuzz/lg_score_json_internal_parser_vajson_vajson_parser/lg_score_json_internal_parser_vajson_vajson_parser_fuzz_test_bin",
+        "status": "passed",
+        "exit_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 31.16,
+        "execs": 450137,
+        "execs_estimated": true,
+        "exec_per_sec": 14446.0,
+        "coverage": 2752,
+        "crash_count": 0,
+        "sanitizer_count": 0,
+        "compile_error_count": 0,
+        "crashes": [],
+        "sanitizer_findings": [],
+        "coverage_report": null,
+        "stdout_log": "out/run2/exe/logs/lg_score_json_internal_parser_vajson_vajson_parser/run.stdout.log",
+        "stderr_log": "out/run2/exe/logs/lg_score_json_internal_parser_vajson_vajson_parser/run.stderr.log",
+        "notes": ""
+      }
+    ]
+  },
+  "analysis": {
+    "status": "not_run",
+    "triage_model": "",
+    "summary": {
+      "true_positive": 0,
+      "false_positive": 0,
+      "needs_review": 0
+    },
+    "findings": []
+  },
+  "gen": {
+    "status": "not_run",
+    "total_groups": 0,
+    "validated_groups": 0,
+    "failed_groups": 0,
+    "groups": []
+  },
+  "selection": {
+    "status": "not_run",
+    "targets": []
+  },
+  "build_units": {
+    "status": "completed",
+    "build_system": "bazel",
+    "config": "fuzz",
+    "total_units": 2,
+    "built_units": 2,
+    "repaired_units": 1,
+    "failed_units": 0,
+    "crashed_units": 0,
+    "units": [
+      {
+        "build_target": "//score/json/internal/parser/nlohmann:nlohmann_parser",
+        "build_system": "bazel",
+        "groups": [
+          "lg_score_json_internal_parser_nlohmann_nlohmann_parser"
+        ],
+        "fuzz_targets": [
+          "//score/json/internal/parser/nlohmann/fuzz/lg_score_json_internal_parser_nlohmann_nlohmann_parser:lg_score_json_internal_parser_nlohmann_nlohmann_parser_fuzz_test"
+        ],
+        "binaries": [
+          "/home/user/baselibs/bazel-out/k8-fastbuild-fuzz/bin/score/json/internal/parser/nlohmann/fuzz/lg_score_json_internal_parser_nlohmann_nlohmann_parser/lg_score_json_internal_parser_nlohmann_nlohmann_parser_fuzz_test_bin"
+        ],
+        "rounds_used": 2,
+        "crashes": 0,
+        "sanitizer_findings": 0,
+        "execs": 747802,
+        "execs_estimated": true,
+        "duration_sec": 31.2,
+        "coverage": 2422,
+        "build_status": "repaired",
+        "run_status": "passed",
+        "run_groups": 1
+      },
+      {
+        "build_target": "//score/json/internal/parser/vajson:vajson_parser",
+        "build_system": "bazel",
+        "groups": [
+          "lg_score_json_internal_parser_vajson_vajson_parser"
+        ],
+        "fuzz_targets": [
+          "//score/json/internal/parser/vajson/fuzz/lg_score_json_internal_parser_vajson_vajson_parser:lg_score_json_internal_parser_vajson_vajson_parser_fuzz_test"
+        ],
+        "binaries": [
+          "/home/user/baselibs/bazel-out/k8-fastbuild-fuzz/bin/score/json/internal/parser/vajson/fuzz/lg_score_json_internal_parser_vajson_vajson_parser/lg_score_json_internal_parser_vajson_vajson_parser_fuzz_test_bin"
+        ],
+        "rounds_used": 1,
+        "crashes": 0,
+        "sanitizer_findings": 0,
+        "execs": 450137,
+        "execs_estimated": true,
+        "duration_sec": 31.16,
+        "coverage": 2752,
+        "build_status": "built",
+        "run_status": "passed",
+        "run_groups": 1
+      }
+    ]
+  },
+  "metrics": {
+    "groups": 2,
+    "passed_groups": 2,
+    "failed_groups": 0,
+    "timed_out_groups": 0,
+    "crashed_groups": 0,
+    "crashes": 0,
+    "sanitizer_findings": 0,
+    "true_positive": 0,
+    "false_positive": 0,
+    "needs_review": 0
+  }
+}
