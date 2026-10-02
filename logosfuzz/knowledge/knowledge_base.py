@@ -160,6 +160,20 @@ def is_test_path(path: str, root: Optional[str] = None) -> bool:
     return bool(_TEST_FILE_RE.search(Path(parts[-1]).stem))
 
 
+def _is_test_path_under_roots(path: str, roots: Sequence[str]) -> bool:
+    """Classify a source relative to its input root, not the checkout's name."""
+    resolved = Path(path).resolve()
+    matching = []
+    for root in roots:
+        candidate = Path(root).resolve()
+        if resolved.is_relative_to(candidate):
+            matching.append(candidate)
+    if matching:
+        root = max(matching, key=lambda candidate: len(candidate.parts))
+        return is_test_path(str(resolved), root=str(root))
+    return is_test_path(path)
+
+
 def _read(path: str) -> str:
     return Path(path).read_text(encoding="utf-8", errors="ignore")
 
@@ -294,7 +308,28 @@ class KnowledgeBase:
         if not paths:
             raise ValueError("paths must be provided")
 
-        sources: List[str] = sorted(set(iter_source_files(paths)))
+        # Test and fuzzing harness files must not enter API groups or header
+        # selection. Classify paths relative to the supplied project roots so
+        # a checkout named "Fuzz" does not hide every production source.
+        if bazel_graph is not None:
+            test_roots = [str(Path(bazel_graph.workspace).resolve())]
+        else:
+            entries = [Path(entry).resolve() for entry in paths or []]
+            directories = [str(entry) for entry in entries if entry.is_dir()]
+            if directories:
+                test_roots = directories
+            elif entries:
+                try:
+                    common = Path(os.path.commonpath(entries))
+                    test_roots = [str(common if common.is_dir() else common.parent)]
+                except ValueError:  # Files on different Windows drives.
+                    test_roots = [str(entry.parent) for entry in entries]
+            else:
+                test_roots = []
+        sources: List[str] = sorted(set(iter_source_files(
+            paths,
+            exclude=lambda source: _is_test_path_under_roots(source, test_roots),
+        )))
 
         file_infos: Dict[str, FileInfo] = {}
         facts: List[FunctionFacts] = []
@@ -320,14 +355,6 @@ class KnowledgeBase:
             facts.extend(extract_from_text(text, path=source))
 
         _merge_header_docs(facts, header_docs)
-        # 테스트 판별 기준이 되는 프로젝트 루트. 호출자가 넘긴 경로가 그대로
-        # 루트다(파일을 넘겼으면 그 부모). 이게 없으면 절대 경로 전체로 판별해서
-        # 홈 디렉터리나 저장소 이름이 표지와 겹칠 때 제품 코드가 통째로 테스트로
-        # 분류된다.
-        test_roots = []
-        for entry in paths or []:
-            entry_path = Path(entry).resolve()
-            test_roots.append(str(entry_path if entry_path.is_dir() else entry_path.parent))
         documents = cls._assemble(facts, file_infos, test_roots=test_roots)
         files = {path: info.to_dict() for path, info in file_infos.items()}
         build_units = bazel_graph.build_units() if bazel_graph is not None else []
@@ -409,8 +436,9 @@ class KnowledgeBase:
             document["build_target"] = info.build_target if info else ""
             document["build_rule_kind"] = info.build_rule_kind if info else ""
             document["build_deps"] = list(info.build_deps) if info else []
-            document["header"] = _declaring_header(document["function"], document["file"],
-                                                   headers)
+            document["header"] = _declaring_header(
+                document["function"], document["file"], headers, test_roots
+            )
         return documents
 
     # -- 조회 --------------------------------------------------------------
@@ -551,16 +579,23 @@ def _merge_header_docs(facts: Sequence[FunctionFacts], header_docs: Dict[str, st
 
 
 def _declaring_header(name: str, definition_file: str,
-                      headers: Dict[str, FileInfo]) -> Optional[str]:
+                      headers: Dict[str, FileInfo],
+                      test_roots: Sequence[str] = ()) -> Optional[str]:
     """해당 API를 선언하는 헤더를 고른다.
 
     같은 basename 의 헤더(foo.c <-> foo.h)를 우선하고, 없으면 선언을 담고
     있는 헤더 중 경로가 가장 짧은 것을 고른다.
     """
-    candidates = [path for path, info in headers.items() if name in info.declares]
+    candidates = [
+        path for path, info in headers.items()
+        if name in info.declares
+        and not _is_test_path_under_roots(path, test_roots)
+    ]
     if not candidates:
         # 헤더 자체에 정의된 static inline 함수라면 그 헤더가 답이다.
-        if definition_file.endswith(HEADER_SUFFIXES):
+        if definition_file.endswith(HEADER_SUFFIXES) and not _is_test_path_under_roots(
+            definition_file, test_roots
+        ):
             return definition_file
         return None
 

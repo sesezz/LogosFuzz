@@ -75,6 +75,14 @@ def _kb(document=None, *, with_unit=True):
                 "build_system": "bazel",
             }
         )
+        units.append(
+            {
+                "target": "//score/base:base",
+                "rule_kind": "cc_library",
+                "visibility": ["//visibility:public"],
+                "build_system": "bazel",
+            }
+        )
     return KnowledgeBase(documents=[document], build_units=units)
 
 
@@ -87,6 +95,62 @@ def test_kb_deps_provider_preserves_external_repository():
         "@score_baselibs//score/json:json",
         "@score_baselibs//score/base:base",
     ]
+
+
+def test_kb_deps_provider_skips_private_and_unknown_direct_deps():
+    kb = _kb()
+    kb.build_units[0]["deps"] = [
+        "//score/json:json_builder",
+        "//score/json:parser_interface",
+        "//score/base:base",
+        "//score/json:unresolved",
+    ]
+    kb.build_units.extend([
+        {
+            "target": "//score/json:json_builder",
+            "rule_kind": "cc_library",
+            "visibility": ["//visibility:private"],
+        },
+        {
+            "target": "//score/json:parser_interface",
+            "rule_kind": "cc_library",
+            "visibility": ["//score/json:__subpackages__"],
+        },
+    ])
+
+    assert KnowledgeBaseDepsProvider(kb).deps_for(
+        "@score_baselibs//score/json:json"
+    ) == [
+        "@score_baselibs//score/json:json",
+        "@score_baselibs//score/json:parser_interface",
+        "@score_baselibs//score/base:base",
+    ]
+
+
+def test_plan_uses_api_id_for_context_when_names_collide():
+    first = _document()
+    second = _document(
+        api_id=8,
+        signature="score::Result<Other> parse_json(OtherSpan input)",
+        file="score/json/other_parser.cpp",
+        constraints=[{
+            "kind": "bounds",
+            "target": "input",
+            "description": "second API only",
+            "confidence": 0.9,
+            "expression": "input.size() > 0",
+        }],
+    )
+    kb = KnowledgeBase(
+        documents=[first, second], build_units=_kb().build_units
+    )
+
+    plan = plan_harness(kb, 8)
+
+    assert plan.api_id == 8
+    assert "second API only" in plan.prompt_context
+    assert "OtherSpan" in plan.prompt_context
+    assert "api_id=7" not in plan.prompt_context
 
 
 def test_plan_connects_kb_to_draft_repair_and_validation_contracts():

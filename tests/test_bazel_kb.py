@@ -59,6 +59,32 @@ def test_bazel_build_units_survive_save_and_load(tmp_path):
     assert restored.build_units == payload["build_units"]
 
 
+def test_bazel_inferred_paths_do_not_index_fuzz_harnesses(tmp_path):
+    product = tmp_path / "score" / "json" / "parser.cc"
+    harness = tmp_path / "score" / "json" / "fuzz" / "parser_fuzz.cc"
+    product.parent.mkdir(parents=True)
+    harness.parent.mkdir(parents=True)
+    product.write_text("int Parse(int value) { return value; }\n", encoding="utf-8")
+    harness.write_text("int FuzzOnly(int value) { return value; }\n", encoding="utf-8")
+    graph = parse_query_xml(
+        """<query version="2">
+          <rule class="cc_library" name="//score/json:json">
+            <list name="srcs"><label value="//score/json:parser.cc"/></list>
+          </rule>
+          <rule class="cc_library" name="//score/json/fuzz:harness">
+            <list name="srcs"><label value="//score/json/fuzz:parser_fuzz.cc"/></list>
+          </rule>
+        </query>""",
+        str(tmp_path),
+        roots=["//score/json:json"],
+    )
+
+    kb = KnowledgeBase.build(bazel_graph=graph)
+
+    assert {document["function"] for document in kb.documents} == {"Parse"}
+    assert str(harness) not in kb.files
+
+
 def test_version_one_kb_remains_loadable(tmp_path):
     source = tmp_path / "legacy.c"
     source.write_text("int Legacy(int value) { return value; }\n", encoding="utf-8")
