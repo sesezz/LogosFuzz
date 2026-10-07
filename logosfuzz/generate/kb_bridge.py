@@ -18,7 +18,7 @@ from logosfuzz.knowledge.kb_adapters import (
 )
 from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
-from .bazel.build_file import parse_label
+from .bazel.build_file import fuzz_package_for, parse_label
 from .build_file_generator import BuildFileGenerator, GenerateReport
 from .contracts import ApiSignature, HarnessArtifact
 from .models import HarnessDraft
@@ -61,24 +61,70 @@ def _with_repository(label: str, repository: str) -> str:
     return f"@{repository}//{parsed.package}:{parsed.target}"
 
 
+def _visible_to_fuzz_package(label: str, visibility: Iterable[str],
+                             target_label: str) -> bool:
+    """Return true only when the known Bazel visibility admits the fuzz rule."""
+    dependency = parse_label(label)
+    consumer = parse_label(target_label)
+    consumer_package = fuzz_package_for(target_label)
+    if dependency.repo == consumer.repo and dependency.package == consumer_package:
+        return True  # Bazel always allows access within the same package.
+    for rule in visibility:
+        if rule == "//visibility:public":
+            return True
+        if rule == "//visibility:private":
+            continue
+        if rule.startswith(":"):
+            rule = f"//{dependency.package}{rule}"
+        try:
+            allowed = parse_label(rule)
+        except ValueError:
+            # A package_group needs Bazel to resolve it. Unknown visibility is
+            # not evidence that this direct dependency is safe to add.
+            continue
+        allowed_repo = allowed.repo or dependency.repo
+        if allowed_repo != consumer.repo:
+            continue
+        if allowed.target == "__pkg__" and consumer_package == allowed.package:
+            return True
+        if allowed.target == "__subpackages__" and (
+            not allowed.package
+            or consumer_package == allowed.package
+            or consumer_package.startswith(f"{allowed.package}/")
+        ):
+            return True
+    return False
+
+
 class KnowledgeBaseDepsProvider:
     """KB의 Bazel 소유권/직접 의존성을 BUILD 생성기에 공급한다."""
 
     def __init__(self, kb: KnowledgeBase) -> None:
         self._units = {
-            _local_label(unit["build_target"]): unit
+            parse_label(unit["build_target"]).text: unit
             for unit in build_unit_metadata(kb)
             if unit.get("build_target")
         }
 
     def deps_for(self, target_label: str) -> List[str]:
         requested = parse_label(target_label)
-        key = f"//{requested.package}:{requested.target}"
-        unit = self._units.get(key)
+        unit = self._units.get(requested.text) or self._units.get(
+            _local_label(target_label)
+        )
         if unit is None:
             return [target_label]
-        labels = [unit["build_target"], *unit.get("build_deps", [])]
-        return _unique(_with_repository(label, requested.repo) for label in labels)
+        labels = [target_label]
+        for dependency in unit.get("build_deps", []):
+            label = _with_repository(dependency, requested.repo)
+            parsed_dependency = parse_label(label)
+            dependency_unit = self._units.get(parsed_dependency.text)
+            if dependency_unit is None and parsed_dependency.repo == requested.repo:
+                dependency_unit = self._units.get(_local_label(label))
+            if dependency_unit and _visible_to_fuzz_package(
+                label, dependency_unit.get("visibility", []), target_label
+            ):
+                labels.append(label)
+        return _unique(labels)
 
 
 @dataclass(frozen=True)
@@ -218,7 +264,7 @@ def plan_harness(
         error_contracts=tuple(error_contracts),
         logic_group=logic_group or f"kb-api-{document['api_id']}",
         language=language,
-        prompt_context=harness_context(kb, str(document["function"])),
+        prompt_context=harness_context(kb, document["api_id"]),
     )
 
 

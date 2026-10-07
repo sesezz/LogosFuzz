@@ -19,12 +19,14 @@ QUERY_XML = """<?xml version="1.1" encoding="UTF-8" standalone="no"?>
     <list name="srcs"><label value="//score/internal:helper.cc"/></list>
     <list name="hdrs"><label value="//score/internal:helper.h"/></list>
     <list name="defines"><string value="HELPER_ENABLED=1"/></list>
+    <list name="visibility"><label value="//visibility:private"/></list>
   </rule>
   <rule class="cc_library" location="score/json/BUILD.bazel:3:11"
         name="//score/json:json">
     <list name="srcs"><label value="//score/json:json.cc"/></list>
     <list name="hdrs"><label value="//score/json:json.h"/></list>
     <list name="deps"><label value="//score/internal:helper"/></list>
+    <list name="visibility"><label value="//visibility:public"/></list>
     <list name="copts"><string value="-DSCORE_JSON"/></list>
     <list name="includes"><string value="public"/></list>
   </rule>
@@ -54,6 +56,9 @@ def test_query_xml_becomes_build_units_and_dependency_graph(tmp_path):
 
     assert set(graph.targets) == {"//score/internal:helper", "//score/json:json"}
     assert graph.targets["//score/json:json"].deps == ["//score/internal:helper"]
+    assert graph.targets["//score/internal:helper"].visibility == [
+        "//visibility:private"
+    ]
     assert graph.transitive_deps("//score/json:json") == ["//score/internal:helper"]
     assert all(unit["build_system"] == "bazel" for unit in graph.build_units())
 

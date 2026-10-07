@@ -28,7 +28,7 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
 SOURCE_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp")
 
@@ -1100,15 +1100,21 @@ def extract_from_file(path: str) -> List[FunctionFacts]:
     return extract_from_text(text, path=str(path))
 
 
-def iter_source_files(paths: Iterable[str]) -> Iterable[str]:
+def iter_source_files(
+    paths: Iterable[str], *, exclude: Optional[Callable[[str], bool]] = None
+) -> Iterable[str]:
     for entry in paths:
         if os.path.isdir(entry):
             for root, _, files in os.walk(entry):
                 for name in sorted(files):
                     if name.endswith(SOURCE_SUFFIXES):
-                        yield os.path.join(root, name)
+                        source = os.path.join(root, name)
+                        if exclude is None or not exclude(source):
+                            yield source
         elif str(entry).endswith(SOURCE_SUFFIXES):
-            yield str(entry)
+            source = str(entry)
+            if exclude is None or not exclude(source):
+                yield source
 
 
 def extract_from_paths(paths: Iterable[str]) -> List[FunctionFacts]:
