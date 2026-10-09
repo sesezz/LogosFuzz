@@ -1,0 +1,29 @@
+{
+  "_comment": "기존 --mode bazel / README 의 S-CORE baselibs //score/json:json 경로. source_root 는 README 예시(third_party/score-baselibs) 기준, 다른 위치면 --workspace 와 같게 고친다.",
+  "name": "score-json",
+  "version": "",
+  "language": "cpp",
+  "domain": "automotive",
+  "build": {
+    "system": "bazel",
+    "source_root": "third_party/score-baselibs",
+    "build_dir": "",
+    "configure_args": [],
+    "libraries": [],
+    "include_dirs": [],
+    "link_flags": [],
+    "compile_commands": "",
+    "bazel": {
+      "workspace": ".",
+      "target": "//score/json:json"
+    }
+  },
+  "apis": [],
+  "error_contract": "score_result",
+  "embedded": {
+    "strip_flags": [],
+    "stub_undefined": false,
+    "stub_allowlist": []
+  },
+  "seeds": []
+}
