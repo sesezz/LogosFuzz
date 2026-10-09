@@ -167,7 +167,7 @@ def test_repo_libsndfile_profile_contents():
     assert profile.build.system == "cmake"
     assert profile.error_contract == "c_return_code"
     assert profile.build.libraries == ("build-fuzz/libsndfile.a",)
-    assert profile.build.include_dirs == ("include", "build-fuzz/include")
+    assert profile.build.include_dirs == ("include",)
     assert profile.build.compile_commands == "build-fuzz/compile_commands.json"
     assert profile.apis == (
         "sf_open", "sf_open_virtual", "sf_read_short", "sf_readf_float",

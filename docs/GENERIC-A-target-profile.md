@@ -75,7 +75,7 @@ profile.is_bazel, profile.is_automotive   # (False, False)
                        "-DBUILD_EXAMPLES=OFF", "-DBUILD_TESTING=OFF",
                        "-DENABLE_EXTERNAL_LIBS=OFF", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"],
     "libraries": ["build-fuzz/libsndfile.a"],
-    "include_dirs": ["include", "build-fuzz/include"],
+    "include_dirs": ["include"],
     "link_flags": ["-lm"],
     "compile_commands": "build-fuzz/compile_commands.json",
     "bazel": null
@@ -95,6 +95,22 @@ cmake -S third_party/libsndfile -B third_party/libsndfile/build-fuzz \
   -DBUILD_SHARED_LIBS=OFF -DBUILD_PROGRAMS=OFF -DBUILD_EXAMPLES=OFF \
   -DBUILD_TESTING=OFF -DENABLE_EXTERNAL_LIBS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 ```
+
+실측 결과 (WSL Ubuntu-24.04, clang 18.1.3, cmake 3.28.3, 2026-10-10):
+
+| 항목 | 실제 위치 |
+| --- | --- |
+| 공개 헤더 `sndfile.h` (`sndfile.hh`) | `include/` (소스 트리. 생성 헤더가 아님) |
+| 생성 헤더 `config.h` | `build-fuzz/src/config.h` (라이브러리 내부 전용. `sndfile.h` 는 include 하지 않음) |
+| `compile_commands.json` | `build-fuzz/compile_commands.json` (92개 항목, `command` 형식) |
+| 정적 라이브러리 | `build-fuzz/libsndfile.a` (`sndfile` 타깃 빌드 후) |
+
+- CMakeLists 는 `build-fuzz/include` 를 BUILD_INTERFACE include 로 선언하지만, 1.2.2 는 이 디렉터리를
+  만들지 않는다. 그래서 프로필의 `include_dirs` 는 `include` 하나만 둔다.
+  compile_commands 에는 이 `-I` 가 그대로 남지만 없는 디렉터리라 파싱에 영향이 없다.
+- libsndfile 은 `-D` 대신 `config.h` 를 쓴다. 그래서 compile_db 결과에는 `-I` 와 `-std=gnu99` 만 나온다.
+- `compile_commands.json` 의 경로는 configure 한 환경 기준이다(WSL 에서 만들면 `/mnt/c/...`).
+  KB·AST 추출은 configure 한 환경(WSL)에서 돌린다.
 
 ### 예시 2: 자동차 Bazel 대상 (`targets/automotive.json`)
 
@@ -136,7 +152,9 @@ from logosfuzz.extract.compile_db import flags_for_profile, merged_flags_for_pro
 profile = load_profile("targets/libsndfile.json")
 per_file = flags_for_profile(profile)          # {절대경로: CompileFlags}
 merged = merged_flags_for_profile(profile)     # 전체 합집합
-merged.clang_args()   # ['-I...', '-isystem', '...', '-DHAVE_CONFIG_H', '-std=gnu99']
+merged.clang_args()
+# libsndfile 실측: ['-I<root>/include', '-I<root>/build-fuzz/include',
+#                 '-I<root>/src', '-I<root>/build-fuzz/src', '-std=gnu99']  (-D 없음)
 ```
 
 ```bash

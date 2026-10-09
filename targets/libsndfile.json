@@ -17,7 +17,7 @@
       "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
     ],
     "libraries": ["build-fuzz/libsndfile.a"],
-    "include_dirs": ["include", "build-fuzz/include"],
+    "include_dirs": ["include"],
     "link_flags": ["-lm"],
     "compile_commands": "build-fuzz/compile_commands.json",
     "bazel": null
