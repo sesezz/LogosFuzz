@@ -66,7 +66,16 @@ class BuildResult:
 
 
 class BuildAdapter(Protocol):
-    """빌드 시스템 1종을 감싸는 어댑터."""
+    """빌드 시스템 1종을 감싸는 어댑터.
+
+    컨트롤러(CTR-06-01)는 이 Protocol 로만 빌드 시스템을 다룬다. "bazel" 같은
+    빌드 시스템 이름이나 bazel 전용 에러 분류를 컨트롤러에 하드코딩하지 않고
+    ``build_system`` 속성과 ``classify_build_error`` 로 어댑터에서 받아 온다.
+    """
+
+    #: 이 어댑터가 다루는 빌드 시스템 이름(예: "bazel", "generic"/"cmake").
+    #: build_summary.json 의 ``build_system`` 필드가 이 값을 그대로 쓴다.
+    build_system: str
 
     def emit_build_definition(self, spec: FuzzTargetSpec, harness_source: str) -> Path:
         """BUILD 정의와 하네스 소스를 워크스페이스에 쓴다. BUILD 파일 경로 반환."""
@@ -84,6 +93,10 @@ class BuildAdapter(Protocol):
 class BazelAdapter:
     """S-CORE(baselibs) 같은 Bazel 워크스페이스용 어댑터."""
 
+    #: BuildAdapter Protocol 의 build_system. 컨트롤러가 이 값을 읽어
+    #: build_summary.json 에 넣으므로 "bazel" 을 컨트롤러에 하드코딩하지 않는다.
+    build_system = "bazel"
+
     def __init__(
         self,
         workspace_root: Path | str,
@@ -98,6 +111,21 @@ class BazelAdapter:
         self.bazel = bazel
         self.extra_args = tuple(extra_args)
         self.timeout_s = timeout_s
+
+    def classify_build_error(self, log: str, bin_label: str):
+        """빌드 로그를 Bazel 에러 처방으로 분류한다(``bazel_errors.classify``).
+
+        컨트롤러가 ``bazel_errors`` 를 직접 import 하지 않도록, bazel 전용
+        분류 지식을 이 어댑터에 둔다. D 모듈이 없거나 분류에 실패하면 None.
+        """
+        try:
+            from logosfuzz.generate.bazel_errors import classify
+        except ImportError:
+            return None
+        try:
+            return classify(log or "", requested_target=bin_label)
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------ #
     # 생성
