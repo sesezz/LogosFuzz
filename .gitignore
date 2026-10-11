@@ -83,3 +83,6 @@ third_party/
 
 # LogosFuzz 런타임 상태(HITL 리뷰 저장소, KB 오버라이드, 감사 로그)
 .logosfuzz/
+
+# GENERIC-C 임베디드 샘플 빌드 산출물
+examples/embedded/build-fuzz*/
