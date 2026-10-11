@@ -352,7 +352,11 @@ class KnowledgeBase:
             if source.endswith(HEADER_SUFFIXES):
                 for name, doc in header_declaration_docs(text).items():
                     header_docs.setdefault(name, doc)
-            facts.extend(extract_from_text(text, path=source))
+            # score::Result 계약은 자동차(S-CORE) 전용이다. 지금 Bazel 경로는 곧
+            # S-CORE 경로이므로 기존 출력 그대로 켜 두고, 그 밖에서는 끈다.
+            facts.extend(extract_from_text(
+                text, path=source, score_result=bazel_graph is not None,
+            ))
 
         _merge_header_docs(facts, header_docs)
         documents = cls._assemble(facts, file_infos, test_roots=test_roots)

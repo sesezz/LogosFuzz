@@ -141,6 +141,9 @@ class HealRound:
     # 순환 import 를 피하려고 타입을 느슨하게 둔다 - bazel_errors 는 models 를
     # 쓰지 않지만, 여기서 errors 를 import 하면 방향이 뒤엉킨다.
     classification: Optional[Any] = None
+    # GENERIC-C: 이 라운드 직전에 링크 실패를 풀려고 자동 생성한 weak 스텁 심볼.
+    # LLM 수정이 아니라 결정적 처리라 repaired_by_llm 은 False 로 남는다.
+    stubbed_symbols: List[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -181,7 +184,26 @@ class GenerateReport:
     def last_compile(self) -> Optional[CompileResult]:
         return self.rounds[-1].compile_result if self.rounds else None
 
+    @property
+    def stubbed_symbols(self) -> List[str]:
+        """자가치유 중 자동 생성한 스텁 심볼(라운드 순서, 중복 없음)."""
+        seen: List[str] = []
+        for r in self.rounds:
+            seen.extend(s for s in r.stubbed_symbols if s not in seen)
+        return seen
+
     def to_dict(self) -> Dict[str, Any]:
+        data = self._to_dict()
+        # 스텁을 만든 경우에만 키를 더한다(기존 Bazel/자동차 출력은 그대로).
+        stubbed = self.stubbed_symbols
+        if stubbed:
+            data["stubbed_symbols"] = stubbed
+            for entry, r in zip(data["rounds"], self.rounds):
+                if r.stubbed_symbols:
+                    entry["stubbed_symbols"] = list(r.stubbed_symbols)
+        return data
+
+    def _to_dict(self) -> Dict[str, Any]:
         return {
             "logic_group": self.logic_group,
             "project": self.project,

@@ -1,0 +1,29 @@
+[
+  {
+    "directory": "@ROOT@/build-fuzz",
+    "command": "/usr/bin/cc -DHAVE_CONFIG_H -D \"PACKAGE_NAME=\\\"libsndfile\\\"\" -I@ROOT@/build-fuzz/src -I../include -I @ROOT@/src -isystem /opt/sysroot/include -O2 -g -std=gnu99 -o CMakeFiles/sndfile.dir/src/sndfile.c.o -c @ROOT@/src/sndfile.c",
+    "file": "@ROOT@/src/sndfile.c"
+  },
+  {
+    "directory": "@ROOT@/build-fuzz",
+    "arguments": [
+      "arm-none-eabi-gcc",
+      "-mcpu=cortex-m4",
+      "-mthumb",
+      "-mfloat-abi=hard",
+      "--specs=nano.specs",
+      "-DSTM32F4",
+      "-Iinclude",
+      "-isystem../third_party/cmsis",
+      "-std=c11",
+      "-c",
+      "../src/hal.c"
+    ],
+    "file": "../src/hal.c"
+  },
+  {
+    "directory": "@ROOT@/build-fuzz",
+    "arguments": ["/usr/bin/cc", "-DEXTRA=1", "-I../include", "-std=c99", "-std=c11", "-c", "@ROOT@/src/sndfile.c"],
+    "file": "@ROOT@/src/sndfile.c"
+  }
+]

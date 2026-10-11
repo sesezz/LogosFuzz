@@ -1,0 +1,42 @@
+{
+  "_comment": "libsndfile 1.2.2 (commit 72f6af15e8f85157bd622ed45b979025828b7001). git clone https://github.com/libsndfile/libsndfile third_party/libsndfile",
+  "name": "libsndfile",
+  "version": "1.2.2",
+  "language": "c",
+  "domain": "generic",
+  "build": {
+    "system": "cmake",
+    "source_root": "third_party/libsndfile",
+    "build_dir": "build-fuzz",
+    "configure_args": [
+      "-DBUILD_SHARED_LIBS=OFF",
+      "-DBUILD_PROGRAMS=OFF",
+      "-DBUILD_EXAMPLES=OFF",
+      "-DBUILD_TESTING=OFF",
+      "-DENABLE_EXTERNAL_LIBS=OFF",
+      "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+    ],
+    "libraries": ["build-fuzz/libsndfile.a"],
+    "include_dirs": ["include"],
+    "link_flags": ["-lm"],
+    "compile_commands": "build-fuzz/compile_commands.json",
+    "bazel": null
+  },
+  "apis": [
+    "sf_open",
+    "sf_open_virtual",
+    "sf_read_short",
+    "sf_readf_float",
+    "sf_seek",
+    "sf_command",
+    "sf_get_string",
+    "sf_close"
+  ],
+  "error_contract": "c_return_code",
+  "embedded": {
+    "strip_flags": [],
+    "stub_undefined": false,
+    "stub_allowlist": []
+  },
+  "seeds": []
+}

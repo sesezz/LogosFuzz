@@ -6,6 +6,9 @@ GEN-03-02 컴파일 에러 자가 치유 루프 ★
 ----
 1. 초안(HarnessDraft)을 컴파일한다.
 2. 성공하면 종료(SUCCESS).
+2-1. (GENERIC-C, ``stub_policy`` 가 켜져 있을 때) 링크 실패의 미정의 심볼 중
+     ``stub_allowlist`` 에 맞는 것을 weak 스텁으로 만들고 다시 빌드한다. LLM 호출 없이
+     결정적으로 처리한다. 허용목록 밖 심볼만 남으면 ESCALATED 로 끝낸다.
 3. 실패하면 컴파일 에러를 LLM에 되먹여 수정 소스를 받고 재컴파일한다.
 4. --max-round 만큼 3을 반복한다.
 5. 그래도 실패하면:
@@ -26,7 +29,8 @@ from typing import Callable, Dict, List, Optional
 
 from . import bazel_errors
 from .compiler import Compiler
-from .errors import BazelErrorReport
+from .errors import BazelErrorKind, BazelErrorReport, classify_toolchain_log
+from .stubs import StubPolicy, parse_undefined_symbols, plan_stubs
 from .llm import LLMClient, RepairPromptBuilder, extract_code, extract_note
 from .models import (
     GenerateReport,
@@ -85,6 +89,17 @@ class SelfHealLoop:
     # B 파트의 build_file_generator 가 컨트롤러에 편입돼 BUILD 재생성까지 한 몸으로
     # 돌게 되면 True 로 올린다.
     can_edit_build: bool = False
+
+    # GENERIC-C 미정의 심볼 스텁 정책(프로필 embedded.stub_undefined / stub_allowlist).
+    #
+    # 켜져 있고 컴파일러가 ``apply_stubs(symbols)`` 를 제공하면(AdapterCompiler), 링크
+    # 실패의 미정의 심볼 중 허용목록에 맞는 것을 weak 스텁으로 만들어 다시 빌드한다.
+    # None 이거나 꺼져 있으면 지금까지와 같다.
+    stub_policy: Optional[StubPolicy] = None
+
+    # 스텁 → 재빌드를 한 번에 몇 차례까지 할지. 스텁을 넣으면 그 뒤에 가려져 있던 다른
+    # 미정의 심볼이 새로 드러날 수 있어서 한 번으로 끝나지 않는다.
+    max_stub_passes: int = 3
 
     def __post_init__(self) -> None:
         if self.prompt_builder is None:
@@ -152,6 +167,57 @@ class SelfHealLoop:
             )
         return ""
 
+    def _stubbing_enabled(self) -> bool:
+        return (self.stub_policy is not None and self.stub_policy.enabled
+                and callable(getattr(self.compiler, "apply_stubs", None)))
+
+    def _stub_and_rebuild(self, draft: HarnessDraft, source: str, result,
+                          rounds: List[HealRound], index: int):
+        """링크 실패를 스텁으로 풀 수 있으면 풀고 다시 빌드한다.
+
+        Returns:
+            (마지막 컴파일 결과, 에스컬레이션 사유). 사유가 비어 있지 않으면 허용목록 밖
+            미정의 심볼만 남아 이 루프로는 못 고친다는 뜻이다.
+        """
+        if not self._stubbing_enabled():
+            return result, ""
+        for _ in range(max(self.max_stub_passes, 0)):
+            if result.ok:
+                return result, ""
+            symbols = parse_undefined_symbols(result.log)
+            if not symbols:
+                return result, ""
+            already = getattr(self.compiler, "stub_symbols", []) or []
+            plan = plan_stubs(symbols, self.stub_policy, already=already)
+            if not plan.stub:
+                if plan.rejected and self._only_undefined_symbols(result.log):
+                    return result, (
+                        "스텁 허용목록 밖의 미정의 심볼만 남았다: "
+                        + ", ".join(plan.rejected)
+                        + " (embedded.stub_allowlist 를 넓히거나 정의를 링크해야 한다)"
+                    )
+                return result, ""
+            self.compiler.apply_stubs(plan.stub)
+            try:
+                result = self.compiler.compile(draft, source)
+            except Exception as e:
+                return result, f"스텁 재빌드 중 컴파일러 예외: {e}"
+            report = None if result.ok else self._classify(result.log, draft)
+            rounds.append(HealRound(index=index, source=source, compile_result=result,
+                                    classification=report,
+                                    llm_note="미정의 심볼 스텁 자동 생성: " + ", ".join(plan.stub),
+                                    stubbed_symbols=list(plan.stub)))
+            self._emit(rounds[-1])
+        return result, ""
+
+    @staticmethod
+    def _only_undefined_symbols(log: str) -> bool:
+        """원문 로그의 진단이 전부 미정의 심볼인가(다른 에러가 섞여 있으면 LLM 에 맡긴다)."""
+        report = classify_toolchain_log(log)
+        return bool(report.diagnostics) and all(
+            d.kind is BazelErrorKind.UNDEFINED_SYMBOL for d in report.diagnostics
+        )
+
     def run(self, draft: HarnessDraft) -> GenerateReport:
         start = time.monotonic()
         rounds: List[HealRound] = []
@@ -168,6 +234,12 @@ class SelfHealLoop:
         rounds.append(HealRound(index=0, source=source, compile_result=result,
                                 classification=report))
         self._emit(rounds[-1])
+
+        result, stub_blocked = self._stub_and_rebuild(draft, source, result, rounds, 0)
+        report = rounds[-1].classification
+        if stub_blocked:
+            return self._finish(draft, rounds, source, HealOutcome.ESCALATED,
+                                start, note=stub_blocked)
 
         if result.ok:
             outcome = HealOutcome.SUCCESS
@@ -216,6 +288,12 @@ class SelfHealLoop:
                           classification=report)
             )
             self._emit(rounds[-1])
+
+            result, stub_blocked = self._stub_and_rebuild(draft, source, result, rounds, i)
+            report = rounds[-1].classification
+            if stub_blocked:
+                return self._finish(draft, rounds, source, HealOutcome.ESCALATED,
+                                    start, note=stub_blocked)
 
             if result.ok:
                 outcome = HealOutcome.SUCCESS

@@ -40,6 +40,8 @@ import re
 from typing import Dict, List, Optional
 
 from .errors import (
+    MISSING_LIBRARY_RE,
+    MULTIPLE_DEFINITION_RE,
     BazelDiagnostic,
     BazelErrorKind,
     BazelErrorReport,
@@ -80,6 +82,7 @@ BUILD_FILE_ACTIONS = frozenset({
 # 하네스 소스를 고쳐서 풀 수 있는 처방.
 SOURCE_FILE_ACTIONS = frozenset({
     FixAction.RESOLVE_SYMBOL,   # 정의 없는 호출을 지우는 쪽으로도 풀린다
+    FixAction.REMOVE_DUPLICATE_DEFINITION,
     FixAction.RETRY_RAW,
 })
 
@@ -365,7 +368,27 @@ def classify_block(block: str, *, requested_target: Optional[str] = None
             block, {"header": header}, prefer_clang=True,
         )
 
-    # 9) 링크 단계 미정의 심볼
+    # 9) 링크 단계: 라이브러리 없음 / 중복 정의 (GENERIC-C)
+    m = MISSING_LIBRARY_RE.search(block)
+    if m:
+        lib = m.group("library") or m.group("lld")
+        return _make(
+            BazelErrorKind.MISSING_LIBRARY, FixAction.ESCALATE,
+            f"링커가 라이브러리 -l{lib} 를 찾지 못했다. 링크 설정을 고쳐야 하며 하네스 "
+            f"소스로는 해결되지 않는다.",
+            block, {"library": lib},
+        )
+    m = MULTIPLE_DEFINITION_RE.search(block)
+    if m:
+        symbol = (m.group("symbol") or m.group("lld") or "").strip()
+        return _make(
+            BazelErrorKind.MULTIPLE_DEFINITION, FixAction.REMOVE_DUPLICATE_DEFINITION,
+            f"심볼 '{symbol}' 이(가) 두 번 정의됐다. 하네스가 대상 함수를 다시 정의했다면 "
+            f"그 정의를 지워야 한다.",
+            block, {"symbol": symbol}, prefer_clang=True,
+        )
+
+    # 10) 링크 단계 미정의 심볼
     m = _UNDEF_SYMBOL_RE.search(block) or _UNDEF_REF_RE.search(block)
     if m:
         symbol = m.group("symbol").strip()
@@ -376,7 +399,7 @@ def classify_block(block: str, *, requested_target: Optional[str] = None
             block, {"symbol": symbol}, prefer_clang=True,
         )
 
-    # 10) 아는 신호가 하나도 없다. 앞선 에러의 결과를 알리는 줄이면 버리고,
+    # 11) 아는 신호가 하나도 없다. 앞선 에러의 결과를 알리는 줄이면 버리고,
     #     아니면 UNKNOWN 으로 남겨 로그 원문 재시도에 맡긴다.
     if _CONSEQUENCE_RE.search(block):
         return None
@@ -408,6 +431,8 @@ _DEDUPE_DETAIL_KEY: Dict[BazelErrorKind, tuple] = {
     BazelErrorKind.MISSING_DEP: ("header",),
     BazelErrorKind.MISSING_SRCS_FILE: ("label",),
     BazelErrorKind.UNDEFINED_SYMBOL: ("symbol",),
+    BazelErrorKind.MULTIPLE_DEFINITION: ("symbol",),
+    BazelErrorKind.MISSING_LIBRARY: ("library",),
     BazelErrorKind.TARGET_NOT_DEFINED: ("label",),
 }
 
@@ -500,6 +525,9 @@ _ACTION_INSTRUCTION: Dict[FixAction, str] = {
     FixAction.RESOLVE_SYMBOL:
         "링크 단계에서 심볼 정의를 찾지 못했다. 정의를 담은 타깃을 deps 에 추가하거나, "
         "정의가 없는 함수 호출을 제거하라.",
+    FixAction.REMOVE_DUPLICATE_DEFINITION:
+        "같은 심볼이 두 번 정의됐다. 하네스에 대상 라이브러리 함수와 같은 이름의 정의가 "
+        "있으면 지우고 라이브러리의 정의를 써라. 모킹이 필요하면 다른 이름으로 감싸라.",
     FixAction.ESCALATE:
         "이 결함은 타깃 구조를 바꿔야 풀린다. 부분 수정으로 시도하지 마라.",
     FixAction.RETRY_RAW:

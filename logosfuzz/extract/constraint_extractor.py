@@ -12,12 +12,17 @@
   - buffer_size  : (포인터, 길이) 인자 쌍
   - resource     : malloc/fopen 등 자원 획득과 해제 책임
   - return_value : 실패 시 반환값 규약
-  - error_contract: score::Result 가 반환하는 오류 규약
+  - error_contract: score::Result 가 반환하는 오류 규약 (자동차 도메인 전용, 아래 참고)
   - risky_call   : 길이 검증이 필요한 위험 API 사용
   - doc          : 주석에 서술된 제약조건
 
+score::Result 계약은 S-CORE(자동차) 전용 관용구다. ``profile.domain == "automotive"``
+이거나 호출자가 ``score_result=True`` 를 명시했을 때만 추출한다. 프로필이 없거나
+generic/embedded 프로필이면 끈다(범용 C 코드의 ``Result<`` 오탐 방지).
+
 사용법:
   python -m logosfuzz.extract.constraint_extractor examples --output build/constraints.json
+  python -m logosfuzz.extract.constraint_extractor --profile targets/automotive.json       third_party/score-baselibs/score/json
 """
 from __future__ import annotations
 
@@ -28,7 +33,10 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Sequence
+from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Sequence
+
+if TYPE_CHECKING:  # pragma: no cover
+    from logosfuzz.common.target_profile import TargetProfile
 
 SOURCE_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp")
 
@@ -126,6 +134,20 @@ RESULT_UNEXPECT_RE = re.compile(
     r"(?:(?:::)?score::)?unexpect\s*,\s*(.*)\}\s*$",
     re.S,
 )
+
+
+
+def score_result_enabled(
+    profile: Optional["TargetProfile"] = None, score_result: Optional[bool] = None
+) -> bool:
+    """score::Result 계약 추출을 켤지 결정한다.
+
+    ``score_result`` 를 명시하면 그 값이 우선이고, 아니면 자동차 프로필일 때만 켠다.
+    """
+    if score_result is not None:
+        return bool(score_result)
+    return profile is not None and profile.domain == "automotive"
+
 
 BRANCH_ERROR_EXIT = "error_exit"
 BRANCH_PLAIN_EXIT = "plain_exit"
@@ -637,15 +659,17 @@ def _branch_segment(masked: str, close_pos: int, window: int = 200) -> str:
     return masked[start : end + 1] if end != -1 else masked[start : start + window]
 
 
-def _classify_branch(masked: str, close_pos: int) -> str:
+def _classify_branch(masked: str, close_pos: int, score_result: bool = False) -> str:
     """분기 본문을 error_exit / plain_exit / none 으로 분류한다.
 
     error_exit 일 때만 "호출자가 만족시켜야 하는 조건"으로 부등호를 뒤집는다.
+    ``MakeUnexpected``/``Unexpected{`` 반환은 score::Result 관용구이므로
+    ``score_result`` 가 켜져 있을 때만 오류 탈출로 본다.
     """
     segment = _branch_segment(masked, close_pos)
     if (
         ERROR_RETURN_RE.search(segment)
-        or RESULT_ERROR_RETURN_RE.search(segment)
+        or (score_result and RESULT_ERROR_RETURN_RE.search(segment))
         or ERROR_GOTO_RE.search(segment)
         or FATAL_CALL_RE.search(segment)
     ):
@@ -1027,7 +1051,19 @@ def doc_constraints(doc: str, line: int) -> List[Constraint]:
     return _doc_constraints(doc, line)
 
 
-def extract_from_text(text: str, path: str = "<memory>") -> List[FunctionFacts]:
+def extract_from_text(
+    text: str,
+    path: str = "<memory>",
+    *,
+    profile: Optional["TargetProfile"] = None,
+    score_result: Optional[bool] = None,
+) -> List[FunctionFacts]:
+    """소스 텍스트에서 함수별 제약조건을 뽑는다.
+
+    ``profile``/``score_result`` 는 :func:`score_result_enabled` 로 score::Result
+    계약 추출 여부만 정한다. 나머지 추출은 프로필과 무관하게 같다.
+    """
+    use_score = score_result_enabled(profile, score_result)
     masked = mask_source(text)
     index = LineIndex(text)
     results: List[FunctionFacts] = []
@@ -1055,7 +1091,7 @@ def extract_from_text(text: str, path: str = "<memory>") -> List[FunctionFacts]:
             cond_masked = masked[cond_start:cond_end]
             cond_original = _snippet(text, cond_start, cond_end)
             cond_line = index.line_of(cond_start)
-            branch = _classify_branch(masked, close_pos)
+            branch = _classify_branch(masked, close_pos, use_score)
             constraints.extend(
                 _null_constraints(cond_masked, cond_original, param_map, cond_line, branch)
             )
@@ -1070,9 +1106,10 @@ def extract_from_text(text: str, path: str = "<memory>") -> List[FunctionFacts]:
         constraints.extend(
             _return_constraints(masked, text, body_span, info["return_type"], index)
         )
-        constraints.extend(
-            _score_result_constraints(masked, text, body_span, info["return_type"], index)
-        )
+        if use_score:
+            constraints.extend(
+                _score_result_constraints(masked, text, body_span, info["return_type"], index)
+            )
 
         doc = extract_doc_comment(text, info["decl_start"])
         constraints.extend(_doc_constraints(doc, line))
@@ -1095,9 +1132,14 @@ def extract_from_text(text: str, path: str = "<memory>") -> List[FunctionFacts]:
     return results
 
 
-def extract_from_file(path: str) -> List[FunctionFacts]:
+def extract_from_file(
+    path: str,
+    *,
+    profile: Optional["TargetProfile"] = None,
+    score_result: Optional[bool] = None,
+) -> List[FunctionFacts]:
     text = Path(path).read_text(encoding="utf-8", errors="ignore")
-    return extract_from_text(text, path=str(path))
+    return extract_from_text(text, path=str(path), profile=profile, score_result=score_result)
 
 
 def iter_source_files(
@@ -1117,11 +1159,18 @@ def iter_source_files(
                 yield source
 
 
-def extract_from_paths(paths: Iterable[str]) -> List[FunctionFacts]:
+def extract_from_paths(
+    paths: Iterable[str],
+    *,
+    profile: Optional["TargetProfile"] = None,
+    score_result: Optional[bool] = None,
+) -> List[FunctionFacts]:
     results: List[FunctionFacts] = []
     for source in iter_source_files(paths):
         try:
-            results.extend(extract_from_file(source))
+            results.extend(
+                extract_from_file(source, profile=profile, score_result=score_result)
+            )
         except OSError:
             continue
     return results
@@ -1133,12 +1182,18 @@ def parse_args(argv=None):
     )
     parser.add_argument("paths", nargs="+", help="Source files or directories")
     parser.add_argument("--output", "-o", help="Output JSON path (defaults to stdout)")
+    parser.add_argument("--profile",
+                        help="targets/*.json — domain=automotive 일 때만 score::Result 계약 추출")
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
-    facts = extract_from_paths(args.paths)
+    profile = None
+    if args.profile:
+        from logosfuzz.common.target_profile import load_profile
+        profile = load_profile(args.profile)
+    facts = extract_from_paths(args.paths, profile=profile)
     payload = [f.to_dict() for f in facts]
     rendered = json.dumps(payload, indent=2, ensure_ascii=False)
     if args.output:
