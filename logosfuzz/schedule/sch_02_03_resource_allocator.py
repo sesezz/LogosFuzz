@@ -141,11 +141,11 @@ if __name__ == "__main__":
 
     # SCH-02-02 목업 데이터 재사용
     apis = [
-        ApiMetadata(101, "int stream_open(stream_ctx_t *ctx)",
+        ApiMetadata(101, "int sf_open(sf_ctx_t *ctx)",
                     ["101", "102", "103", "101", "102"]),
-        ApiMetadata(102, "int stream_set_mode(stream_ctx_t *ctx, uint8_t level)",
+        ApiMetadata(102, "int sf_seek(sf_ctx_t *ctx, uint8_t whence)",
                     ["101", "102", "103"]),
-        ApiMetadata(103, "int stream_read_block(stream_ctx_t *ctx, uint16_t block)",
+        ApiMetadata(103, "int sf_read_short(sf_ctx_t *ctx, uint16_t items)",
                     ["102", "103"]),
         ApiMetadata(201, "int json_parse(const char *buf, size_t len)",
                     ["201", "202"]),
@@ -153,12 +153,12 @@ if __name__ == "__main__":
                     ["201", "202"]),
     ]
     constraints = [
-        Constraint(1, 102, "set_mode must precede read_block", "SPEC_DOC"),
-        Constraint(2, 103, "read_block requires an opened stream", "SPEC_DOC"),
-        Constraint(3, 101, "stream_open must be called before any other stream API", "SPEC_DOC"),
+        Constraint(1, 102, "sf_seek must follow a successful sf_open", "SPEC_DOC"),
+        Constraint(2, 103, "sf_read_short requires an opened handle", "SPEC_DOC"),
+        Constraint(3, 101, "check the sf_open handle for NULL before any sf_read_* call", "SPEC_DOC"),
     ]
     logic_groups = {
-        "lg_1_stream": [101, 102, 103],
+        "lg_1_sndfile": [101, 102, 103],
         "lg_2_json": [201, 202],
     }
 
@@ -171,9 +171,9 @@ if __name__ == "__main__":
         print(f"  {name} : synergy={score}")
 
     # SCH-02-03: 퍼징 이력 목업
-    # lg_1_stream는 이미 40% 탐색됨, lg_2_json은 아직 미탐색
+    # lg_1_sndfile는 이미 40% 탐색됨, lg_2_json은 아직 미탐색
     fuzzing_runs = [
-        FuzzingRun(run_id=1, group_name="lg_1_stream",
+        FuzzingRun(run_id=1, group_name="lg_1_sndfile",
                    total_branches=1000, covered_branches=400),
         FuzzingRun(run_id=2, group_name="lg_2_json",
                    total_branches=500,  covered_branches=0),

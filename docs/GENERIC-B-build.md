@@ -87,4 +87,4 @@ python -m pytest -q
 | `reporting/summary.py` `profile_metadata(profile)` | 리포트 `metadata` 에 `project`/`target`/`domain` | 같음. 웹 리포트 제목에 `대상 (domain)` 표시 |
 
 `common/models.py` 의 `SIGNAL_*` 상수는 그대로 두었다(자동차 전용 주석만 갱신).
-`sch_02_02` / `sch_02_03` / `llm_harness_generator` 의 데모 데이터는 UDS·CAN 대신 일반 예시(`stream_open` 등)로 바꿨다.
+`sch_02_02` / `sch_02_03` / `llm_harness_generator` 의 데모 데이터는 UDS·CAN 대신 일반 예시(`sf_open` 핸들 확인 후 `sf_read_*` 호출)로 바꿨다.

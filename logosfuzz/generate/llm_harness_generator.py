@@ -88,23 +88,23 @@ class FuzzDriver:
 VECTOR_DB_MOCK: dict[int, ApiContext] = {
     101: ApiContext(
         api_id=101,
-        func_signature="int stream_open(stream_ctx_t *ctx)",
-        call_order=["stream_open", "stream_set_mode", "stream_read_block"],
-        constraints=["must be called before any other stream API"],
+        func_signature="int sf_open(sf_ctx_t *ctx)",
+        call_order=["sf_open", "sf_seek", "sf_read_short"],
+        constraints=["check the sf_open handle for NULL before any sf_read_* call"],
         source_type="SPEC_DOC"
     ),
     102: ApiContext(
         api_id=102,
-        func_signature="int stream_set_mode(stream_ctx_t *ctx, uint8_t level)",
-        call_order=["stream_open", "stream_set_mode", "stream_read_block"],
-        constraints=["set_mode must precede read_block"],
+        func_signature="int sf_seek(sf_ctx_t *ctx, uint8_t whence)",
+        call_order=["sf_open", "sf_seek", "sf_read_short"],
+        constraints=["sf_seek must follow a successful sf_open"],
         source_type="SPEC_DOC"
     ),
     103: ApiContext(
         api_id=103,
-        func_signature="int stream_read_block(stream_ctx_t *ctx, uint16_t block)",
-        call_order=["stream_set_mode", "stream_read_block"],
-        constraints=["read_block requires an opened stream"],
+        func_signature="int sf_read_short(sf_ctx_t *ctx, uint16_t items)",
+        call_order=["sf_seek", "sf_read_short"],
+        constraints=["sf_read_short requires an opened handle"],
         source_type="SPEC_DOC"
     ),
     201: ApiContext(
@@ -566,11 +566,11 @@ def generate_harness(schedule: list[ScheduleResult],
 
 if __name__ == "__main__":
     apis = [
-        ApiMetadata(101, "int stream_open(stream_ctx_t *ctx)",
+        ApiMetadata(101, "int sf_open(sf_ctx_t *ctx)",
                     ["101", "102", "103", "101", "102"]),
-        ApiMetadata(102, "int stream_set_mode(stream_ctx_t *ctx, uint8_t level)",
+        ApiMetadata(102, "int sf_seek(sf_ctx_t *ctx, uint8_t whence)",
                     ["101", "102", "103"]),
-        ApiMetadata(103, "int stream_read_block(stream_ctx_t *ctx, uint16_t block)",
+        ApiMetadata(103, "int sf_read_short(sf_ctx_t *ctx, uint16_t items)",
                     ["102", "103"]),
         ApiMetadata(201, "int json_parse(const char *buf, size_t len)",
                     ["201", "202"]),
@@ -578,16 +578,16 @@ if __name__ == "__main__":
                     ["201", "202"]),
     ]
     constraints = [
-        Constraint(1, 102, "set_mode must precede read_block", "SPEC_DOC"),
-        Constraint(2, 103, "read_block requires an opened stream", "SPEC_DOC"),
-        Constraint(3, 101, "stream_open must be called before any other stream API", "SPEC_DOC"),
+        Constraint(1, 102, "sf_seek must follow a successful sf_open", "SPEC_DOC"),
+        Constraint(2, 103, "sf_read_short requires an opened handle", "SPEC_DOC"),
+        Constraint(3, 101, "check the sf_open handle for NULL before any sf_read_* call", "SPEC_DOC"),
     ]
     logic_groups = {
-        "lg_1_stream": [101, 102, 103],
+        "lg_1_sndfile": [101, 102, 103],
         "lg_2_json": [201, 202],
     }
     fuzzing_runs = [
-        FuzzingRun(1, "lg_1_stream", total_branches=1000, covered_branches=400),
+        FuzzingRun(1, "lg_1_sndfile", total_branches=1000, covered_branches=400),
         FuzzingRun(2, "lg_2_json", total_branches=500, covered_branches=0),
     ]
 
