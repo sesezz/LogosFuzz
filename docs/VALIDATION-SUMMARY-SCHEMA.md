@@ -44,6 +44,7 @@ python -m logosfuzz.analyze.cli analyze \
     "project": "dlt-daemon",
     "environment": "ec2",
     "target": "dlt_message_read",
+    "domain": "automotive",
     "commit": "abc123"
   },
   "run": {

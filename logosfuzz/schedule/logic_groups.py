@@ -109,12 +109,19 @@ def _duration_to_ms(value: str, unit: str) -> Optional[float]:
     return millis if millis > 0 else None
 
 
-def extract_realtime_signals(texts: Iterable[str], source: str = "") -> List[RealtimeSignal]:
+def extract_realtime_signals(texts: Iterable[str], source: str = "",
+                             domain: str = "automotive") -> List[RealtimeSignal]:
     """문서/제약조건 텍스트에서 타이밍 신호를 뽑는다.
+
+    워치독·CAN 주기·UDS P2 같은 키워드는 자동차 도메인 용어라 ``domain`` 이
+    ``automotive`` 일 때만 뽑는다(그 외에는 빈 목록). 기본값은 프로필 없이 부르는
+    기존 호출부의 동작을 지키려고 ``automotive`` 로 둔다.
 
     한 문장 안에 신호 종류 키워드와 시간 값이 함께 있어야 인정한다. 문서 전체를
     한 덩어리로 보면 무관한 숫자가 엮이기 때문이다.
     """
+    if domain != "automotive":
+        return []
     found: Dict[Tuple[str, float], RealtimeSignal] = {}
 
     for text in texts:
@@ -451,7 +458,8 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
 # ---------------------------------------------------------------------------
 
 
-def attach_realtime_signals(groups: Sequence[GroupInfo], kb: KnowledgeBase) -> None:
+def attach_realtime_signals(groups: Sequence[GroupInfo], kb: KnowledgeBase,
+                            domain: str = "automotive") -> None:
     """그룹에 속한 API 의 문서/제약조건에서 타이밍 신호를 뽑아 붙인다.
 
     출처는 API 단위로 기록한다(`uds.c:uds_read_did`). 그룹의 첫 파일로 뭉뚱그리면
@@ -474,7 +482,7 @@ def attach_realtime_signals(groups: Sequence[GroupInfo], kb: KnowledgeBase) -> N
             if not texts:
                 continue
             origin = f"{os.path.basename(document['file'])}:{document['function']}"
-            for signal in extract_realtime_signals(texts, source=origin):
+            for signal in extract_realtime_signals(texts, source=origin, domain=domain):
                 collected.setdefault((signal.kind, signal.period_ms), signal)
         group.realtime_signals = sorted(
             collected.values(), key=lambda s: (s.period_ms, s.kind)
@@ -506,10 +514,11 @@ def attach_priorities(groups: Sequence[GroupInfo], kb: KnowledgeBase) -> bool:
 
 def build_groups(kb: KnowledgeBase, link_calls: bool = True,
                  with_priority: bool = True,
-                 max_group: int = MAX_CALL_LINK_GROUP) -> List[GroupInfo]:
-    """추출 + 실시간 신호 결합 + 우선순위까지 한 번에."""
+                 max_group: int = MAX_CALL_LINK_GROUP,
+                 domain: str = "automotive") -> List[GroupInfo]:
+    """추출 + 실시간 신호 결합 + 우선순위까지 한 번에. ``domain`` 은 프로필의 domain."""
     groups = extract_groups(kb, link_calls=link_calls, max_group=max_group)
-    attach_realtime_signals(groups, kb)
+    attach_realtime_signals(groups, kb, domain=domain)
     if with_priority:
         attach_priorities(groups, kb)
         groups.sort(key=lambda g: (-g.priority, g.group_id))
@@ -601,6 +610,9 @@ def parse_args(argv=None):
     build_parser.add_argument("--no-call-links", action="store_true",
                               help="호출 관계로 잇지 않고 핸들 타입만으로 묶는다")
     build_parser.add_argument("--no-priority", action="store_true")
+    build_parser.add_argument("--domain", default="automotive",
+                              choices=("generic", "embedded", "automotive"),
+                              help="프로필의 domain. automotive 일 때만 실시간 신호를 뽑는다")
     build_parser.add_argument("--max-call-group", type=int, default=MAX_CALL_LINK_GROUP,
                               help="호출 관계 병합으로 만들 수 있는 그룹 크기 상한 "
                                    f"(기본 {MAX_CALL_LINK_GROUP})")
@@ -632,6 +644,7 @@ def main(argv=None):
             link_calls=not args.no_call_links,
             with_priority=not args.no_priority,
             max_group=args.max_call_group,
+            domain=args.domain,
         )
         save_groups(groups, args.output)
         print(json.dumps({"output": args.output, **stats(groups)},

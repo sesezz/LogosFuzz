@@ -70,3 +70,21 @@ python -m pytest -q
 
 수동 하네스는 `out/manual/sndfile_manual_fuzz.c` 이고 자동 생성 결과가 아니다.
 8개 API 중 `sf_open_virtual`, `sf_readf_float`, `sf_close` 3개만 호출한다.
+
+## domain 별 동작 분리 (2일차)
+
+`domain` 은 프로필 값(`generic` / `embedded` / `automotive`)이다. 자동차 전용 동작은 `automotive` 일 때만 켠다.
+아래 함수들은 `domain` 인자를 받고, **기본값은 `automotive`** 다(프로필 없이 부르는 기존 호출부가 같은 결과를 받도록).
+컨트롤러가 `profile.domain` 을 넘기면 된다.
+
+| 위치 | `automotive` | 그 외 |
+|---|---|---|
+| `schedule/logic_groups.py` `extract_realtime_signals` / `attach_realtime_signals` / `build_groups` | 워치독·CAN 주기·UDS P2 신호 추출 | 신호 없음 |
+| `generate/llm.py` `RepairPromptBuilder(domain=)` | "automotive open-source libraries" | "C/C++ libraries and embedded firmware" |
+| `analyze/regenerate.py` `draft_system_prompt(domain)` | 위와 같음 | 위와 같음 |
+| `generate/llm_harness_generator.py` `build_cpp_prompt(domain=)` | `score::Result` 이름 사용, S-CORE 참조 하네스 기본 포함 | `Result` 로 표기, 참조 하네스는 직접 줄 때만 |
+| `generate/gen_03_01_harness_generator.py` `generate_pairs(_from_kb)` / `list_groups` | 위 값을 전달 | 위 값을 전달 |
+| `reporting/summary.py` `profile_metadata(profile)` | 리포트 `metadata` 에 `project`/`target`/`domain` | 같음. 웹 리포트 제목에 `대상 (domain)` 표시 |
+
+`common/models.py` 의 `SIGNAL_*` 상수는 그대로 두었다(자동차 전용 주석만 갱신).
+`sch_02_02` / `sch_02_03` / `llm_harness_generator` 의 데모 데이터는 UDS·CAN 대신 일반 예시(`stream_open` 등)로 바꿨다.
