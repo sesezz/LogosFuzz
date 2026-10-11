@@ -1,0 +1,83 @@
+# LogosFuzz 범용(비-Bazel) 격리 퍼징 실행 이미지  ->  logosfuzz-exec:generic
+#
+# Bazel 이미지(docker/Dockerfile = logosfuzz-exec:latest)와 역할이 다르다.
+#   Bazel 판: 툴체인(clang/libFuzzer/sanitizer)을 전부 Bazel이 hermetic 하게
+#             공급하므로 이미지는 "Bazel 구동 환경 + 캐시"만 책임졌다.
+#   범용 판 : Bazel 이 없는 대상(cmake/ninja/make 등)을 위한 이미지다. hermetic
+#             툴체인이 없으므로 clang/llvm 툴체인을 이미지가 직접 공급한다.
+#             하네스는 이 툴체인(clang)으로 빌드되고, 커버리지 후처리
+#             (llvm-profdata -> llvm-cov)도 이 안의 LLVM 도구가 담당한다.
+#
+# 격리 정책은 이미지가 아니라 실행 측(logosfuzz/execute/docker_runner.py)이
+# 건다: --network none / --cap-drop ALL / --security-opt no-new-privileges /
+# 하네스 ro 마운트. 이 이미지는 그 정책을 바꾸지 않으며, 그 정책 아래에서
+# 동작하도록 Bazel 이미지와 같은 사용자·마운트·CMD 규약을 그대로 따른다.
+#
+# 베이스 = ubuntu:24.04 (Bazel 이미지와 동일). 하네스 바이너리가 요구하는
+# glibc 가 호스트(WSL Ubuntu 24.04 = 2.39)를 따라가므로 베이스도 24.04 로 맞춘다.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Asia/Seoul \
+    LANG=C.UTF-8
+
+# 범용 빌드·실행·커버리지에 필요한 툴체인을 설치한다.
+#   clang / lld            : 하네스 컴파일 및 -fsanitize=fuzzer,address 링크
+#   llvm (profdata/cov/..) : 커버리지 계측 후처리. 패키지 llvm 이
+#                            llvm-profdata / llvm-cov / llvm-symbolizer 를 제공한다.
+#                            (llvm-symbolizer 는 ASan/UBSan 스택 심볼라이즈에도 쓰여,
+#                            없으면 EXE-04-02 파서가 프레임을 잃는다.)
+#   cmake / ninja-build    : 범용 대상의 주 빌드 시스템
+#   pkg-config             : 대상 라이브러리 의존 검색
+#   make                   : autotools/Makefile 기반 대상 대비
+#   libatomic1             : clang 이 하네스를 libatomic.so.1 에 동적 링크할 때 필요
+#                            (없으면 실행 즉시 rc=127, Bazel 이미지와 같은 이슈)
+#   ca-certificates/git/curl/unzip/xz-utils/patch/file/binutils :
+#                            소스 fetch·아카이브 전개·addr2line 심볼라이즈
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        clang \
+        lld \
+        llvm \
+        cmake \
+        ninja-build \
+        pkg-config \
+        make \
+        libatomic1 \
+        curl \
+        git \
+        unzip \
+        xz-utils \
+        patch \
+        file \
+        binutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---- 새니타이저 기본값 -----------------------------------------------------
+# Bazel 이미지와 동일. 실제 값은 DockerIsolationRunner 가 -e 로 덮어쓴다.
+# UBSan 은 print_stacktrace=1 이 없으면 한 줄 요약만 나와 1주차 "UBSan 출력
+# 원문 수집"이 불가능하므로 반드시 켜 둔다.
+ENV ASAN_OPTIONS="abort_on_error=1:detect_leaks=1:symbolize=1" \
+    UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1" \
+    LSAN_OPTIONS="symbolize=1" \
+    TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1"
+
+# ---- 실행 사용자 -----------------------------------------------------------
+# Bazel 이미지와 동일한 규약: 소스는 /src(ro), 출력은 /out(rw) 로 마운트된다.
+# ubuntu:24.04 는 uid 1000 의 기본 사용자 ubuntu 를 가져 먼저 지우고 fuzzer 로 만든다.
+RUN (userdel -r ubuntu 2>/dev/null || true) \
+    && useradd -m -u 1000 fuzzer \
+    && mkdir -p /out /src \
+    && chown -R fuzzer:fuzzer /out
+
+COPY --chown=fuzzer:fuzzer docker/entrypoint.sh /usr/local/bin/logosfuzz-entrypoint
+RUN chmod +x /usr/local/bin/logosfuzz-entrypoint
+
+WORKDIR /src
+USER fuzzer
+
+# ENTRYPOINT 를 두지 않는다: docker_runner 가 `docker run ... image bash -lc "<cmd>"`
+# 로 전체 커맨드를 넘긴다. ENTRYPOINT ["bash","-lc"] 를 두면 인자가 이중으로
+# 이어붙어 아무 것도 실행하지 않고 rc=0 으로 위장되는 버그가 재도입된다
+# (Bazel 이미지 주석 참고).
+CMD ["bash", "-lc", "clang --version && cmake --version | head -1 && ninja --version && echo 'LogosFuzz exec image (generic) ready'"]

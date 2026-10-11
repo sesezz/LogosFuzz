@@ -27,6 +27,21 @@ from logosfuzz.reporting.summary import (
 )
 
 
+# 빌드 시스템별 기본 격리 이미지 태그.
+#   bazel -> logosfuzz-exec:latest  (docker/Dockerfile, Bazel 구동 환경)
+#   그 외 -> logosfuzz-exec:generic (docker/Dockerfile.generic, clang/cmake/ninja)
+_EXEC_IMAGES = {"bazel": "logosfuzz-exec:latest"}
+_GENERIC_EXEC_IMAGE = "logosfuzz-exec:generic"
+
+
+def default_exec_image(build_system: str | None) -> str:
+    """``--image`` 미지정 시 build_system 에 맞는 기본 격리 이미지 태그를 고른다.
+
+    GENERIC-A-profile 병합 후에는 ``profile.build.system`` 값이 그대로 들어온다.
+    """
+    return _EXEC_IMAGES.get((build_system or "bazel").lower(), _GENERIC_EXEC_IMAGE)
+
+
 def discover_groups(harness_dir: Path, groups_spec: Path | None) -> list:
     if groups_spec:
         data = json.loads(Path(groups_spec).read_text())
@@ -66,7 +81,12 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="출력 디렉토리(crashes/, logs/, summary)")
     f.add_argument("--groups", type=Path, default=None,
                    help="로직 그룹 정의 JSON(미지정 시 harness-dir 자동 탐색)")
-    f.add_argument("--image", default="logosfuzz-exec:latest", help="격리 이미지 태그")
+    f.add_argument("--image", default=None,
+                   help="격리 이미지 태그. 미지정 시 --build-system 에 따라 자동 선택 "
+                        "(bazel -> logosfuzz-exec:latest, 그 외 -> logosfuzz-exec:generic)")
+    f.add_argument("--build-system", default="bazel",
+                   help="대상 빌드 시스템(이미지 자동 선택용). GENERIC-A-profile 병합 후에는 "
+                        "profile.build.system 값을 넘긴다. 기본 bazel")
     f.add_argument("--no-build", action="store_true", help="이미지 자동 빌드 생략")
     f.add_argument("--coverage", default="none",
                    help="커버리지 계측(EXE-04-04): none | llvm-cov | sancov (기본 none). "
@@ -211,7 +231,7 @@ def main(argv: list | None = None) -> int:
             use_docker=args.docker,
             harness_dir=args.harness_dir,
             output_dir=args.output,
-            image=args.image,
+            image=args.image or default_exec_image(args.build_system),
             coverage=CoverageMode.parse(args.coverage),
         )
         groups = discover_groups(args.harness_dir, args.groups)
