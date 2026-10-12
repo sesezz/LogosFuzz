@@ -667,12 +667,13 @@ def filter_groups(groups: Sequence[Any], patterns: Sequence[str] = ()) -> List[A
     return [g for g in groups if matches(g)]
 
 
-def list_groups(kb: Any, only: Sequence[str] = ()) -> List[Dict[str, Any]]:
+def list_groups(kb: Any, only: Sequence[str] = (),
+                domain: str = "automotive") -> List[Dict[str, Any]]:
     """Logic Group 목록(LLM 호출 없음). ``--only`` 패턴을 고를 때 본다."""
     from logosfuzz.schedule.logic_groups import build_groups
 
     rows = []
-    for group in filter_groups(build_groups(kb), only):
+    for group in filter_groups(build_groups(kb, domain=domain), only):
         documents = [kb.api(aid) for aid in list(group.api_ids)]
         names = [d["function"] for d in documents if d]
         rows.append({
@@ -838,6 +839,7 @@ def generate_pairs(
     group_meta: Optional[Mapping[str, Mapping[str, Any]]] = None,
     default_target: str = "",
     llm: Optional[Callable[[str], str]] = None,
+    domain: str = "automotive",
 ) -> Tuple[List[HarnessPair], List[str]]:
     """스케줄 순서대로 C++ 하네스를 생성하고 BUILD 쌍으로 묶는다."""
     provider = deps_provider or StaticDepsProvider()
@@ -853,6 +855,7 @@ def generate_pairs(
         context_db=context_db,
         group_meta=meta,
         llm=llm,
+        domain=domain,
     )
     return pair_drivers(drivers, group_targets, provider, default_target=default_target)
 
@@ -883,6 +886,7 @@ def generate_pairs_from_kb(
     plans_out: Optional[Dict[str, List[Any]]] = None,
     only: Sequence[str] = (),
     meta_out: Optional[Dict[str, Dict[str, Any]]] = None,
+    domain: str = "automotive",
 ) -> Tuple[List[HarnessPair], List[str]]:
     """KB -> Logic Group(빌드 단위 경계) -> 스케줄 -> C++ 하네스 쌍.
 
@@ -890,6 +894,9 @@ def generate_pairs_from_kb(
     그룹만 대상이 되고 ``top_n`` 은 그 안에서 **시너지 랭킹 상위 N개**를 고른다.
     ``meta_out`` 을 주면 그룹별 프롬프트 부가 정보(``header_content`` 등)를 채워 준다
     (BUILD 단계의 소스 자가치유가 같은 API 선언을 힌트로 쓴다).
+
+    ``domain`` 은 프로필의 domain. automotive 가 아니면 실시간 신호를 뽑지 않고
+    프롬프트에도 ``score::Result`` 라는 이름을 쓰지 않는다(기본 automotive = 기존 동작).
 
     ``deps_provider`` 를 안 주면 KB 기반 공급자를 기본으로 쓴다(``make_deps_provider``).
     ``plans_out`` 은 ``group_meta_from_kb`` 로 그대로 넘어간다.
@@ -904,7 +911,7 @@ def generate_pairs_from_kb(
     )
     from logosfuzz.schedule.sch_02_03_resource_allocator import allocate_resources
 
-    groups = filter_groups(build_groups(kb), only)
+    groups = filter_groups(build_groups(kb, domain=domain), only)
     if only and not groups:
         print(f"[WARN] --only {list(only)} 와 맞는 그룹이 없다 (--list-groups 로 확인)")
         return [], []
@@ -938,6 +945,7 @@ def generate_pairs_from_kb(
         group_meta=meta,
         default_target=default_target,
         llm=llm,
+        domain=domain,
     )
 
 
