@@ -81,6 +81,7 @@ Bear64.exe
 # 재현: git clone --depth 1 --filter=blob:none --sparse \
 #         https://github.com/eclipse-score/baselibs.git third_party/score-baselibs
 #       git -C third_party/score-baselibs sparse-checkout set score
+# libsndfile(범용 대상)은 고정 커밋으로 받는다: bash scripts/fetch_libsndfile.sh --build
 third_party/
 
 # LogosFuzz 런타임 상태(HITL 리뷰 저장소, KB 오버라이드, 감사 로그)
