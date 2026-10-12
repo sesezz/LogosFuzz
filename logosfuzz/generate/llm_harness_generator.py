@@ -88,24 +88,24 @@ class FuzzDriver:
 VECTOR_DB_MOCK: dict[int, ApiContext] = {
     101: ApiContext(
         api_id=101,
-        func_signature="int can_open(can_ctx_t *ctx)",
-        call_order=["can_open", "uds_session_start", "uds_read_did"],
-        constraints=["must be called before any UDS API"],
-        source_type="CAN_SPEC"
+        func_signature="int sf_open(sf_ctx_t *ctx)",
+        call_order=["sf_open", "sf_seek", "sf_read_short"],
+        constraints=["check the sf_open handle for NULL before any sf_read_* call"],
+        source_type="SPEC_DOC"
     ),
     102: ApiContext(
         api_id=102,
-        func_signature="int uds_session_start(uds_ctx_t *ctx, uint8_t level)",
-        call_order=["can_open", "uds_session_start", "uds_read_did"],
-        constraints=["session start must precede read_did"],
-        source_type="UDS_SPEC"
+        func_signature="int sf_seek(sf_ctx_t *ctx, uint8_t whence)",
+        call_order=["sf_open", "sf_seek", "sf_read_short"],
+        constraints=["sf_seek must follow a successful sf_open"],
+        source_type="SPEC_DOC"
     ),
     103: ApiContext(
         api_id=103,
-        func_signature="int uds_read_did(uds_ctx_t *ctx, uint16_t did)",
-        call_order=["uds_session_start", "uds_read_did"],
-        constraints=["read_did requires active session"],
-        source_type="UDS_SPEC"
+        func_signature="int sf_read_short(sf_ctx_t *ctx, uint16_t items)",
+        call_order=["sf_seek", "sf_read_short"],
+        constraints=["sf_read_short requires an opened handle"],
+        source_type="SPEC_DOC"
     ),
     201: ApiContext(
         api_id=201,
@@ -152,7 +152,8 @@ def build_prompt(group_name: str, contexts: list[ApiContext],
                  build_deps: Sequence[str] | None = None,
                  context_blocks: Sequence[str] | None = None,
                  error_contracts: Sequence[str] | None = None,
-                 reference_harness: str | None = None) -> str:
+                 reference_harness: str | None = None,
+                 domain: str = "automotive") -> str:
     """언어에 맞는 하네스 생성 프롬프트를 만든다.
 
     기본은 C(``language="c"``)라 기존 호출부는 이전과 똑같은 프롬프트를 받는다.
@@ -173,6 +174,7 @@ def build_prompt(group_name: str, contexts: list[ApiContext],
         context_blocks=context_blocks,
         error_contracts=error_contracts,
         reference_harness=reference_harness,
+        domain=domain,
     )
 
 
@@ -198,8 +200,14 @@ def build_cpp_prompt(group_name: str, contexts: Sequence[ApiContext],
                      build_deps: Sequence[str] | None = None,
                      context_blocks: Sequence[str] | None = None,
                      error_contracts: Sequence[str] | None = None,
-                     reference_harness: str | None = None) -> str:
-    """C++ / FuzzedDataProvider / Bazel cc_fuzz_test 용 프롬프트."""
+                     reference_harness: str | None = None,
+                     domain: str = "automotive") -> str:
+    """C++ / FuzzedDataProvider / Bazel cc_fuzz_test 용 프롬프트.
+
+    ``domain`` 이 ``automotive`` 가 아니면 ``score::Result`` 라는 이름을 프롬프트에
+    쓰지 않는다(기본값은 기존 호출부와 같은 프롬프트를 위해 ``automotive``).
+    """
+    result_type = "score::Result" if domain == "automotive" else "Result"
     api_block = ""
     for ctx in contexts:
         api_block += f"""
@@ -253,13 +261,18 @@ BUILD UNIT:
     if contracts:
         contract_lines = "\n".join(f"  - {c}" for c in contracts)
         contract_section = f"""
-ERROR CONTRACTS (score::Result — returning an error is EXPECTED behaviour):
+ERROR CONTRACTS ({result_type} — returning an error is EXPECTED behaviour):
 {contract_lines}
   When a call returns an error, stop using that object and `return 0;`.
   NEVER abort()/assert()/__builtin_trap() on an error result.
 """
 
-    reference = load_reference_harness() if reference_harness is None else reference_harness
+    # 기본 참조 하네스는 S-CORE(score::Result) 용이라 automotive 에서만 기본으로 넣는다.
+    # 다른 도메인은 reference_harness 를 직접 줄 때만 참조 섹션이 생긴다.
+    if reference_harness is None:
+        reference = load_reference_harness() if domain == "automotive" else ""
+    else:
+        reference = reference_harness
     reference_section = ""
     if reference:
         reference_section = f"""
@@ -303,7 +316,7 @@ STRICT RULES:
 5. CONSUME every result so the optimizer cannot delete the call (discarding
    it lets -O1 remove the path) — but only with what the REAL return type
    offers. Read the return type in the signatures / header excerpts above:
-   - score::Result<T> / expected: check has_value(), then read value().
+   - {result_type}<T> / expected: check has_value(), then read value().
    - a reference such as `Foo&` (fluent/chained API): bind it with `auto&`,
      NEVER `auto` (that copies; many project classes are non-copyable), and do
      NOT call has_value()/value() on it. Observe it through a real accessor
@@ -486,7 +499,8 @@ def generate_harness(schedule: list[ScheduleResult],
                      group_meta: Mapping[str, Mapping[str, Any]] | None = None,
                      llm: Optional[Any] = None,
                      model: str = DEFAULT_MODEL,
-                     max_tokens: int = 1500) -> list[FuzzDriver]:
+                     max_tokens: int = 1500,
+                     domain: str = "automotive") -> list[FuzzDriver]:
     """스케줄 순서대로 Logic Group 마다 하네스를 생성한다.
 
     Parameters
@@ -498,6 +512,8 @@ def generate_harness(schedule: list[ScheduleResult],
                   error_contracts, header_content
     llm         : ``prompt -> str`` 호출 가능 객체. 없으면 OpenAI 를 쓴다.
                   테스트에서는 가짜 함수를 주입한다.
+    domain      : 프로필의 domain. automotive 가 아니면 C++ 프롬프트가 score::Result
+                  이름을 쓰지 않는다(기본 automotive = 기존 동작).
     """
     if language not in SUPPORTED_LANGUAGES:
         raise ValueError(f"지원하지 않는 언어: {language!r}")
@@ -527,6 +543,7 @@ def generate_harness(schedule: list[ScheduleResult],
             build_deps=meta.get("build_deps"),
             context_blocks=meta.get("context_blocks"),
             error_contracts=meta.get("error_contracts"),
+            domain=domain,
         )
         raw = complete(prompt)
         code = normalize_cpp_harness(raw) if language == LANG_CPP else raw.strip()
@@ -549,11 +566,11 @@ def generate_harness(schedule: list[ScheduleResult],
 
 if __name__ == "__main__":
     apis = [
-        ApiMetadata(101, "int can_open(can_ctx_t *ctx)",
+        ApiMetadata(101, "int sf_open(sf_ctx_t *ctx)",
                     ["101", "102", "103", "101", "102"]),
-        ApiMetadata(102, "int uds_session_start(uds_ctx_t *ctx, uint8_t level)",
+        ApiMetadata(102, "int sf_seek(sf_ctx_t *ctx, uint8_t whence)",
                     ["101", "102", "103"]),
-        ApiMetadata(103, "int uds_read_did(uds_ctx_t *ctx, uint16_t did)",
+        ApiMetadata(103, "int sf_read_short(sf_ctx_t *ctx, uint16_t items)",
                     ["102", "103"]),
         ApiMetadata(201, "int json_parse(const char *buf, size_t len)",
                     ["201", "202"]),
@@ -561,16 +578,16 @@ if __name__ == "__main__":
                     ["201", "202"]),
     ]
     constraints = [
-        Constraint(1, 102, "session start must precede read_did", "UDS_SPEC"),
-        Constraint(2, 103, "read_did requires active session", "UDS_SPEC"),
-        Constraint(3, 101, "can_open must be called before any UDS API", "CAN_SPEC"),
+        Constraint(1, 102, "sf_seek must follow a successful sf_open", "SPEC_DOC"),
+        Constraint(2, 103, "sf_read_short requires an opened handle", "SPEC_DOC"),
+        Constraint(3, 101, "check the sf_open handle for NULL before any sf_read_* call", "SPEC_DOC"),
     ]
     logic_groups = {
-        "lg_1_uds": [101, 102, 103],
+        "lg_1_sndfile": [101, 102, 103],
         "lg_2_json": [201, 202],
     }
     fuzzing_runs = [
-        FuzzingRun(1, "lg_1_uds", total_branches=1000, covered_branches=400),
+        FuzzingRun(1, "lg_1_sndfile", total_branches=1000, covered_branches=400),
         FuzzingRun(2, "lg_2_json", total_branches=500, covered_branches=0),
     ]
 

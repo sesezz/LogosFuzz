@@ -26,6 +26,21 @@ _VERDICT_KEYS = ("true_positive", "false_positive", "needs_review")
 _GROUP_STATUSES = {"passed", "failed", "timeout", "crashed"}
 
 
+def profile_metadata(profile: Any, **extra: Any) -> dict[str, Any]:
+    """대상 프로필에서 리포트 ``metadata`` 를 만든다 (``project`` / ``target`` / ``domain``).
+
+    웹 리포트가 제목에 대상 이름과 도메인을 보여 주는 데 쓴다. ``extra`` 로
+    ``commit`` / ``environment`` 같은 값을 덧붙일 수 있다.
+    """
+    meta: dict[str, Any] = {
+        "project": str(profile.name),
+        "target": str(profile.name),
+        "domain": str(profile.domain),
+    }
+    meta.update({k: v for k, v in extra.items() if v is not None})
+    return meta
+
+
 class ValidationSummaryError(ValueError):
     """검증 결과 JSON이 공유 계약을 만족하지 않을 때 발생한다."""
 

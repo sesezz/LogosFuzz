@@ -75,8 +75,10 @@ def _triager_for_args(
     if getattr(args, "source_root", None):
         provider = SourceReachabilityProvider(args.source_root, args.harness_dir)
     contracts = _contract_provider_for_args(args)
+    profile = _profile_for_args(args)
 
-    fallback = RuleBasedTriager(context_provider=provider, contract_provider=contracts)
+    fallback = RuleBasedTriager(context_provider=provider, contract_provider=contracts,
+                                profile=profile)
     if not getattr(args, "llm", False):
         return fallback, provider
 
@@ -90,13 +92,31 @@ def _triager_for_args(
             fallback=fallback,
             context_provider=provider,
             contract_provider=contracts,
+            profile=profile,
         ),
         provider,
     )
 
 
-def _contract_provider_for_args(args: argparse.Namespace) -> KnowledgeBaseContractProvider:
-    """에러계약 근거 공급자. ``--kb`` 가 있으면 선언된 계약·Bazel 타깃까지 본다."""
+def _profile_for_args(args: argparse.Namespace):
+    """``--profile`` 이 있으면 TargetProfile, 없으면 None(기존 자동차 동작)."""
+    if not getattr(args, "profile", None):
+        return None
+    cached = getattr(args, "_profile", None)
+    if cached is None:
+        from logosfuzz.common.target_profile import load_profile
+
+        cached = load_profile(args.profile)
+        args._profile = cached
+    return cached
+
+
+def _contract_provider_for_args(args: argparse.Namespace):
+    """에러계약 근거 공급자. ``--kb`` 가 있으면 선언된 계약·Bazel 타깃까지 본다.
+
+    ``--profile`` 이 있으면 ``profile.error_contract`` 플러그인을, 없으면 기존
+    ``score::Result`` 공급자를 쓴다.
+    """
     cached = getattr(args, "_contract_provider", None)
     if cached is not None:
         return cached
@@ -105,7 +125,13 @@ def _contract_provider_for_args(args: argparse.Namespace) -> KnowledgeBaseContra
         from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
         kb = KnowledgeBase.load(args.kb)
-    provider = KnowledgeBaseContractProvider(kb)
+    profile = _profile_for_args(args)
+    if profile is not None:
+        from logosfuzz.analyze.contracts import ContractProvider
+
+        provider = ContractProvider.for_profile(profile, kb=kb)
+    else:
+        provider = KnowledgeBaseContractProvider(kb)
     args._contract_provider = provider
     return provider
 
@@ -358,6 +384,8 @@ def _run_analyze(args: argparse.Namespace) -> int:
 def add_gate_arguments(parser: argparse.ArgumentParser) -> None:
     """triage/analyze 공통: 에러계약 KB 와 크래시 승인 게이트 옵션."""
     parser.add_argument("--kb", help="지식베이스 JSON(에러계약·Bazel 타깃 근거, 선택)")
+    parser.add_argument("--profile",
+                        help="대상 프로필 targets/*.json (error_contract·domain·apis 로 판별, 선택)")
     parser.add_argument("--review-store", dest="review_store",
                         help="HITL 리뷰 저장소 경로(기본 .logosfuzz/hitl/reviews.json)")
     parser.add_argument("--project", default="", help="리뷰 항목에 붙일 프로젝트 이름")

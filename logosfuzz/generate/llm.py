@@ -161,25 +161,35 @@ def truncate_middle(text: str, limit: int) -> str:
     return text[:head] + marker + text[-tail:]
 
 
+def domain_subject(domain: str) -> str:
+    """시스템 프롬프트가 설명하는 대상. automotive 만 자동차 문구를 쓴다."""
+    if domain == "automotive":
+        return "automotive open-source libraries"
+    return "C/C++ libraries and embedded firmware"
+
+
 class RepairPromptBuilder:
     """컴파일 에러를 고치기 위한 수정 프롬프트를 만든다."""
 
-    SYSTEM = (
+    SYSTEM_TEMPLATE = (
         "You are a C/C++ fuzzing-harness repair assistant for the LogosFuzz project. "
-        "You fix compilation errors in libFuzzer/AFL++ harnesses for automotive open-source "
-        "libraries. Return ONLY the full corrected source file inside a single ```c code block. "
+        "You fix compilation errors in libFuzzer/AFL++ harnesses for {subject}. "
+        "Return ONLY the full corrected source file inside a single ```c code block. "
         "Do not add explanations outside the code block. Preserve the LLVMFuzzerTestOneInput "
         "entry point and the intended target API calls."
     )
+    # 기존 호출부·테스트가 읽는 값(automotive 문구). 도메인별 문구는 system_prompt() 가 만든다.
+    SYSTEM = SYSTEM_TEMPLATE.format(subject=domain_subject("automotive"))
 
-    def __init__(self, max_log_chars: int = 8000) -> None:
+    def __init__(self, max_log_chars: int = 8000, domain: str = "automotive") -> None:
+        self.domain = domain
         # 기본값이 2000 이던 시절엔 `error_digest()`(파싱된 진단 몇 줄)만 넣었다.
         # 이제 로그 **전문**을 넣으므로 한도를 넉넉히 잡는다. Bazel 로그는 진행률
         # 줄이 섞여 길지만, 진단이 로그 전반에 흩어져 있어 요약하면 원인을 잃는다.
         self.max_log_chars = max_log_chars
 
     def system_prompt(self) -> str:
-        return self.SYSTEM
+        return self.SYSTEM_TEMPLATE.format(subject=domain_subject(self.domain))
 
     def build(
         self,

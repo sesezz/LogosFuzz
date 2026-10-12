@@ -30,7 +30,7 @@
 
 from __future__ import annotations
 
-from logosfuzz.analyze import error_contract as _ec
+from logosfuzz.analyze import contracts as _contracts
 from logosfuzz.analyze.models import CrashCluster, TriageResult, Verdict
 from logosfuzz.analyze.signature import application_frames, has_application_frame
 
@@ -59,7 +59,48 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
 
 
-def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageResult:
+# 프로필 없이 부르면(기존 자동차 모드 호출부) 지금까지와 같게 score::Result 계약과
+# 자동차 문구를 쓴다. 프로필이 있으면 profile.error_contract / profile.domain 을 따른다.
+_LEGACY_CONTRACT = "score_result"
+_LEGACY_DOMAIN = "automotive"
+
+
+def _domain(profile) -> str:
+    if profile is None:
+        return _LEGACY_DOMAIN
+    return getattr(profile, "domain", "") or "generic"
+
+
+def _resolve_contract(rep, contract=None, profile=None, kb=None):
+    """(플러그인, 근거). 근거가 주어지면 그 타입의 플러그인을 쓴다."""
+    if contract is not None:
+        plugin = _contracts.contract_for_evidence(contract)
+        if plugin is not None:
+            return plugin, contract
+    if profile is None:
+        plugin = _contracts.get_contract(_LEGACY_CONTRACT)
+    else:
+        plugin = _contracts.contract_for_profile(profile)
+    return plugin, plugin.analyze(rep, kb=kb, profile=profile)
+
+
+def _mocking_rationale(profile) -> str:
+    """mocking-fail-fp 근거문. 자동차 표현(CAN/UDS)은 automotive 에서만 쓴다."""
+    if _domain(profile) == "automotive":
+        return (
+            "하네스의 가상 네트워크(CAN/UDS) 모킹 미구현으로 발생한 가짜 크래시다. "
+            "대상 라이브러리 결함이 아니라 하네스 환경 문제이므로 오탐으로 판정한다. "
+            "원인 모킹 코드를 보완하면 사라진다(GEN-03-03 피드백 대상)."
+        )
+    return (
+        "하네스의 외부 장치·주변장치(HAL) 모킹 미구현으로 발생한 가짜 크래시다. "
+        "대상 라이브러리 결함이 아니라 하네스 환경 문제이므로 오탐으로 판정한다. "
+        "원인 모킹 코드를 보완하면 사라진다(GEN-03-03 피드백 대상)."
+    )
+
+
+def rule_triage(cluster: CrashCluster, context=None, contract=None,
+                profile=None) -> TriageResult:
     """결정적 휴리스틱으로 하나의 클러스터를 판별한다.
 
     Args:
@@ -68,27 +109,25 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageRes
             (선택). 주어지면 정적으로 증명 가능한 도달 가능성 신호를 점수에
             반영한다. 불변식 추론이 필요한 사안은 여기서 판정하지 않는다 —
             그건 ``reachability.render_for_prompt()`` 로 LLM 판별기에 넘긴다.
-        contract: :class:`~logosfuzz.analyze.error_contract.ErrorContractEvidence`
-            (선택). 없으면 대표 레코드의 원문 로그만으로 계산한다 — 스택에서
-            읽히는 계약 위반은 KB 없이도 증명되기 때문이다. KB 의 선언된 계약까지
-            보려면 ``KnowledgeBaseContractProvider(kb)`` 로 만든 근거를 넘긴다.
+        contract: 에러계약 근거(선택). ``analyze.contracts`` 플러그인이 만든 객체
+            (``ErrorContractEvidence``/``CReturnCodeEvidence``/...). 없으면 대표 레코드의
+            원문 로그만으로 계산한다 — 스택에서 읽히는 계약 위반은 KB 없이도 증명되기
+            때문이다. KB 의 선언된 계약까지 보려면 ``ContractProvider`` 로 만든 근거를 넘긴다.
+        profile: :class:`~logosfuzz.common.target_profile.TargetProfile` (선택).
+            있으면 ``profile.error_contract`` 로 계약 플러그인을, ``profile.domain`` 으로
+            근거문 표현을 고른다. 없으면 기존 동작(``score_result``, 자동차 표현)이다.
     """
     rep = cluster.representative
-    if contract is None:
-        contract = _ec.analyze_error_contract(rep)
+    plugin, contract = _resolve_contract(rep, contract, profile)
     cat = cluster.bug_type
     signals: list[str] = []
 
-    # (0) mocking 실패 = 가상 네트워크 모킹 실패로 인한 가짜 크래시 → 오탐(설계서 명시)
+    # (0) mocking 실패 = 외부 장치 모킹 실패로 인한 가짜 크래시 → 오탐(설계서 명시)
     if cat == "mocking-fail-fp":
         return TriageResult(
             verdict=Verdict.FALSE_POSITIVE,
             confidence=0.9,
-            rationale=(
-                "하네스의 가상 네트워크(CAN/UDS) 모킹 미구현으로 발생한 가짜 크래시다. "
-                "대상 라이브러리 결함이 아니라 하네스 환경 문제이므로 오탐으로 판정한다. "
-                "원인 모킹 코드를 보완하면 사라진다(GEN-03-03 피드백 대상)."
-            ),
+            rationale=_mocking_rationale(profile),
             triage_model=RULE_MODEL_NAME,
             cluster_id=cluster.cluster_id,
             signals=["mocking-fail-fp"],
@@ -140,9 +179,9 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageRes
         score += delta
         signals.extend(reach_signals)
 
-    # (6) 에러계약: score::Result 의 오류 대안을 누가 무시했는가 / 거부 통로가
-    # 있는 API 가 거부 대신 메모리를 깨뜨렸는가
-    delta, contract_signals = _ec.derive_signals(contract, cat)
+    # (6) 에러계약: API 가 알린 오류(score::Result 오류 대안, NULL/오류 반환 코드)를
+    # 누가 무시했는가 / 거부 통로가 있는 API 가 거부 대신 메모리를 깨뜨렸는가
+    delta, contract_signals = plugin.derive_signals(contract, cat)
     score += delta
     signals.extend(contract_signals)
 
@@ -192,7 +231,7 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageRes
             "도달 불가로 해석하면 안 된다."
         )
     # 에러계약 근거는 위 도달 가능성 근거와 독립이라 함께 남긴다.
-    rationale += _ec.render_rationale(contract)
+    rationale += plugin.render_rationale(contract)
 
     return TriageResult(
         verdict=verdict,
@@ -211,22 +250,26 @@ class RuleBasedTriager:
         context_provider: ``cluster -> ReachabilityContext`` 콜러블(선택).
             ``reachability.SourceReachabilityProvider(대상_소스_루트)`` 를 넣으면
             호출부 증거를 점수에 반영한다. 없으면 기존 동작 그대로다.
-        contract_provider: ``cluster -> ErrorContractEvidence`` 콜러블(선택).
+        contract_provider: ``cluster -> 에러계약 근거`` 콜러블(선택).
+            ``contracts.ContractProvider.for_profile(profile, kb)`` 나
             ``error_contract.KnowledgeBaseContractProvider(kb)`` 를 넣으면 KB 에
             선언된 에러계약까지 근거로 쓴다. 없으면 원문 로그만 본다.
+        profile: TargetProfile (선택). 계약 플러그인·근거문 표현을 고른다.
     """
 
     model_name = RULE_MODEL_NAME
 
-    def __init__(self, context_provider=None, contract_provider=None) -> None:
+    def __init__(self, context_provider=None, contract_provider=None, profile=None) -> None:
         self.context_provider = context_provider
         self.contract_provider = contract_provider
+        self.profile = profile
 
     def triage(self, cluster: CrashCluster) -> TriageResult:
         return rule_triage(
             cluster,
             context=_safe_context(self.context_provider, cluster),
             contract=_safe_context(self.contract_provider, cluster),
+            profile=self.profile,
         )
 
 
@@ -281,7 +324,8 @@ _REACHABILITY_QUESTION = """\
   취급하고, 3번 질문(계약 위반이 필요한가)으로 판단하라."""
 
 
-def build_triage_prompt(cluster: CrashCluster, context=None, contract=None) -> str:
+def build_triage_prompt(cluster: CrashCluster, context=None, contract=None,
+                        profile=None) -> str:
     """클러스터 대표 결함을 LLM 판별용 프롬프트로 직렬화한다.
 
     Args:
@@ -301,8 +345,8 @@ def build_triage_prompt(cluster: CrashCluster, context=None, contract=None) -> s
 
         evidence = render_for_prompt(context) + "\n\n"
 
-    contract = contract if contract is not None else _ec.analyze_error_contract(rep)
-    contract_block = _ec.render_for_prompt(contract)
+    plugin, contract = _resolve_contract(rep, contract, profile)
+    contract_block = plugin.render_for_prompt(contract)
     if contract_block:
         evidence += contract_block + "\n\n"
 
@@ -358,13 +402,15 @@ class LLMTriager:
     """
 
     def __init__(self, client, model_name: str = "deepseek-r1", fallback=None,
-                 context_provider=None, contract_provider=None) -> None:
+                 context_provider=None, contract_provider=None, profile=None) -> None:
         self.client = client
         self.model_name = model_name
         self.context_provider = context_provider
         self.contract_provider = contract_provider
+        self.profile = profile
         self.fallback = fallback or RuleBasedTriager(
-            context_provider=context_provider, contract_provider=contract_provider
+            context_provider=context_provider, contract_provider=contract_provider,
+            profile=profile,
         )
 
     def triage(self, cluster: CrashCluster) -> TriageResult:
@@ -372,7 +418,8 @@ class LLMTriager:
         contract = _safe_context(self.contract_provider, cluster)
         try:
             raw = self.client.complete(
-                build_triage_prompt(cluster, context=context, contract=contract),
+                build_triage_prompt(cluster, context=context, contract=contract,
+                                    profile=self.profile),
                 system=_TRIAGE_SYSTEM,
             )
         except Exception:
@@ -383,8 +430,7 @@ class LLMTriager:
         signals = ["llm-judgment"]
         if context is not None and context.resolved:
             signals.append("reachability-context")
-        if contract is None:
-            contract = _ec.analyze_error_contract(cluster.representative)
+        _, contract = _resolve_contract(cluster.representative, contract, self.profile)
         if contract.found:
             signals.append("error-contract-context")
         return TriageResult(

@@ -14,6 +14,7 @@ GEN-03-00("성공/실패 그룹 수 + 실패 로그 경로" 출력)과 EXE-04-01
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
 import time
@@ -32,6 +33,70 @@ from logosfuzz.generate.validation import (
 )
 
 Logger = Callable[[str], None]
+
+
+# --------------------------------------------------------------------------- #
+# GENERIC-C: 자가치유 루프(빌드 어댑터 백엔드)를 재진입점으로 쓰기
+# --------------------------------------------------------------------------- #
+# 검증이 실패하면 피드백을 받아 하네스를 다시 만들어야 한다. Bazel 경로는 컨트롤러가
+# 그 일을 하지만, CMake/prebuilt 대상은 ``adapter_compiler.heal_loop_for(profile, llm)``
+# 로 만든 SelfHealLoop 가 다시 빌드한다. 빌드된 실행 파일 경로(BuildResult.binary)가
+# 그대로 다음 라운드의 ``HarnessArtifact.harness_path`` 가 된다.
+DraftFactory = Callable[[HarnessArtifact, FeedbackPayload], "HarnessDraft"]
+
+
+class RebuildFailedError(RuntimeError):
+    """재생성한 하네스가 자가치유 뒤에도 빌드되지 않았다(재시도 중단 사유)."""
+
+
+def artifact_from_report(group_id: str, report, *, corpus_dir: Optional[Path] = None,
+                         source_path: Optional[Path] = None, gen_model: str = "") -> HarnessArtifact:
+    """자가치유 결과(GenerateReport)로 검증 입력을 만든다.
+
+    ``harness_path`` 는 빌드 어댑터가 돌려준 실행 파일 경로(``CompileResult.artifact_path``)다.
+
+    Raises:
+        RebuildFailedError: 자가치유가 성공하지 못했거나 실행 파일 경로가 없다.
+    """
+    last = report.last_compile
+    if not report.success or last is None or not last.artifact_path:
+        raise RebuildFailedError(
+            f"[{group_id}] 자가치유 {report.outcome.value} — 실행 파일이 없다"
+        )
+    if source_path is not None:
+        Path(source_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(source_path).write_text(report.final_source, encoding="utf-8")
+    return HarnessArtifact(
+        group_id=group_id,
+        harness_path=Path(last.artifact_path),
+        source_path=source_path,
+        corpus_dir=corpus_dir,
+        gen_model=gen_model,
+    )
+
+
+def selfheal_regenerate_fn(loop, draft_for: DraftFactory) -> RegenerateCallback:
+    """``validate_with_retry`` 의 ``regenerate_fn`` 으로 쓸 콜백을 만든다.
+
+    Args:
+        loop: SelfHealLoop (보통 ``adapter_compiler.heal_loop_for(profile, llm)``).
+        draft_for: (현재 산출물, 실패 피드백) → 새 하네스 초안. 피드백을 프롬프트에
+            넣어 GEN-03-01 로 다시 생성하는 자리다.
+    """
+
+    def regenerate(artifact: HarnessArtifact, feedback: FeedbackPayload) -> HarnessArtifact:
+        draft = draft_for(artifact, feedback)
+        report = loop.run(draft)
+        rebuilt = artifact_from_report(
+            artifact.group_id, report,
+            corpus_dir=artifact.corpus_dir, source_path=artifact.source_path,
+            gen_model=artifact.gen_model,
+        )
+        return dataclasses.replace(
+            artifact, harness_path=rebuilt.harness_path, round_no=artifact.round_no,
+        )
+
+    return regenerate
 
 
 @dataclass
