@@ -27,20 +27,27 @@ from logosfuzz.knowledge.kb_adapters import harness_context
 from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 from logosfuzz.generate.compiler import Compiler
-from logosfuzz.generate.llm import LLMClient, extract_code
+from logosfuzz.generate.llm import LLMClient, domain_subject, extract_code
 from logosfuzz.generate.models import GenerateReport, HarnessDraft
 from logosfuzz.generate.selfheal import SelfHealLoop
 
 from .kb_feedback import KBOverrideStore
 from .models import KBUpdateProposal, RegenerationRecord
 
-DRAFT_SYSTEM_PROMPT = (
+_DRAFT_SYSTEM_TEMPLATE = (
     "You are a C/C++ fuzzing-harness author for the LogosFuzz project targeting "
-    "automotive open-source libraries. Given API context (signatures, constraints, "
+    "{subject}. Given API context (signatures, constraints, "
     "and any self-correction notes from prior false positives), write a libFuzzer "
     "harness. Return ONLY the full source inside a single ```c code block. The file "
     "must define LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)."
 )
+# 기존 호출부·테스트가 읽는 값(automotive 문구). 도메인별 문구는 draft_system_prompt().
+DRAFT_SYSTEM_PROMPT = _DRAFT_SYSTEM_TEMPLATE.format(subject=domain_subject("automotive"))
+
+
+def draft_system_prompt(domain: str = "automotive") -> str:
+    """프로필 domain 에 맞는 초안 시스템 프롬프트."""
+    return _DRAFT_SYSTEM_TEMPLATE.format(subject=domain_subject(domain))
 
 FALLBACK_SOURCE = (
     "int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { return 0; }"
@@ -56,7 +63,8 @@ def _api_context_blocks(
         if document is None:
             continue
         block = harness_context(kb, name)
-        override_text = overrides.current_text(document["api_id"])
+        # 타깃 노트(같은 Bazel 타깃의 다른 API에서 나온 오탐 포함) + API 노트
+        override_text = overrides.notes_for(document)
         if override_text:
             block += f"\n\nself-correction notes (오탐 역피드백):\n{override_text}"
         blocks.append(block)
@@ -82,11 +90,12 @@ def draft_via_llm(
     logic_group: str,
     target_apis: List[str],
     project: str = "",
+    domain: str = "automotive",
 ) -> HarnessDraft:
     """GEN-03-01을 대신하는 어댑터: 갱신된 KB 컨텍스트로 LLM에 초안을 요청한다."""
     context_blocks = _api_context_blocks(kb, overrides, target_apis)
     prompt = _draft_prompt(logic_group, context_blocks)
-    response = llm.complete(prompt, system=DRAFT_SYSTEM_PROMPT)
+    response = llm.complete(prompt, system=draft_system_prompt(domain))
     source = extract_code(response) or FALLBACK_SOURCE
 
     return HarnessDraft(

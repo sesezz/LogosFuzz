@@ -52,7 +52,51 @@ __all__ = [
     "split_blocks",
     "prompt_hint",
     "load_statement_for",
+    "BUILD_FILE_ACTIONS",
+    "fix_target_artifact",
+    "needs_build_file_edit",
 ]
+
+# --------------------------------------------------------------------------- #
+# 처방이 어느 파일을 고치라는 것인가
+# --------------------------------------------------------------------------- #
+# 자가치유 루프는 하네스 **소스**(.c/.cc)만 LLM 에게 다시 쓰게 한다. 그런데 아래
+# 처방들은 전부 **BUILD 파일**을 고쳐야 풀린다 - deps 를 추가하든 load() 를 넣든
+# 하네스 소스를 아무리 다시 써도 빌드는 같은 에러로 실패한다.
+#
+# 이 구분이 없으면 루프가 "load() 를 추가하라"는 정확한 지시를 들고 고칠 수 없는
+# 파일만 반복해서 고치다 라운드를 다 태운다. 분류가 맞을수록 더 확신에 차서
+# 헛돌기 때문에, 분류기를 붙이는 순간 같이 붙여야 하는 장치다.
+BUILD_FILE_ACTIONS = frozenset({
+    FixAction.ADD_LOAD,
+    FixAction.FIX_BUILD_SYNTAX,
+    FixAction.DEFINE_TARGET,
+    FixAction.EXPAND_VISIBILITY,   # 정확히는 **대상** 패키지의 BUILD 다
+    FixAction.ADD_DEPS,
+    FixAction.FIX_DEP_LABEL,
+    FixAction.ADD_SRCS_FILE,
+})
+
+# 하네스 소스를 고쳐서 풀 수 있는 처방.
+SOURCE_FILE_ACTIONS = frozenset({
+    FixAction.RESOLVE_SYMBOL,   # 정의 없는 호출을 지우는 쪽으로도 풀린다
+    FixAction.RETRY_RAW,
+})
+
+
+def fix_target_artifact(action: FixAction) -> str:
+    """처방이 어느 산출물을 고치라는 것인지. ``"build"`` | ``"source"`` | ``"unknown"``."""
+    if action in BUILD_FILE_ACTIONS:
+        return "build"
+    if action in SOURCE_FILE_ACTIONS:
+        return "source"
+    return "unknown"
+
+
+def needs_build_file_edit(report: BazelErrorReport) -> bool:
+    """근본 원인을 풀려면 BUILD 파일을 고쳐야 하나."""
+    primary = report.primary
+    return primary is not None and primary.action in BUILD_FILE_ACTIONS
 
 # --------------------------------------------------------------------------- #
 # 블록 분할 (발견 C)

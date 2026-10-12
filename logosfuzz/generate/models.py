@@ -124,6 +124,7 @@ class HealOutcome(str, Enum):
     SUCCESS = "success"        # 컴파일 성공(초안 그대로 또는 수정 후)
     EXHAUSTED = "exhausted"    # max-round 소진, 여전히 실패
     STAGNATED = "stagnated"    # 동일 에러 반복으로 조기 중단
+    ESCALATED = "escalated"    # 분류기가 "LLM 재시도로는 못 고친다"고 판단해 조기 중단
     ERROR = "error"            # 루프 자체 오류(LLM/컴파일러 예외 등)
 
 
@@ -136,10 +137,23 @@ class HealRound:
     repaired_by_llm: bool = False
     llm_note: str = ""               # LLM 응답에서 추출한 설명(있으면)
     timestamp: str = field(default_factory=now_iso)
+    # GEN-03-02 에러 분류 결과(logosfuzz.generate.errors.BazelErrorReport).
+    # 순환 import 를 피하려고 타입을 느슨하게 둔다 - bazel_errors 는 models 를
+    # 쓰지 않지만, 여기서 errors 를 import 하면 방향이 뒤엉킨다.
+    classification: Optional[Any] = None
 
     @property
     def ok(self) -> bool:
         return self.compile_result.ok
+
+    @property
+    def diagnosis(self) -> str:
+        """분류 결과를 한 줄로. 분류가 없거나 못 했으면 빈 문자열."""
+        report = self.classification
+        primary = getattr(report, "primary", None)
+        if primary is None:
+            return ""
+        return f"{primary.kind.value}/{primary.action.value}"
 
 
 @dataclass
@@ -184,6 +198,7 @@ class GenerateReport:
                     "repaired_by_llm": r.repaired_by_llm,
                     "errors": len(r.compile_result.errors),
                     "digest": r.compile_result.error_digest(limit=3) if not r.ok else "",
+                    "diagnosis": r.diagnosis,
                 }
                 for r in self.rounds
             ],

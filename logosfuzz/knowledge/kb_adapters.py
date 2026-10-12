@@ -165,6 +165,7 @@ def build_unit_metadata(kb: KnowledgeBase) -> List[dict]:
             "build_target": target,
             "build_rule_kind": str(raw.get("rule_kind") or raw.get("build_rule_kind") or ""),
             "build_deps": list(raw.get("deps") or raw.get("build_deps") or []),
+            "visibility": list(raw.get("visibility") or []),
             "sources": list(raw.get("sources") or []),
             "headers": list(raw.get("headers") or []),
             "include_dirs": list(raw.get("include_dirs") or []),
@@ -185,6 +186,7 @@ def build_unit_metadata(kb: KnowledgeBase) -> List[dict]:
                 "build_target": target,
                 "build_rule_kind": str(document.get("build_rule_kind", "")),
                 "build_deps": list(document.get("build_deps") or []),
+                "visibility": [],
                 "sources": [],
                 "headers": [],
                 "include_dirs": [],
@@ -235,7 +237,7 @@ def call_sequences_by_build_unit(kb: KnowledgeBase) -> Dict[str, List[str]]:
 # ---------------------------------------------------------------------------
 
 
-def harness_context(kb: KnowledgeBase, target: str, max_constraints: int = 12) -> str:
+def harness_context(kb: KnowledgeBase, target: int | str, max_constraints: int = 12) -> str:
     """하네스 생성 프롬프트에 그대로 넣을 수 있는 컨텍스트 블록.
 
     EXT-01-02 의 제약조건 블록에 "컴파일에 필요한 정보"를 더한 것이다.
@@ -243,7 +245,7 @@ def harness_context(kb: KnowledgeBase, target: str, max_constraints: int = 12) -
     """
     document = kb.api(target)
     if document is None:
-        hits = kb.search(target, top_k=1)
+        hits = kb.search(target, top_k=1) if isinstance(target, str) else []
         if not hits:
             return f"# no knowledge-base entry matched '{target}'"
         document = hits[0]["document"]

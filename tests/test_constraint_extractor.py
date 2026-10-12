@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from logosfuzz.extract.constraint_extractor import (
     destructure_macro_declaration,
     extract_from_paths,
@@ -6,6 +8,16 @@ from logosfuzz.extract.constraint_extractor import (
     parse_params,
     split_top_level,
 )
+from logosfuzz.common.target_profile import load_profile
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+AUTOMOTIVE = load_profile(REPO_ROOT / "targets" / "automotive.json", base_dir=REPO_ROOT)
+GENERIC = load_profile(REPO_ROOT / "targets" / "libsndfile.json", base_dir=REPO_ROOT)
+
+
+def _extract_automotive(text, path="<memory>"):
+    """score::Result 계약은 자동차 프로필에서만 켜진다."""
+    return extract_from_text(text, path=path, profile=AUTOMOTIVE)
 
 SAMPLE = """
 #include <stdlib.h>
@@ -274,7 +286,7 @@ def test_return_value_null_for_pointer_return():
 
 
 def test_extract_score_result_make_unexpected_contracts():
-    facts = extract_from_text(
+    facts = _extract_automotive(
         "score::Result<int> Parse(int value) {"
         "  if (value < 0) { return score::MakeUnexpected(Error::kNegative); }"
         "  if (value > 10) { return MakeUnexpected(Error::kTooLarge, \"too large\"); }"
@@ -291,7 +303,7 @@ def test_extract_score_result_make_unexpected_contracts():
 
 
 def test_extract_unqualified_result_used_inside_score_namespace():
-    facts = extract_from_text(
+    facts = _extract_automotive(
         "Result<void> Update(void) { return MakeUnexpected(ErrorCode::kInvalid); }"
     )
 
@@ -300,7 +312,7 @@ def test_extract_unqualified_result_used_inside_score_namespace():
 
 
 def test_extract_result_contract_from_qualified_cpp_method():
-    facts = extract_from_text(
+    facts = _extract_automotive(
         "Result<void> Digest::Update(int value) noexcept {"
         "  if (value < 0) { return MakeUnexpected(ErrorCode::kInvalid); }"
         "  return {};"
@@ -314,7 +326,7 @@ def test_extract_result_contract_from_qualified_cpp_method():
 
 
 def test_extract_score_result_unexpected_and_unexpect_constructors():
-    facts = extract_from_text(
+    facts = _extract_automotive(
         "score::Result<void> First(void) { return score::Unexpected{Error::kFirst}; }\n"
         "score::Result<void> Second(void) {"
         "  return score::Result<void>{score::unexpect, Error::kSecond};"
@@ -328,7 +340,7 @@ def test_extract_score_result_unexpected_and_unexpect_constructors():
 
 
 def test_extract_score_result_propagated_error_contract():
-    facts = extract_from_text(
+    facts = _extract_automotive(
         "score::Result<int> Parent(void) {"
         "  auto child = Child();"
         "  if (!child.has_value()) { return score::MakeUnexpected(child.error()); }"
@@ -343,7 +355,7 @@ def test_extract_score_result_propagated_error_contract():
 
 
 def test_trailing_score_result_return_type_is_parsed_and_extracted():
-    facts = extract_from_text(
+    facts = _extract_automotive(
         "auto Parse(int value) noexcept -> ::score::Result<int> {"
         "  if (value == 0) { return ::score::MakeUnexpected(Error::kZero); }"
         "  return value;"
@@ -356,7 +368,7 @@ def test_trailing_score_result_return_type_is_parsed_and_extracted():
 
 
 def test_score_result_error_exit_strengthens_argument_precondition():
-    facts = extract_from_text(
+    facts = _extract_automotive(
         "score::Result<int> Parse(int value) {"
         "  if (value <= 0) { return score::MakeUnexpected(Error::kInvalid); }"
         "  return value;"
@@ -369,7 +381,7 @@ def test_score_result_error_exit_strengthens_argument_precondition():
 
 
 def test_make_unexpected_is_not_a_result_contract_for_other_return_types():
-    facts = extract_from_text(
+    facts = _extract_automotive(
         "int Legacy(void) { return MakeUnexpected(Error::kInvalid); }"
     )
 
@@ -546,3 +558,49 @@ def test_declaration_style_macro_is_destructured():
 
 def test_macro_without_parameter_group_is_ignored():
     assert destructure_macro_declaration("JUST, SOME, TOKENS") is None
+
+
+# ---------------------------------------------------------------------
+# GENERIC-A: score::Result 계약은 domain=automotive 에서만
+# ---------------------------------------------------------------------
+
+SCORE_SOURCE = (
+    "score::Result<int> Parse(int value) {"
+    "  if (value <= 0) { return score::MakeUnexpected(Error::kInvalid); }"
+    "  return value;"
+    "}"
+)
+
+
+def test_score_result_disabled_without_profile():
+    facts = extract_from_text(SCORE_SOURCE)
+    assert _find(facts[0].constraints, "error_contract") == []
+    # MakeUnexpected 분기도 오류 탈출로 보지 않으므로 부등호를 뒤집지 않는다.
+    checks = _find(facts[0].constraints, "range_check", "value")
+    assert all("value > 0" not in c.description for c in checks)
+
+
+def test_score_result_disabled_for_generic_profile():
+    facts = extract_from_text(SCORE_SOURCE, profile=GENERIC)
+    assert _find(facts[0].constraints, "error_contract") == []
+
+
+def test_score_result_explicit_flag_overrides_profile():
+    on = extract_from_text(SCORE_SOURCE, profile=GENERIC, score_result=True)
+    off = extract_from_text(SCORE_SOURCE, profile=AUTOMOTIVE, score_result=False)
+    assert _find(on[0].constraints, "error_contract")
+    assert _find(off[0].constraints, "error_contract") == []
+
+
+def test_generic_profile_keeps_c_return_code_constraints():
+    with_profile = [f.to_dict() for f in extract_from_text(SAMPLE, profile=GENERIC)]
+    without = [f.to_dict() for f in extract_from_text(SAMPLE)]
+    assert with_profile == without
+    assert any(c["kind"] == "return_value" for f in with_profile for c in f["constraints"])
+
+
+def test_extract_from_paths_passes_profile(tmp_path):
+    (tmp_path / "p.cc").write_text(SCORE_SOURCE, encoding="utf-8")
+    assert _find(extract_from_paths([str(tmp_path)])[0].constraints, "error_contract") == []
+    facts = extract_from_paths([str(tmp_path)], profile=AUTOMOTIVE)
+    assert _find(facts[0].constraints, "error_contract")

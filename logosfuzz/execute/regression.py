@@ -119,17 +119,26 @@ def _classify(result: CommandResult, findings: list[dict]) -> str:
 #    fuzz test" 가 뜨고 파일 재생만 한다). 재생 엔진으로 빌드하면 입력 파일을
 #    인자로 받아 한 번씩 먹이는 바이너리가 나온다 - 퍼징 기능은 필요 없다.
 # 2. GCC 툴체인은 --config=bl-x86_64-linux 가 공급한다(회귀 게이트용 config).
-# 3. ASan 자체는 GCC 에도 있다. 다만 baselibs 의 asan_ubsan_lsan 은 test: 로만
-#    정의돼 있어 bazel build 에서는 "config value is not defined" 가 된다.
-#    그래서 그 config 가 펼치는 것과 같은 --features 를 직접 넘긴다.
+# 3. ASan 자체는 GCC 에도 있다. baselibs 는 현재 asan_ubsan_lsan 을 build: 로
+#    정의한다(2주차에는 test: 전용이었으나 이후 바뀌었다). 그래서 --features 를
+#    흉내 내지 않고 config 를 그대로 쓴다. config 가 켜는
+#    @score_cpp_policies 쪽 새니타이저 플래그까지 같이 따라오기 때문이다.
 #
-# 주의 - 이 조합으로 실제 빌드해 본 적이 없다. 위 세 사실은 각각 확인된
-# 것이지만 셋을 합친 커맨드는 미검증이다. baselibs 가 있는 환경에서
-# gcc_replay_build_argv() 가 만드는 커맨드를 먼저 돌려봐야 한다.
+# 5주차 실측(baselibs 09be72c, Bazel 8.6.0, WSL) - 그대로 조합하면 빌드가
+# 대상 코드가 아니라 **abseil-cpp 에서** 죽는다.
+#
+#     absl/strings/internal/str_format/float_conversion.cc:983:47:
+#     error: format not a string literal [-Werror=format-nonliteral]
+#
+# rules_fuzzing 이 abseil 을 끌고 들어오는데, baselibs 는 전역으로
+# warnings_as_errors 를 켜 두고 GCC 12 는 clang 이 넘어가는 이 경고를 잡는다.
+# baselibs 가 google_benchmark 에 이미 쓰는 것과 같은 방식으로 외부 저장소
+# 한정 -Wno-error 를 준다. 대상 코드(score/...)의 경고 정책은 그대로다.
 
 GCC_REPLAY_PLATFORM_CONFIG = "bl-x86_64-linux"
-GCC_REPLAY_SANITIZER_FEATURES = ("asan", "ubsan")
+GCC_REPLAY_SANITIZER_CONFIG = "asan_ubsan_lsan"
 REPLAY_ENGINE_LABEL = "@rules_fuzzing//fuzzing/engines:replay"
+GCC_REPLAY_EXTERNAL_NO_WERROR = ("external/abseil-cpp.*@-Wno-error",)
 
 
 def gcc_replay_build_argv(target: str, *, bazel: str = "bazel") -> list[str]:
@@ -140,11 +149,15 @@ def gcc_replay_build_argv(target: str, *, bazel: str = "bazel") -> list[str]:
     """
     if not target.endswith("_bin"):
         target = f"{target}_bin"
-    argv = [bazel, "build", f"--config={GCC_REPLAY_PLATFORM_CONFIG}"]
-    argv += [f"--features={feature}" for feature in GCC_REPLAY_SANITIZER_FEATURES]
-    # 퍼징 엔진을 재생 엔진으로 바꾼다. GCC 에는 libFuzzer 가 없으므로 이
-    # 교체가 없으면 링크에서 죽는다.
-    argv.append(f"--@rules_fuzzing//fuzzing:cc_engine={REPLAY_ENGINE_LABEL}")
+    argv = [
+        bazel, "build",
+        f"--config={GCC_REPLAY_PLATFORM_CONFIG}",
+        f"--config={GCC_REPLAY_SANITIZER_CONFIG}",
+        # 퍼징 엔진을 재생 엔진으로 바꾼다. GCC 에는 libFuzzer 가 없으므로 이
+        # 교체가 없으면 링크에서 죽는다.
+        f"--@rules_fuzzing//fuzzing:cc_engine={REPLAY_ENGINE_LABEL}",
+    ]
+    argv += [f"--per_file_copt={spec}" for spec in GCC_REPLAY_EXTERNAL_NO_WERROR]
     argv.append(target)
     return argv
 

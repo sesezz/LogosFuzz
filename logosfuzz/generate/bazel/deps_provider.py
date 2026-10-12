@@ -15,7 +15,9 @@ bazel_query 가 나오면 생성기 코드를 한 줄도 안 고치고 교체할
 """
 from __future__ import annotations
 
-from typing import Callable, Dict, Iterable, Mapping, Protocol, Sequence, Tuple
+from typing import Callable, Dict, Iterable, Mapping, Optional, Protocol, Sequence, Tuple
+
+from .build_file import parse_label
 
 
 class DepsProvider(Protocol):
@@ -48,9 +50,32 @@ class StaticDepsProvider:
         }
         self._fallback_to_self = fallback_to_self
 
-    def deps_for(self, target_label: str) -> Sequence[str]:
+    @staticmethod
+    def _identity(label: str) -> Optional[Tuple[str, str]]:
+        """repo 접두사를 뗀 (package, target). 라벨 형식이 아니면 None."""
+        try:
+            parsed = parse_label(label)
+        except ValueError:
+            return None
+        return parsed.package, parsed.target
+
+    def _lookup(self, target_label: str) -> Optional[Tuple[str, ...]]:
         if target_label in self._mapping:
             return self._mapping[target_label]
+        # 같은 대상이 `@repo//pkg` 와 `//pkg:pkg` 로 달리 표기되는 경우를 잇는다.
+        # (KB 는 `//score/json:json`, 1주차 검증 표는 `@score_baselibs//score/json`)
+        want = self._identity(target_label)
+        if want is None:
+            return None
+        for key, deps in self._mapping.items():
+            if self._identity(key) == want:
+                return deps
+        return None
+
+    def deps_for(self, target_label: str) -> Sequence[str]:
+        found = self._lookup(target_label)
+        if found is not None:
+            return found
         if self._fallback_to_self:
             return (target_label,)
         return ()

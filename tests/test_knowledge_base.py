@@ -218,6 +218,26 @@ def test_header_for_symbol_prefers_the_matching_header(kb, tree):
     assert kb.header_for("lib_open").endswith("lib.h")
 
 
+def test_header_mapping_excludes_test_suite_and_mock_headers(tmp_path):
+    source = tmp_path / "src" / "parser.cpp"
+    source.parent.mkdir()
+    source.write_text(
+        "int FromBuffer(const char *data) { return data ? 1 : 0; }\n",
+        encoding="utf-8",
+    )
+    production = tmp_path / "include" / "json_parser_interface.h"
+    production.parent.mkdir()
+    production.write_text("int FromBuffer(const char *data);\n", encoding="utf-8")
+    for relative in ("parsers_test_suite.h", "mock/parser.h", "test/parser.h"):
+        header = tmp_path / relative
+        header.parent.mkdir(parents=True, exist_ok=True)
+        header.write_text("int FromBuffer(const char *data);\n", encoding="utf-8")
+
+    built = KnowledgeBase.build(paths=[str(tmp_path)])
+
+    assert built.header_for("FromBuffer") == str(production)
+
+
 def test_declaring_files_finds_the_prototype(kb):
     assert any(p.endswith("lib.h") for p in kb.declaring_files("lib_read"))
 
@@ -329,9 +349,7 @@ def test_static_functions_are_marked(tmp_path):
     assert public["is_static"] is False
 
 
-def test_test_code_is_marked(tmp_path):
-    """Eclipse S-CORE 색인에서 API 388개 중 188개(48.5%)가 테스트 코드였고,
-    SCH 가 뽑은 최우선 그룹이 전부 gtest 픽스처였다."""
+def test_build_excludes_test_and_fuzz_sources(tmp_path):
     src = tmp_path / "score" / "mw"
     src.mkdir(parents=True)
     (src / "formatter.cpp").write_text(
@@ -343,13 +361,19 @@ def test_test_code_is_marked(tmp_path):
     (tests / "formatter_test.cpp").write_text(
         "int SetUp(int fixture)\n{\n    return fixture;\n}\n", encoding="utf-8"
     )
+    fuzz = tmp_path / "score" / "mw" / "fuzz"
+    fuzz.mkdir()
+    (fuzz / "formatter_fuzz.cc").write_text(
+        "int FuzzEntry(int input) { return input; }\n", encoding="utf-8"
+    )
+    (src / "formatter_test.cc").write_text(
+        "int TestFormatter(int input) { return input; }\n", encoding="utf-8"
+    )
     built = KnowledgeBase.build(paths=[str(tmp_path)])
 
-    product = next(d for d in built.documents if d["function"] == "format_entry")
-    fixture = next(d for d in built.documents if d["function"] == "SetUp")
-
-    assert product["is_test"] is False
-    assert fixture["is_test"] is True
+    assert {d["function"] for d in built.documents} == {"format_entry"}
+    assert built.api("format_entry")["is_test"] is False
+    assert all("/fuzz/" not in path.replace("\\", "/") for path in built.files)
 
 
 def test_is_test_path_recognises_common_layouts():

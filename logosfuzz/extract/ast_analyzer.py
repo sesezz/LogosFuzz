@@ -2,6 +2,11 @@
 
 Usage:
   python -m logosfuzz.extract.ast_analyzer path/to/file.c --output out.json
+  python -m logosfuzz.extract.ast_analyzer --profile targets/libsndfile.json --output out.json
+
+``--profile`` 이 비-Bazel(cmake/prebuilt) 대상이면 compile_commands.json 의
+-I/-isystem/-D/-std 를 clang 인자로 쓰고(:mod:`logosfuzz.extract.compile_db`),
+Bazel 대상이면 기존처럼 ``bazel query`` 그래프를 쓴다. 프로필이 없으면 기존 동작 그대로.
 
 This script will use clang Python bindings if available; otherwise falls back to a
 lightweight regex-based extractor (includes, simple function names).
@@ -60,16 +65,22 @@ def _resolve_libclang():
         pass
 
 
-def clang_args_for_path(path, clang_args=None):
+def clang_args_for_path(path, clang_args=None, language=None):
     """Return language-correct clang arguments for a source/header path.
 
     S-CORE headers are C++ headers even when they use the conventional ``.h``
     suffix.  An explicit ``-x`` or ``-std`` supplied by the caller always wins;
     otherwise we add a safe project default.
+
+    ``language`` 는 프로필의 ``language``(``"c"``/``"cpp"``)다. ``"c"`` 이면 ``.h`` 를
+    C 헤더로 파싱한다(libsndfile 같은 C 라이브러리). ``None`` 이면 기존 동작.
     """
     args = list(clang_args or [])
     suffix = os.path.splitext(str(path))[1].lower()
-    is_cxx = suffix in CXX_SUFFIXES or suffix in C_HEADER_SUFFIXES
+    if language == "c":
+        is_cxx = suffix in CXX_SUFFIXES
+    else:
+        is_cxx = suffix in CXX_SUFFIXES or suffix in C_HEADER_SUFFIXES
 
     has_language = any(
         arg == "-x" or str(arg).startswith("-x") for arg in args
@@ -111,10 +122,10 @@ def _is_callable_cursor(node):
     }
 
 
-def analyze_with_clang(path, clang_args=None):
+def analyze_with_clang(path, clang_args=None, language=None):
     _resolve_libclang()
 
-    clang_args = clang_args_for_path(path, clang_args)
+    clang_args = clang_args_for_path(path, clang_args, language=language)
 
     # clang 내장 resource dir(stddef.h 등)은 호출자가 clang_args를 넘겼든
     # 아니든 항상 붙여야 한다. 이게 빠지면 libclang이 size_t 같은 표준
@@ -277,9 +288,9 @@ def analyze_simple(path):
     return {'file': path, 'includes': includes, 'functions': list(dict.fromkeys(funcs)), 'counts': counts}
 
 
-def analyze_file(path, clang_args=None):
+def analyze_file(path, clang_args=None, language=None):
     if HAVE_CLANG:
-        return analyze_with_clang(path, clang_args=clang_args)
+        return analyze_with_clang(path, clang_args=clang_args, language=language)
     else:
         return analyze_simple(path)
 
@@ -299,8 +310,61 @@ def _analysis_files(paths):
     return sorted(dict.fromkeys(files))
 
 
-def analyze_paths(paths, clang_args=None, bazel_graph=None):
-    """Analyze paths, applying Bazel compile context when it is available."""
+class ProfileCompileContext:
+    """비-Bazel 프로필의 파일별 clang 인자 공급자.
+
+    compile_commands.json 에 항목이 있는 소스는 그 파일의 플래그를 쓰고,
+    항목이 없는 파일(주로 헤더)은 전체 합집합을 쓰되 ``-std`` 는 빼서 파일
+    언어 기본값을 따르게 한다(C 프로젝트의 -std=gnu99 가 .hpp 에 붙지 않도록).
+    프로필의 ``build.include_dirs`` 는 항상 뒤에 붙인다. compile_commands.json 이
+    아직 없으면(configure 전) 경고만 남기고 include_dirs 만으로 진행한다.
+    """
+
+    def __init__(self, profile):
+        from logosfuzz.extract.compile_db import (
+            CompileDbError, CompileFlags, flags_for_profile,
+        )
+
+        self.profile = profile
+        try:
+            self.by_file = flags_for_profile(profile)
+        except CompileDbError as exc:
+            logger.warning("compile_commands.json 없이 include_dirs 만 사용합니다: %s", exc)
+            self.by_file = {}
+        merged = CompileFlags()
+        for flags in self.by_file.values():
+            merged.merge(flags)
+        merged.std = ""
+        self.merged = merged
+        self.include_args = [f"-I{profile.abs(d)}" for d in profile.build.include_dirs]
+
+    def files(self):
+        """프로필만 주어졌을 때의 분석 후보: compile_db 소스 + include_dirs."""
+        candidates = [path for path in self.by_file if os.path.exists(path)]
+        candidates.extend(
+            str(self.profile.abs(d)) for d in self.profile.build.include_dirs
+            if os.path.isdir(self.profile.abs(d))
+        )
+        return candidates
+
+    def clang_args(self, path):
+        flags = self.by_file.get(os.path.normpath(os.path.abspath(path)), self.merged)
+        args = flags.clang_args()
+        args.extend(a for a in self.include_args if a not in args)
+        return args
+
+
+def analyze_paths(paths, clang_args=None, bazel_graph=None, profile=None):
+    """Analyze paths, applying Bazel compile context when it is available.
+
+    ``profile`` 이 비-Bazel 대상이면 compile_db 플래그를 파일별로 덧붙인다.
+    Bazel 프로필은 ``bazel_graph`` 경로를 그대로 쓰므로 언어 정보만 반영된다.
+    """
+    language = profile.language if profile is not None else None
+    profile_ctx = None
+    if profile is not None and not profile.is_bazel:
+        profile_ctx = ProfileCompileContext(profile)
+
     candidates = list(paths or [])
     if bazel_graph is not None:
         candidates.extend(
@@ -309,6 +373,8 @@ def analyze_paths(paths, clang_args=None, bazel_graph=None):
             for path in target.sources + target.headers
             if os.path.exists(path)
         )
+    if profile_ctx is not None and not candidates:
+        candidates = profile_ctx.files()
 
     results = []
     for path in _analysis_files(candidates):
@@ -318,7 +384,15 @@ def analyze_paths(paths, clang_args=None, bazel_graph=None):
             flag for flag in context.get("compile_flags", [])
             if flag not in combined_args
         )
-        result = analyze_file(path, clang_args=combined_args)
+        if profile_ctx is not None:
+            combined_args.extend(
+                flag for flag in profile_ctx.clang_args(path)
+                if flag not in combined_args
+            )
+        if language is None:
+            result = analyze_file(path, clang_args=combined_args)
+        else:
+            result = analyze_file(path, clang_args=combined_args, language=language)
         if context:
             result["build_system"] = context["build_system"]
             result["build_target"] = context["build_target"]
@@ -336,9 +410,19 @@ def main(argv=None):
     p.add_argument('--bazel-workspace')
     p.add_argument('--bazel-target', action='append', default=[])
     p.add_argument('--bazel', help='bazel/bazelisk executable')
+    p.add_argument('--profile', help='targets/*.json 대상 프로필')
     args = p.parse_args(argv)
 
+    profile = None
+    if args.profile:
+        from logosfuzz.common.target_profile import load_profile
+        profile = load_profile(args.profile)
+
     bazel_graph = None
+    if profile is not None and profile.is_bazel and not (args.bazel_workspace or args.bazel_target):
+        # 자동차(Bazel) 프로필은 기존 bazel query 경로로 보낸다.
+        args.bazel_workspace = str(profile.abs(profile.build.bazel.workspace))
+        args.bazel_target = [profile.build.bazel.target]
     if args.bazel_workspace or args.bazel_target:
         if not (args.bazel_workspace and args.bazel_target):
             p.error('--bazel-workspace and --bazel-target must be used together')
@@ -346,13 +430,14 @@ def main(argv=None):
         bazel_graph = query_bazel(
             args.bazel_workspace, args.bazel_target, bazel=args.bazel
         )
-    if not args.paths and bazel_graph is None:
-        p.error('provide paths or a Bazel workspace/target')
+    if not args.paths and bazel_graph is None and profile is None:
+        p.error('provide paths, a Bazel workspace/target, or --profile')
 
     results = analyze_paths(
         args.paths,
         clang_args=args.clang_arg,
         bazel_graph=bazel_graph,
+        profile=profile,
     )
 
     out = json.dumps(results, indent=2, ensure_ascii=False)

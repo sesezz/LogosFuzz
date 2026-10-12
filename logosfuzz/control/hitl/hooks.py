@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from .gate import HITLManager
+from .gate import CrashApprovalGate, HITLManager
 from .models import Checkpoint, DecisionType
 
 
@@ -63,30 +63,18 @@ def review_crash_triage(
     """
     ANA-05-01 이후 호출. 정탐/오탐 판정을 CRASH_TRIAGE 체크포인트로 확인한다.
 
+    4주차부터 실제 게이트(`gate.CrashApprovalGate`)에 위임한다 - 재실행 시 중복
+    항목을 만들지 않고 사람의 이전 결정을 재사용한다.
+
     반환값: 최종 확정된 verdict 문자열, 보류/건너뜀이면 None.
+    REJECT 는 "검증된 크래시로 인정하지 않음"이므로 false_positive 로 확정된다.
     """
-    decision = hitl.request(
-        Checkpoint.CRASH_TRIAGE,
-        target=crash_signature,
-        project=project,
+    approval = CrashApprovalGate(hitl, project=project).review(
+        crash_signature, verdict, confidence,
         summary=f"{crash_signature} → LLM판정={verdict} (conf={confidence:.2f})",
-        payload={
-            "crash_signature": crash_signature,
-            "llm_verdict": verdict,
-            "confidence": confidence,
-            "sanitizer": sanitizer,
-            "stacktrace": stacktrace,
-        },
+        payload={"sanitizer": sanitizer, "stacktrace": stacktrace},
     )
-    if decision.type == DecisionType.APPROVE:
-        return verdict
-    if decision.type == DecisionType.EDIT and decision.edited_payload:
-        # 사람이 판정을 뒤집은 경우
-        return decision.edited_payload.get("llm_verdict", verdict)
-    if decision.type == DecisionType.REJECT:
-        # TODO(ANA-05-03): 오탐 확정 → 지식베이스 역피드백 트리거
-        return "false_positive"
-    return None
+    return approval.final_verdict
 
 
 def approve_cve_disclosure(

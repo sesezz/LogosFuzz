@@ -57,7 +57,15 @@ class CheckpointRule:
 # 기본 조건부 판정 함수들 (스켈레톤 예시 - 실제 임계값은 팀에서 조정)
 # --------------------------------------------------------------------------- #
 def _low_confidence_crash(item: ReviewItem) -> bool:
-    """ANA 정탐/오탐 신뢰도가 낮을 때만 사람 확인을 요청."""
+    """ANA 정탐/오탐 신뢰도가 낮거나, 판별기가 판정을 못 냈으면 사람 확인을 요청.
+
+    ``needs_review`` 는 신뢰도와 무관하게 사람에게 보낸다. 규칙 기반 판별기는
+    점수가 0.5 근처일수록 needs_review 의 신뢰도를 높게(최대 0.9) 매기므로, 신뢰도만
+    보면 "판정 불가" 크래시가 자동 승인돼 검증 목록에 섞인다.
+    """
+    verdict = item.payload.get("llm_verdict") or item.payload.get("verdict")
+    if verdict == "needs_review":
+        return True
     conf = item.payload.get("confidence")
     return conf is None or float(conf) < 0.8
 

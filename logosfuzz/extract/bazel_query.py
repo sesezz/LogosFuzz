@@ -45,6 +45,7 @@ class BazelTarget:
     target: str
     rule_kind: str
     deps: List[str] = field(default_factory=list)
+    visibility: List[str] = field(default_factory=list)
     sources: List[str] = field(default_factory=list)
     headers: List[str] = field(default_factory=list)
     include_dirs: List[str] = field(default_factory=list)
@@ -312,6 +313,7 @@ def parse_query_xml(xml_text: str, workspace: str,
             target=label,
             rule_kind=rule_kind,
             deps=_unique(deps),
+            visibility=_attribute_values(rule, "visibility"),
             sources=_paths_from_labels(
                 source_labels, workspace_path, package, _SOURCE_SUFFIXES
             ),

@@ -14,7 +14,7 @@ LogosFuzz 자동 퍼징 파이프라인에서 사람의 검토/승인이 필요�
     hitl = HITLManager.create()                 # 기본 정책 + JSON 저장소
     decision = hitl.request(Checkpoint.CVE_DISCLOSURE, target="CVE-DRAFT-1", ...)
 """
-from .gate import HITLManager
+from .gate import CrashApproval, CrashApprovalGate, HITLManager
 from .models import (
     Checkpoint,
     Decision,
@@ -28,6 +28,8 @@ from .store import InMemoryReviewStore, JsonReviewStore, ReviewStore
 
 __all__ = [
     "HITLManager",
+    "CrashApproval",
+    "CrashApprovalGate",
     "HITLPolicy",
     "Mode",
     "Checkpoint",

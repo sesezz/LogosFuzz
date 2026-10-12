@@ -22,6 +22,7 @@ from logosfuzz.reporting.summary import (
     ValidationSummaryError,
     build_validation_summary,
     load_json,
+    render_build_units_markdown,
     write_validation_summary,
 )
 
@@ -80,6 +81,13 @@ def _build_parser() -> argparse.ArgumentParser:
     a.add_argument("--output", "-o", type=Path, default=None, help="통합 결과 JSON 저장 경로")
     a.add_argument("--source-root", help="대상 C/C++ 소스 트리(도달 가능성 증거 수집)")
     a.add_argument("--harness-dir", help="크래시를 낸 하네스 소스 디렉터리(선택)")
+    # 크래시 승인 게이트(CTR-06-02 CRASH_TRIAGE)·에러계약 KB 옵션은 ANA CLI와 공유한다.
+    from logosfuzz.analyze.cli import add_gate_arguments
+    add_gate_arguments(a)
+
+    # 승인 게이트에 쌓인 항목을 사람이 처리한다(logosfuzz review list/approve/...).
+    from logosfuzz.control.hitl.cli import register as register_review
+    register_review(sub)
 
     s = sub.add_parser(
         "summary",
@@ -91,6 +99,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="GEN-03-04 gen_validation_summary.json 경로")
     s.add_argument("--selection", type=Path, default=None,
                    help="EXT/SCH 대상 선정·제약 조건 결과 JSON 경로")
+    s.add_argument("--build", type=Path, default=None,
+                   help="CTR-06-01 BUILD 단계 build_summary.json 경로(빌드 단위 집계)")
+    s.add_argument("--markdown", type=Path, default=None,
+                   help="빌드 단위 집계 표를 Markdown 으로도 저장할 경로")
     s.add_argument("--output", "-o", type=Path, required=True,
                    help="표준 검증 결과 JSON 저장 경로")
     s.add_argument("--project", default="", help="프로젝트 또는 대상 이름")
@@ -120,6 +132,7 @@ def main(argv: list | None = None) -> int:
             analysis = load_json(args.analysis) if args.analysis else None
             generation = load_json(args.generation) if args.generation else None
             selection = load_json(args.selection) if args.selection else None
+            build = load_json(args.build) if args.build else None
             metadata = {
                 key: value for key, value in {
                     "project": args.project,
@@ -134,8 +147,13 @@ def main(argv: list | None = None) -> int:
                 metadata=metadata,
                 generation_summary=generation,
                 selection_summary=selection,
+                build_summary=build,
             )
             path = write_validation_summary(args.output, result)
+            if args.markdown:
+                args.markdown.parent.mkdir(parents=True, exist_ok=True)
+                args.markdown.write_text(render_build_units_markdown(result),
+                                         encoding="utf-8")
         except (OSError, ValidationSummaryError) as e:
             print(f"[SUMMARY 오류] {e}", file=sys.stderr)
             return 1
@@ -146,8 +164,20 @@ def main(argv: list | None = None) -> int:
             f"오탐 {result['metrics']['false_positive']} | "
             f"검토필요 {result['metrics']['needs_review']}"
         )
+        units = result["build_units"]
+        if units["status"] == "completed":
+            print(
+                f"[SUMMARY] 빌드 단위 {units['total_units']}개 | "
+                f"빌드 성공 {units['built_units']} (자가치유 {units['repaired_units']}) | "
+                f"빌드 실패 {units['failed_units']} | 크래시 발생 {units['crashed_units']}"
+            )
         print(f"  -> {path}")
+        if args.markdown:
+            print(f"  -> {args.markdown}")
         return 0
+
+    if args.command == "review":
+        return args.func(args)
 
     if args.command == "analyze":
         # ANA 파트로 위임(설계서 기능 흐름도의 analyze 명령)
@@ -192,7 +222,11 @@ def main(argv: list | None = None) -> int:
 
         session = FuzzSession(config)
         summary = session.run(groups, ensure_image=not args.no_build)
-        return 0 if summary.total_crashes == 0 else 3  # 3: 크래시 발견(analyze 필요)
+        if summary.total_crashes:
+            return 3  # 3: 크래시 발견(analyze 필요)
+        if summary.failed_groups:
+            return 4  # 4: 하네스가 실행되지 못한 그룹이 있음(퍼징이 실제로 안 돎)
+        return 0
     except ExecuteError as e:
         print(f"[EXE 오류] {e}", file=sys.stderr)
         return 1

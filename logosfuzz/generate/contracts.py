@@ -47,12 +47,14 @@ class HarnessArtifact:
         source_path: 하네스 소스 코드 경로. 정적 리뷰(선택 단계)에만 필요하며,
             없으면 해당 단계는 건너뛴다.
         corpus_dir: 시드 코퍼스 디렉토리. 없으면 빈 코퍼스로 dry-run한다.
-        expected_mock_symbols: GEN-03-03이 하네스에 삽입한 CAN/UDS mock 함수
-            심볼 목록. 비어 있으면 mock 트레이싱 단계를 건너뛴다(GEN-03-03
-            미적용 그룹으로 간주). 각 mock 함수는 호출될 때 자신의 심볼명을
-            포함한 로그 한 줄(예: ``[MOCK-CALL] mock_can_send``)을 stdout/
-            stderr에 남긴다고 전제한다 — GEN-03-03 구현 시 이 컨벤션을
-            따라야 GEN-03-04가 호출 여부를 판별할 수 있다.
+        expected_mock_symbols: 하네스에 삽입된 mock 함수 심볼 목록.
+            **GEN-03-03(Mock 주입)은 제거됐다**(`docs/GEN-03-03.md`) — Bazel 의
+            `deps` 가 링크를 책임지므로 stub 을 꽂을 일이 없다. 지금은 아무도 이
+            필드를 채우지 않아 mock 트레이싱 단계가 항상 통과한다. 모킹이 다시
+            필요해질 때를 위해 계약만 남겨 둔 것이다. 채울 경우, 각 mock 함수는
+            호출될 때 자신의 심볼명을 포함한 로그 한 줄(예:
+            ``[MOCK-CALL] mock_can_send``)을 stdout/stderr에 남겨야 GEN-03-04가
+            호출 여부를 판별할 수 있다.
         api_signatures: 정적 리뷰에서 비교할 원본 API 시그니처 목록.
         gen_model: 하네스를 생성한 LLM 모델명. ANA 단계가 추적할 수 있도록
             `logosfuzz/analyze/cve_reporting`의 `harness.gen_model` 필드 컨벤션과

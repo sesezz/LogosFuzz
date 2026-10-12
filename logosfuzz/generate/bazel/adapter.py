@@ -18,10 +18,10 @@ from __future__ import annotations
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Protocol, Sequence
+from typing import List, Optional, Sequence
 
+from ..build.base import BuildAdapter, BuildResult, _DIAGNOSTIC_RE  # noqa: F401 (재수출)
 from .build_file import FuzzTargetSpec, render_build_file
 
 # 1주차에 오버레이로 추가한 config. bl-x86_64-linux(GCC) 와 절대 병용 금지 —
@@ -33,37 +33,10 @@ DEFAULT_FUZZ_CONFIG = "fuzz"
 REGRESSION_CONFIG = "bl-x86_64-linux"
 
 
-@dataclass
-class BuildResult:
-    """빌드 1회 시도의 결과."""
-
-    ok: bool
-    target: str
-    log: str = ""
-    binary: Optional[Path] = None
-    duration_s: float = 0.0
-    command: Sequence[str] = field(default_factory=tuple)
-
-    @property
-    def short_log(self) -> str:
-        lines = [ln for ln in self.log.splitlines() if ln.startswith("ERROR")]
-        return "\n".join(lines[:5]) or self.log[-500:]
-
-
-class BuildAdapter(Protocol):
-    """빌드 시스템 1종을 감싸는 어댑터."""
-
-    def emit_build_definition(self, spec: FuzzTargetSpec, harness_source: str) -> Path:
-        """BUILD 정의와 하네스 소스를 워크스페이스에 쓴다. BUILD 파일 경로 반환."""
-        ...
-
-    def build(self, spec: FuzzTargetSpec) -> BuildResult:
-        """퍼저 바이너리를 만든다."""
-        ...
-
-    def remove(self, spec: FuzzTargetSpec) -> None:
-        """생성한 것을 되돌린다."""
-        ...
+# `BuildResult` / `BuildAdapter` 는 빌드 시스템 중립 위치(generate/build/base.py)로 옮겼다.
+# 위에서 재수출하므로 기존 `from logosfuzz.generate.bazel.adapter import BuildResult` 는
+# 그대로 동작하고 같은 객체를 가리킨다. 아래 이름은 이전 코드와의 호환용 별칭이다.
+_COMPILER_DIAGNOSTIC_RE = _DIAGNOSTIC_RE
 
 
 class BazelAdapter:
@@ -165,6 +138,10 @@ class BazelAdapter:
             duration_s=elapsed,
             command=cmd,
         )
+
+    def binary_path(self, spec: FuzzTargetSpec) -> Optional[Path]:
+        """설정에 맞는 퍼저 바이너리 경로(cquery 기반). 소스 자가치유 후 재조회용."""
+        return self._binary_path(spec)
 
     def _binary_path(self, spec: FuzzTargetSpec) -> Optional[Path]:
         """설정에 고정된 퍼저 바이너리 경로를 돌려준다.

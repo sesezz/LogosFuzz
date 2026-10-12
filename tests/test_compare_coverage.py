@@ -128,3 +128,36 @@ def test_markdown_highlights_fuzz_only(tmp_path):
     md = cc.to_markdown(cc.compare(cc.parse_lcov(unit), cc.parse_lcov(fuzz)))
     assert "퍼징만 커버" in md
     assert "`x.cc`" in md
+
+
+# --- 비교 범위 (5주차 실측 반영) --------------------------------------------
+def test_include_prefix_drops_modules_the_harness_cannot_reach():
+    """baselibs 유닛 커버리지는 scope 전체(457개 파일)를 담는다. 대상만 남긴다."""
+    lcov = {
+        "score/json/json_parser.cpp": {1: 1},
+        "score/filesystem/path.cpp": {1: 0},
+    }
+    kept = cc.filter_lcov(lcov, include=["score/json/"])
+    assert list(kept) == ["score/json/json_parser.cpp"]
+
+
+def test_include_prefix_matches_after_normalization():
+    """퍼징 lcov 는 /proc/self/cwd/ 접두사가 붙는다. 정규화 후 비교해야 한다."""
+    lcov = {"/proc/self/cwd/score/json/any.cpp": {1: 1}}
+    assert cc.filter_lcov(lcov, include=["score/json/"]) == lcov
+
+
+def test_exclude_harness_drops_fuzz_harness_and_test_bodies():
+    """하네스는 퍼징에만, 테스트 본문은 유닛에만 나와 한쪽 수치를 부풀린다."""
+    lcov = {
+        "/proc/self/cwd/score/json/fuzz/json_parser_fuzz.cc": {1: 1},
+        "score/json/json_test.cpp": {1: 1},
+        "score/json/json_parser.cpp": {1: 1},
+    }
+    kept = cc.filter_lcov(lcov, exclude_harness=True)
+    assert list(kept) == ["score/json/json_parser.cpp"]
+
+
+def test_filter_is_noop_by_default():
+    lcov = {"a/b_test.cpp": {1: 1}, "c.cpp": {2: 0}}
+    assert cc.filter_lcov(lcov) == lcov

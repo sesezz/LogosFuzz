@@ -3,7 +3,8 @@ GEN (Generate) 계층 - LLM 기반 퍼징 하네스 자동 생성.
 
 - GEN-03-01 실시간 컨텍스트 주입 기반 하네스 초안 생성 (TODO: draft.py)
 - GEN-03-02 컴파일 에러 자가 치유 루프 ★ (selfheal.py)
-- GEN-03-03 자동차 환경 가상화(Mocking) 코드 삽입 (TODO: mocking.py)
+- GEN-03-03 자동차 환경 가상화(Mocking) 코드 삽입 - 제거됨 (docs/GEN-03-03.md)
+- GEN-03-04 하네스 검증 게이트 (validation.py)
 
 공개 API
 --------
@@ -43,6 +44,17 @@ from .models import (
     HealRound,
     parse_diagnostics,
 )
+from .kb_bridge import (
+    ApiNotFoundError,
+    HarnessBuildPlan,
+    KnowledgeBaseDepsProvider,
+    KnowledgeBridgeError,
+    KnowledgeBuildResult,
+    MissingBuildUnitError,
+    UnsupportedApiError,
+    build_harness_from_kb,
+    plan_harness,
+)
 from .selfheal import SelfHealLoop, summarize
 
 __all__ = [
@@ -68,6 +80,15 @@ __all__ = [
     "FnLLMClient",
     "RepairPromptBuilder",
     "extract_code",
+    "ApiNotFoundError",
+    "HarnessBuildPlan",
+    "KnowledgeBaseDepsProvider",
+    "KnowledgeBridgeError",
+    "KnowledgeBuildResult",
+    "MissingBuildUnitError",
+    "UnsupportedApiError",
+    "build_harness_from_kb",
+    "plan_harness",
 ]
 
 __version__ = "0.1.0"  # GEN-03-02 골격

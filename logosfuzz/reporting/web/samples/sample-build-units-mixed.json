@@ -1,0 +1,242 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-10-01T14:38:39+00:00",
+  "metadata": {
+    "project": "sample (synthetic)",
+    "environment": "wsl2-local",
+    "target": "합성 데이터 — 상태 표시 확인용"
+  },
+  "run": {
+    "engine": "libfuzzer",
+    "timeout_sec": 30,
+    "started_at": 1790865229.8863587,
+    "finished_at": 1790865292.2606635,
+    "total_groups": 3,
+    "total_crashes": 1,
+    "groups": [
+      {
+        "stage": "exe_ana",
+        "target": "lg_score_json_internal_parser_nlohmann_nlohmann_parser",
+        "harness_name": "lg_score_json_internal_parser_nlohmann_nlohmann_parser",
+        "build_target": "//score/json/internal/parser/nlohmann:nlohmann_parser",
+        "build_system": "bazel",
+        "fuzz_target": "//score/json/internal/parser/nlohmann/fuzz/lg_score_json_internal_parser_nlohmann_nlohmann_parser:lg_score_json_internal_parser_nlohmann_nlohmann_parser_fuzz_test",
+        "binary": "/home/user/baselibs/bazel-out/k8-fastbuild-fuzz/bin/score/json/internal/parser/nlohmann/fuzz/lg_score_json_internal_parser_nlohmann_nlohmann_parser/lg_score_json_internal_parser_nlohmann_nlohmann_parser_fuzz_test_bin",
+        "status": "passed",
+        "exit_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 31.2,
+        "execs": 747802,
+        "execs_estimated": true,
+        "exec_per_sec": 23968.0,
+        "coverage": 2422,
+        "crash_count": 0,
+        "sanitizer_count": 0,
+        "compile_error_count": 0,
+        "crashes": [],
+        "sanitizer_findings": [],
+        "coverage_report": null,
+        "stdout_log": "out/run2/exe/logs/lg_score_json_internal_parser_nlohmann_nlohmann_parser/run.stdout.log",
+        "stderr_log": "out/run2/exe/logs/lg_score_json_internal_parser_nlohmann_nlohmann_parser/run.stderr.log",
+        "notes": ""
+      },
+      {
+        "stage": "exe_ana",
+        "target": "lg_score_json_internal_parser_vajson_vajson_parser",
+        "harness_name": "lg_score_json_internal_parser_vajson_vajson_parser",
+        "build_target": "//score/json/internal/parser/vajson:vajson_parser",
+        "build_system": "bazel",
+        "fuzz_target": "//score/json/internal/parser/vajson/fuzz/lg_score_json_internal_parser_vajson_vajson_parser:lg_score_json_internal_parser_vajson_vajson_parser_fuzz_test",
+        "binary": "/home/user/baselibs/bazel-out/k8-fastbuild-fuzz/bin/score/json/internal/parser/vajson/fuzz/lg_score_json_internal_parser_vajson_vajson_parser/lg_score_json_internal_parser_vajson_vajson_parser_fuzz_test_bin",
+        "status": "crashed",
+        "exit_code": 1,
+        "timed_out": false,
+        "crashed": true,
+        "duration_sec": 31.16,
+        "execs": 450137,
+        "execs_estimated": true,
+        "exec_per_sec": 14446.0,
+        "coverage": 2752,
+        "crash_count": 1,
+        "sanitizer_count": 1,
+        "compile_error_count": 0,
+        "crashes": [],
+        "sanitizer_findings": [],
+        "coverage_report": null,
+        "stdout_log": "out/run2/exe/logs/lg_score_json_internal_parser_vajson_vajson_parser/run.stdout.log",
+        "stderr_log": "out/run2/exe/logs/lg_score_json_internal_parser_vajson_vajson_parser/run.stderr.log",
+        "notes": ""
+      },
+      {
+        "stage": "exe_ana",
+        "target": "dlt_fuzzer",
+        "harness_name": "dlt_fuzzer",
+        "build_target": null,
+        "build_system": null,
+        "fuzz_target": null,
+        "binary": null,
+        "status": "passed",
+        "exit_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 10.0,
+        "execs": 4200,
+        "execs_estimated": true,
+        "exec_per_sec": 420.0,
+        "coverage": 88,
+        "crash_count": 0,
+        "sanitizer_count": 0,
+        "compile_error_count": 0,
+        "crashes": [],
+        "sanitizer_findings": [],
+        "coverage_report": null,
+        "stdout_log": "out/run2/exe/logs/lg_score_json_internal_parser_nlohmann_nlohmann_parser/run.stdout.log",
+        "stderr_log": "out/run2/exe/logs/lg_score_json_internal_parser_nlohmann_nlohmann_parser/run.stderr.log",
+        "notes": "",
+        "group": "dlt_fuzzer"
+      }
+    ]
+  },
+  "analysis": {
+    "status": "completed",
+    "triage_model": "logosfuzz-rule-triage/v1",
+    "summary": {
+      "true_positive": 0,
+      "false_positive": 0,
+      "needs_review": 1
+    },
+    "findings": [
+      {
+        "cluster_id": "CL-sample-0001",
+        "bug_type": "heap-buffer-overflow",
+        "crash_location": "score/json/internal/parser/vajson/vajson_parser.cpp:52",
+        "error_reason": "READ of size 4 (합성 데이터)",
+        "triage_result": {
+          "verdict": "needs_review",
+          "confidence": 0.55,
+          "rationale": "합성 샘플입니다 — 빌드 단위 화면에서 '크래시' 상태가 분석 결과와 함께 어떻게 보이는지 확인하기 위한 가짜 항목이며 실제 크래시가 아닙니다."
+        }
+      }
+    ]
+  },
+  "gen": {
+    "status": "not_run",
+    "total_groups": 0,
+    "validated_groups": 0,
+    "failed_groups": 0,
+    "groups": []
+  },
+  "selection": {
+    "status": "not_run",
+    "targets": []
+  },
+  "build_units": {
+    "status": "completed",
+    "build_system": "bazel",
+    "config": "fuzz",
+    "total_units": 3,
+    "built_units": 2,
+    "repaired_units": 1,
+    "failed_units": 1,
+    "crashed_units": 1,
+    "units": [
+      {
+        "build_target": "//score/json/internal/parser/nlohmann:nlohmann_parser",
+        "build_system": "bazel",
+        "groups": [
+          "lg_score_json_internal_parser_nlohmann_nlohmann_parser"
+        ],
+        "fuzz_targets": [
+          "//score/json/internal/parser/nlohmann/fuzz/lg_score_json_internal_parser_nlohmann_nlohmann_parser:lg_score_json_internal_parser_nlohmann_nlohmann_parser_fuzz_test"
+        ],
+        "binaries": [
+          "/home/user/baselibs/bazel-out/k8-fastbuild-fuzz/bin/score/json/internal/parser/nlohmann/fuzz/lg_score_json_internal_parser_nlohmann_nlohmann_parser/lg_score_json_internal_parser_nlohmann_nlohmann_parser_fuzz_test_bin"
+        ],
+        "rounds_used": 2,
+        "crashes": 0,
+        "sanitizer_findings": 0,
+        "execs": 747802,
+        "execs_estimated": true,
+        "duration_sec": 31.2,
+        "coverage": 2422,
+        "build_status": "repaired",
+        "run_status": "passed",
+        "run_groups": 1
+      },
+      {
+        "build_target": "//score/json/internal/parser/vajson:vajson_parser",
+        "build_system": "bazel",
+        "groups": [
+          "lg_score_json_internal_parser_vajson_vajson_parser"
+        ],
+        "fuzz_targets": [
+          "//score/json/internal/parser/vajson/fuzz/lg_score_json_internal_parser_vajson_vajson_parser:lg_score_json_internal_parser_vajson_vajson_parser_fuzz_test"
+        ],
+        "binaries": [
+          "/home/user/baselibs/bazel-out/k8-fastbuild-fuzz/bin/score/json/internal/parser/vajson/fuzz/lg_score_json_internal_parser_vajson_vajson_parser/lg_score_json_internal_parser_vajson_vajson_parser_fuzz_test_bin"
+        ],
+        "rounds_used": 1,
+        "crashes": 1,
+        "sanitizer_findings": 1,
+        "execs": 120034,
+        "execs_estimated": false,
+        "duration_sec": 31.16,
+        "coverage": 2752,
+        "build_status": "built",
+        "run_status": "crashed",
+        "run_groups": 1
+      },
+      {
+        "build_target": "//score/crypto/internal:sha256",
+        "build_system": "bazel",
+        "groups": [
+          "lg_score_crypto_sha256"
+        ],
+        "fuzz_targets": [],
+        "binaries": [],
+        "rounds_used": 3,
+        "crashes": 0,
+        "sanitizer_findings": 0,
+        "execs": 0,
+        "execs_estimated": false,
+        "duration_sec": 0.0,
+        "coverage": 0,
+        "build_status": "failed",
+        "run_status": "not_run",
+        "run_groups": 0
+      },
+      {
+        "build_target": "(unassigned)",
+        "build_system": "bazel",
+        "groups": [
+          "dlt_fuzzer"
+        ],
+        "fuzz_targets": [],
+        "binaries": [],
+        "rounds_used": 0,
+        "crashes": 0,
+        "sanitizer_findings": 0,
+        "execs": 4200,
+        "execs_estimated": true,
+        "duration_sec": 10.0,
+        "coverage": 88,
+        "build_status": "not_built",
+        "run_status": "passed",
+        "run_groups": 1
+      }
+    ]
+  },
+  "metrics": {
+    "groups": 3,
+    "passed_groups": 2,
+    "failed_groups": 0,
+    "timed_out_groups": 0,
+    "crashed_groups": 1,
+    "crashes": 1,
+    "sanitizer_findings": 1,
+    "true_positive": 0,
+    "false_positive": 0,
+    "needs_review": 1
+  }
+}

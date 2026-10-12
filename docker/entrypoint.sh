@@ -22,11 +22,12 @@
 #      fuzz            = 퍼징 주경로   (clang, @llvm_toolchain)
 #      bl-x86_64-linux = 회귀 게이트만 (GCC 12.2.0)
 #
-# ② 퍼징에 --config=asan_ubsan_lsan 을 쓰면 안 된다. baselibs .bazelrc 에서
-#    이 config 는 test: 로만 정의돼 있어 bazel build/run 에서는
-#    "config value is not defined" 로 실패한다. 오버레이의 build:fuzz 가
-#    그 자리를 대신하며, run/test 가 build 를 상속하므로 세 커맨드 모두에서
-#    쓸 수 있다.
+# ② 퍼징에 --config=asan_ubsan_lsan 을 쓰지 않는다. 오버레이의 build:fuzz 가
+#    ASan 을 켜며(rules_fuzzing cc_engine_sanitizer), run/test 가 build 를
+#    상속하므로 세 커맨드 모두에서 쓸 수 있다.
+#    (1주차에는 asan_ubsan_lsan 이 test: 전용이라 build 에서 못 썼다. 5주차
+#    baselibs 09be72c 에서는 build: 로 바뀌어 GCC 재생 빌드가 이 config 를
+#    쓴다 - logosfuzz/execute/regression.py 참고. 퍼징 쪽 결정은 그대로다.)
 #
 # ③ 크래시 종료코드는 55 다(baselibs 가 ASAN_OPTIONS/UBSAN_OPTIONS 에
 #    exitcode=55, halt_on_error=1 을 박아 둔다). 크래시 판정은 종료코드와

@@ -5,6 +5,7 @@ from .summary import (
     ValidationSummaryError,
     build_validation_summary,
     load_json,
+    render_build_units_markdown,
     validate_validation_summary,
     write_validation_summary,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "ValidationSummaryError",
     "build_validation_summary",
     "load_json",
+    "render_build_units_markdown",
     "validate_validation_summary",
     "write_validation_summary",
 ]

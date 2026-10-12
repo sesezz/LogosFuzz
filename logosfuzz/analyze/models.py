@@ -179,7 +179,12 @@ class CrashCluster:
         )
 
     def to_dict(self) -> dict:
+        # signature 가 이 모듈을 import 하므로 지연 import 한다.
+        from logosfuzz.analyze.signature import application_frames
+
         rep = self.representative
+        # abort/raise 같은 런타임 프레임이 아니라 첫 코드 프레임을 위치로 보인다.
+        top = (application_frames(rep) or rep.traceback)[:1]
         return {
             "cluster_id": self.cluster_id,
             "signature": self.signature,
@@ -187,9 +192,7 @@ class CrashCluster:
             "count": self.count,
             "sanitizer": rep.sanitizer,
             "error_reason": rep.error_reason,
-            "crash_location": (
-                f"{rep.traceback[0].file}:{rep.traceback[0].line}" if rep.traceback else None
-            ),
+            "crash_location": f"{top[0].file}:{top[0].line}" if top else None,
             "traceback": [{"file": f.file, "line": f.line} for f in rep.traceback],
             "groups": self.groups,
             "crash_inputs": self.crash_inputs,
@@ -268,6 +271,10 @@ class FalsePositiveCrash:
 
     ANA-05-01의 실제 출력(`TriageResult`)이 api_id/harness_id/run_id/asan_log
     매핑까지 제공하게 되면 이 필드들만 채워 넘기면 된다.
+
+    ``build_target``은 크래시를 낸 API를 소유한 Bazel 타깃이다. 비워 두면
+    ANA-05-03이 KB(`build_unit_for_api`)에서 찾고, 그래도 없으면(빌드 정보가 없는
+    구 KB) 예전처럼 API 단위로 역피드백한다.
     """
 
     crash_id: str
@@ -277,6 +284,7 @@ class FalsePositiveCrash:
     asan_log: str
     verdict: Verdict
     confidence: float = 0.0
+    build_target: str = ""
 
     def __post_init__(self) -> None:
         if self.verdict != Verdict.FALSE_POSITIVE:
@@ -311,7 +319,13 @@ class RootCauseAnalysis:
 
 @dataclass
 class KBUpdateProposal:
-    """KB 변경 제안(diff). 승인 전까지는 KB에 반영되지 않는다(HITL 게이트 대상)."""
+    """KB 변경 제안(diff). 승인 전까지는 KB에 반영되지 않는다(HITL 게이트 대상).
+
+    ``build_target``이 있으면 제안의 반영 범위는 그 Bazel 타깃 전체다 -
+    ``before_text``/``after_text``도 타깃 단위 노트이고, ``affected_api_ids``는
+    재생성 프롬프트에 이 노트가 실릴 API 목록이다. 비어 있으면 ``api_id`` 하나만
+    대상으로 하는 예전(API 단위) 제안이다.
+    """
 
     proposal_id: str
     crash_id: str
@@ -320,6 +334,8 @@ class KBUpdateProposal:
     before_text: str  # 현재 오버라이드 텍스트(없으면 "")
     after_text: str  # 반영될 오버라이드 텍스트(root-cause 요약 기반)
     embedding: Optional[List[float]] = None
+    build_target: str = ""
+    affected_api_ids: List[int] = field(default_factory=list)
     status: ProposalStatus = ProposalStatus.PENDING
     created_at: str = field(default_factory=now_iso)
     decided_at: Optional[str] = None
@@ -335,6 +351,8 @@ class KBUpdateProposal:
         before_text: str,
         after_text: str,
         embedding: Optional[List[float]] = None,
+        build_target: str = "",
+        affected_api_ids: Optional[List[int]] = None,
     ) -> "KBUpdateProposal":
         return KBUpdateProposal(
             proposal_id=new_id("kbprop"),
@@ -344,7 +362,14 @@ class KBUpdateProposal:
             before_text=before_text,
             after_text=after_text,
             embedding=embedding,
+            build_target=build_target,
+            affected_api_ids=list(affected_api_ids or []),
         )
+
+    @property
+    def scope(self) -> str:
+        """반영 범위 표시: Bazel 타깃 또는 ``api:<id>``(빌드 정보 없는 구 KB)."""
+        return self.build_target or f"api:{self.api_id}"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -355,6 +380,8 @@ class KBUpdateProposal:
             "before_text": self.before_text,
             "after_text": self.after_text,
             "embedding": self.embedding,
+            "build_target": self.build_target,
+            "affected_api_ids": list(self.affected_api_ids),
             "status": self.status.value,
             "created_at": self.created_at,
             "decided_at": self.decided_at,
@@ -373,6 +400,8 @@ class KBUpdateProposal:
             before_text=d.get("before_text", ""),
             after_text=d.get("after_text", ""),
             embedding=d.get("embedding"),
+            build_target=d.get("build_target", ""),
+            affected_api_ids=list(d.get("affected_api_ids") or []),
             status=ProposalStatus(d.get("status", "pending")),
             created_at=d.get("created_at", now_iso()),
             decided_at=d.get("decided_at"),
@@ -396,6 +425,7 @@ class RegenerationRecord:
     rounds_used: int
     compiled_ok: bool
     triggered_at: str = field(default_factory=now_iso)
+    build_target: str = ""
 
     @staticmethod
     def new(
@@ -415,6 +445,7 @@ class RegenerationRecord:
             outcome=outcome,
             rounds_used=rounds_used,
             compiled_ok=compiled_ok,
+            build_target=proposal.build_target,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -429,4 +460,5 @@ class RegenerationRecord:
             "rounds_used": self.rounds_used,
             "compiled_ok": self.compiled_ok,
             "triggered_at": self.triggered_at,
+            "build_target": self.build_target,
         }
