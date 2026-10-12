@@ -3,6 +3,10 @@
 3주차까지 추출한 API/제약조건/Bazel 빌드 단위를 하네스 초안,
 BUILD 생성, 자가치유 힌트, 검증 계약으로 한 번에 전달한다.
 계획 단계는 subprocess 없이 동작하고, 실제 빌드는 기존 생성기에 위임한다.
+
+GENERIC-A: 프로필로 만든 비-Bazel(cmake/prebuilt) KB 의 빌드 단위도 받는다.
+이때 ``build_deps`` 는 Bazel 라벨이 아니라 링크할 라이브러리 경로이고, BUILD 생성기
+(``build_harness_from_kb``) 대신 ``generate.build.adapter_for(profile)`` 로 빌드한다.
 """
 from __future__ import annotations
 
@@ -96,14 +100,20 @@ def _visible_to_fuzz_package(label: str, visibility: Iterable[str],
     return False
 
 
+def _is_bazel_unit(unit: dict) -> bool:
+    """빌드 시스템 값이 없는 예전 KB 단위는 Bazel 로 본다(2주차 스키마)."""
+    return str(unit.get("build_system") or "bazel") == "bazel"
+
+
 class KnowledgeBaseDepsProvider:
     """KB의 Bazel 소유권/직접 의존성을 BUILD 생성기에 공급한다."""
 
     def __init__(self, kb: KnowledgeBase) -> None:
+        # Bazel 단위만 다룬다. cmake/prebuilt 단위의 build_target 은 라벨이 아니다.
         self._units = {
             parse_label(unit["build_target"]).text: unit
             for unit in build_unit_metadata(kb)
-            if unit.get("build_target")
+            if unit.get("build_target") and _is_bazel_unit(unit)
         }
 
     def deps_for(self, target_label: str) -> List[str]:
@@ -147,9 +157,27 @@ class HarnessBuildPlan:
     logic_group: str
     language: str
     prompt_context: str
+    #: 빌드 단위의 빌드 시스템 ("bazel" / "cmake" / "prebuilt").
+    #: bazel 이 아니면 ``target_label`` 은 프로필 이름, ``build_deps`` 는 라이브러리 경로다.
+    build_system: str = "bazel"
+
+    @property
+    def is_bazel(self) -> bool:
+        return self.build_system == "bazel"
 
     def repair_knowledge(self) -> Dict[str, str]:
         """SelfHealLoop.knowledge에 바로 전달할 수 있는 힌트."""
+        if not self.is_bazel:
+            return {
+                "target_api": self.signature,
+                "build_system": self.build_system,
+                "build_target": self.target_label,
+                "link_libraries": " ".join(self.build_deps),
+                "include": self.include,
+                "compile_flags": " ".join(self.compile_flags),
+                "constraints": "\n".join(self.constraints),
+                "error_contracts": "\n".join(self.error_contracts),
+            }
         return {
             "target_api": self.signature,
             "bazel_target": self.target_label,
@@ -175,11 +203,20 @@ class HarnessBuildPlan:
             project=project,
             target_apis=[self.api_name],
             language=self.language,
-            context={
-                "bazel_target": self.target_label,
-                "kb_context": self.prompt_context,
-                "repair_knowledge": self.repair_knowledge(),
-            },
+            context=(
+                {
+                    "bazel_target": self.target_label,
+                    "kb_context": self.prompt_context,
+                    "repair_knowledge": self.repair_knowledge(),
+                }
+                if self.is_bazel else
+                {
+                    "build_system": self.build_system,
+                    "build_target": self.target_label,
+                    "kb_context": self.prompt_context,
+                    "repair_knowledge": self.repair_knowledge(),
+                }
+            ),
         )
 
     def api_signature(self) -> ApiSignature:
@@ -221,11 +258,16 @@ def plan_harness(
     unit = build_unit_for_api(kb, document["api_id"])
     if unit is None:
         raise MissingBuildUnitError(
-            f"API에 Bazel 빌드 단위가 연결되지 않았다: {document['function']}"
+            f"API에 빌드 단위가 연결되지 않았다: {document['function']}"
         )
 
+    build_system = str(unit.get("build_system") or "bazel")
     requested = target_label or str(unit["build_target"])
-    deps = KnowledgeBaseDepsProvider(kb).deps_for(requested)
+    if build_system == "bazel":
+        deps = KnowledgeBaseDepsProvider(kb).deps_for(requested)
+    else:
+        # cmake/prebuilt: 라이브러리 전체가 단위 1개이고 deps 는 링크할 라이브러리다.
+        deps = _unique(unit.get("build_deps", []))
     flags = _unique(
         [*unit.get("compile_flags", []), *document.get("compile_flags", [])]
     )
@@ -265,6 +307,7 @@ def plan_harness(
         logic_group=logic_group or f"kb-api-{document['api_id']}",
         language=language,
         prompt_context=harness_context(kb, document["api_id"]),
+        build_system=build_system,
     )
 
 
@@ -281,6 +324,11 @@ def build_harness_from_kb(
 ) -> KnowledgeBuildResult:
     """KB 기반 BUILD를 생성·빌드하고 성공 시 검증용 artifact까지 만든다."""
     plan = plan_harness(kb, api, target_label=target_label, logic_group=logic_group)
+    if not plan.is_bazel:
+        raise KnowledgeBridgeError(
+            f"{plan.build_system} 빌드 단위는 Bazel BUILD 생성기로 빌드할 수 없다. "
+            "logosfuzz.generate.build.adapter_for(profile) 를 사용한다."
+        )
     spec = generator.make_spec(plan.target_label).with_deps(plan.build_deps)
     report = generator.generate(plan.target_label, harness_source, spec=spec)
     artifact = None

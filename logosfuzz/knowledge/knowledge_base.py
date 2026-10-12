@@ -9,6 +9,11 @@
 은 1주차에 제거했다. S-CORE 는 Bazel 로 빌드하므로 2주차
 `extract/bazel_query.py`가 타깃·deps·include 경로를 공급한다.
 
+GENERIC-A 부터는 대상 프로필(`targets/*.json`)로도 만든다. `build.system == "bazel"`
+이면 위 Bazel 경로를 그대로 쓰고, cmake/prebuilt 이면 CMake 가 직접 만든
+compile_commands.json(`extract/compile_db.py`)에서 파일별 플래그를 채운 뒤
+라이브러리 전체를 빌드 단위 1개로 기록한다. `profile.apis` 가 있으면 그 API 만 담는다.
+
 여기에 통합 단계에서만 얻을 수 있는 정보를 더한다.
 
   * `api_id`  : 파일·줄 기준으로 결정적으로 매겨지는 정수 ID.
@@ -22,6 +27,7 @@ B/D가 실제로 소비하는 형태로 바꾸는 어댑터는 `logosfuzz.knowle
 
 사용법:
   python -m logosfuzz.knowledge.knowledge_base build --paths examples --output build/kb_full.json
+  python -m logosfuzz.knowledge.knowledge_base build --profile targets/libsndfile.json --output build/sndfile-kb.json
   python -m logosfuzz.knowledge.knowledge_base show --kb build/kb_full.json --api parse_header
   python -m logosfuzz.knowledge.knowledge_base stats --kb build/kb_full.json
 """
@@ -29,11 +35,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence
+
+if TYPE_CHECKING:  # pragma: no cover
+    from logosfuzz.common.target_profile import TargetProfile
 
 from logosfuzz.extract.bazel_query import BazelGraph, query_bazel
 from logosfuzz.extract.constraint_extractor import (
@@ -44,9 +54,12 @@ from logosfuzz.extract.constraint_extractor import (
     extract_from_text,
     iter_source_files,
     mask_source,
+    score_result_enabled,
 )
 from logosfuzz.knowledge.rag_constraints import build_document
 from logosfuzz.knowledge.rag_index import BM25Index, DenseIndex, HybridRetriever
+
+logger = logging.getLogger(__name__)
 
 KB_VERSION = 2
 SUPPORTED_KB_VERSIONS = {1, KB_VERSION}
@@ -266,10 +279,14 @@ class KnowledgeBase:
                  files: Optional[Dict[str, dict]] = None,
                  build_units: Optional[Sequence[dict]] = None,
                  index: Optional[BM25Index] = None,
-                 use_dense: bool = False) -> None:
+                 use_dense: bool = False,
+                 profile: Optional[dict] = None) -> None:
         self.documents: List[dict] = list(documents or [])
         self.files: Dict[str, dict] = dict(files or {})
         self.build_units: List[dict] = list(build_units or [])
+        # 프로필로 만든 KB 면 {name, domain, build_system, apis, apis_missing}.
+        # 없으면 None (기존 KB 와 같은 형태로 저장된다).
+        self.profile: Optional[dict] = dict(profile) if profile else None
         if index is None:
             index = BM25Index()
             index.add_documents(self.documents)
@@ -293,7 +310,15 @@ class KnowledgeBase:
               bazel_graph: Optional[BazelGraph] = None,
               bazel_workspace: Optional[str] = None,
               bazel_targets: Optional[Sequence[str]] = None,
-              bazel: Optional[str] = None) -> "KnowledgeBase":
+              bazel: Optional[str] = None,
+              profile: Optional["TargetProfile"] = None) -> "KnowledgeBase":
+        if profile is not None and not profile.is_bazel:
+            return cls._build_from_profile(profile, paths=paths, use_dense=use_dense)
+        if (profile is not None and bazel_graph is None
+                and not (bazel_workspace or bazel_targets)):
+            # Bazel 프로필은 기존 bazel query 경로를 그대로 탄다.
+            bazel_workspace = str(profile.abs(profile.build.bazel.workspace))
+            bazel_targets = [profile.build.bazel.target]
         if bazel_graph is None and bazel_workspace and bazel_targets:
             bazel_graph = query_bazel(
                 bazel_workspace, bazel_targets, bazel=bazel
@@ -352,13 +377,19 @@ class KnowledgeBase:
             if source.endswith(HEADER_SUFFIXES):
                 for name, doc in header_declaration_docs(text).items():
                     header_docs.setdefault(name, doc)
-            # score::Result 계약은 자동차(S-CORE) 전용이다. 지금 Bazel 경로는 곧
-            # S-CORE 경로이므로 기존 출력 그대로 켜 두고, 그 밖에서는 끈다.
-            facts.extend(extract_from_text(
-                text, path=source, score_result=bazel_graph is not None,
-            ))
+            # score::Result 계약은 자동차(S-CORE) 전용이다. 프로필이 없으면 지금
+            # Bazel 경로가 곧 S-CORE 경로이므로 기존 출력 그대로 켜 두고, 그 밖에서는
+            # 끈다. 프로필이 있으면 domain 으로 정한다.
+            use_score = (
+                score_result_enabled(profile) if profile is not None
+                else bazel_graph is not None
+            )
+            facts.extend(extract_from_text(text, path=source, score_result=use_score))
 
         _merge_header_docs(facts, header_docs)
+        meta = None
+        if profile is not None:
+            facts, meta = _select_profile_apis(facts, profile)
         documents = cls._assemble(facts, file_infos, test_roots=test_roots)
         files = {path: info.to_dict() for path, info in file_infos.items()}
         build_units = bazel_graph.build_units() if bazel_graph is not None else []
@@ -367,6 +398,107 @@ class KnowledgeBase:
             files=files,
             build_units=build_units,
             use_dense=use_dense,
+            profile=meta,
+        )
+
+    @classmethod
+    def _build_from_profile(cls, profile: "TargetProfile",
+                            paths: Optional[Sequence[str]] = None,
+                            use_dense: bool = False) -> "KnowledgeBase":
+        """비-Bazel(cmake/prebuilt) 프로필로 KB 를 만든다.
+
+        * 파일별 플래그: compile_commands.json 항목이 있으면 그 파일의 clang 인자,
+          없으면(헤더 등) 전체 합집합에서 ``-std`` 를 뺀 것. ``include_dirs`` 는 항상 붙인다.
+          compile_commands.json 이 없으면 경고 후 ``include_dirs`` 만 쓴다.
+        * 빌드 단위: 라이브러리 전체가 1개다. ``build_target`` = ``profile.name``,
+          ``build_deps`` = ``libraries``(절대경로). 모든 파일·API 가 이 단위를 참조한다.
+        * 대상 파일: ``paths`` 가 없으면 compile_db 의 소스 + ``include_dirs``.
+          compile_db 가 없으면 ``source_root`` 전체(테스트·예제 트리 제외).
+        """
+        from logosfuzz.extract.compile_db import (
+            CompileDbError, CompileFlags, compile_db_path, flags_for_profile,
+        )
+
+        root = profile.root
+        try:
+            by_file = flags_for_profile(profile)
+            db_path = str(compile_db_path(profile))
+        except CompileDbError as exc:
+            logger.warning("compile_commands.json 없이 include_dirs 만 사용합니다: %s", exc)
+            by_file, db_path = {}, ""
+        merged = CompileFlags()
+        for flags in by_file.values():
+            merged.merge(flags)
+        merged.std = ""
+        include_dirs = [str(profile.abs(d)) for d in profile.build.include_dirs]
+        include_args = [f"-I{d}" for d in include_dirs]
+
+        if not paths:
+            db_sources = [path for path in sorted(by_file) if os.path.exists(path)]
+            if db_sources:
+                paths = db_sources + [d for d in include_dirs if os.path.isdir(d)]
+            else:
+                # compile_db 가 없으면 소스 위치를 모르므로 source_root 전체를 본다
+                # (테스트·예제 트리는 아래 test_roots 기준으로 빠진다).
+                paths = [str(root)]
+        test_roots = [str(root)]
+        sources: List[str] = sorted(set(iter_source_files(
+            paths,
+            exclude=lambda source: _is_test_path_under_roots(source, test_roots),
+        )))
+
+        unit_target = profile.name
+        unit_deps = [str(profile.abs(lib)) for lib in profile.build.libraries]
+        use_score = score_result_enabled(profile)
+
+        file_infos: Dict[str, FileInfo] = {}
+        facts: List[FunctionFacts] = []
+        header_docs: Dict[str, str] = {}
+        for source in sources:
+            try:
+                text = _read(source)
+            except OSError:
+                continue
+            info = scan_file(source, text)
+            flags = by_file.get(os.path.normpath(os.path.abspath(source)), merged).clang_args()
+            flags.extend(arg for arg in include_args if arg not in flags)
+            info.flags = flags
+            info.directory = str(root)
+            info.build_system = profile.build.system
+            info.build_target = unit_target
+            info.build_rule_kind = f"{profile.build.system}_library"
+            info.build_deps = list(unit_deps)
+            file_infos[source] = info
+            if source.endswith(HEADER_SUFFIXES):
+                for name, doc in header_declaration_docs(text).items():
+                    header_docs.setdefault(name, doc)
+            facts.extend(extract_from_text(text, path=source, score_result=use_score))
+
+        _merge_header_docs(facts, header_docs)
+        facts, meta = _select_profile_apis(facts, profile)
+        documents = cls._assemble(facts, file_infos, test_roots=test_roots)
+        files = {path: info.to_dict() for path, info in file_infos.items()}
+        unit_flags = merged.clang_args()
+        unit_flags.extend(arg for arg in include_args if arg not in unit_flags)
+        build_unit = {
+            "build_system": profile.build.system,
+            "build_target": unit_target,
+            "build_rule_kind": f"{profile.build.system}_library",
+            "build_deps": unit_deps,
+            "compile_flags": unit_flags,
+            "include_dirs": include_dirs,
+            "link_flags": list(profile.build.link_flags),
+            "sources": [p for p in sources if not p.endswith(HEADER_SUFFIXES)],
+            "headers": [p for p in sources if p.endswith(HEADER_SUFFIXES)],
+            "visibility": [],
+            "build_file": db_path,
+        }
+        return cls(
+            documents=documents,
+            files=files,
+            build_units=[build_unit],
+            use_dense=use_dense,
+            profile=meta,
         )
 
     @staticmethod
@@ -534,6 +666,7 @@ class KnowledgeBase:
                 round(covered / len(self.documents), 4) if self.documents else 0.0
             ),
             "dense_backend": self._dense_enabled,
+            **({"profile": dict(self.profile)} if self.profile else {}),
         }
 
     # -- 저장/로드 ---------------------------------------------------------
@@ -547,6 +680,8 @@ class KnowledgeBase:
             "build_units": self.build_units,
             "index": self.index.to_dict(),
         }
+        if self.profile:
+            payload["profile"] = self.profile
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return str(target)
 
@@ -564,6 +699,7 @@ class KnowledgeBase:
             build_units=payload.get("build_units", []),
             index=BM25Index.from_dict(payload["index"]),
             use_dense=use_dense,
+            profile=payload.get("profile"),
         )
 
 
@@ -580,6 +716,41 @@ def _merge_header_docs(facts: Sequence[FunctionFacts], header_docs: Dict[str, st
             if key not in existing:
                 fact.constraints.append(constraint)
                 existing.add(key)
+
+
+def _select_profile_apis(facts: Sequence[FunctionFacts],
+                         profile: "TargetProfile") -> tuple:
+    """``profile.apis`` 가 있으면 그 API 의 정의만 남긴다.
+
+    같은 이름의 정의가 여럿이면 외부 하네스가 링크할 수 있는 공개 함수(non-static)를
+    우선한다. 프로필에 적었는데 정의를 못 찾은 API 는 ``apis_missing`` 으로 남긴다.
+    반환: (남긴 facts, KB 에 저장할 프로필 메타데이터)
+    """
+    meta = {
+        "name": profile.name,
+        "domain": profile.domain,
+        "build_system": profile.build.system,
+        "apis": list(profile.apis),
+        "apis_missing": [],
+    }
+    if not profile.apis:
+        return list(facts), meta
+    wanted = set(profile.apis)
+    by_name: Dict[str, List[FunctionFacts]] = {}
+    for fact in facts:
+        if fact.name in wanted:
+            by_name.setdefault(fact.name, []).append(fact)
+    selected: List[FunctionFacts] = []
+    for name in profile.apis:
+        candidates = by_name.get(name, [])
+        public = [
+            fact for fact in candidates
+            if not fact.signature.lstrip().startswith("static")
+        ]
+        selected.extend(public or candidates)
+        if not candidates:
+            meta["apis_missing"].append(name)
+    return selected, meta
 
 
 def _declaring_header(name: str, definition_file: str,
@@ -623,6 +794,10 @@ def parse_args(argv=None):
     build_parser.add_argument("--bazel-workspace")
     build_parser.add_argument("--bazel-target", action="append", default=[])
     build_parser.add_argument("--bazel", help="bazel/bazelisk executable")
+    build_parser.add_argument(
+        "--profile",
+        help="targets/*.json 대상 프로필. bazel 이면 기존 경로, cmake/prebuilt 이면 compile_db 사용",
+    )
 
     show_parser = subparsers.add_parser("show", help="Show a single API entry")
     show_parser.add_argument("--kb", required=True)
@@ -638,12 +813,17 @@ def main(argv=None):
     args = parse_args(argv)
 
     if args.command == "build":
+        profile = None
+        if args.profile:
+            from logosfuzz.common.target_profile import load_profile
+            profile = load_profile(args.profile)
         kb = KnowledgeBase.build(
             paths=args.paths,
             use_dense=args.dense,
             bazel_workspace=args.bazel_workspace,
             bazel_targets=args.bazel_target,
             bazel=args.bazel,
+            profile=profile,
         )
         kb.save(args.output)
         print(json.dumps({"output": args.output, **kb.stats()}, indent=2, ensure_ascii=False))

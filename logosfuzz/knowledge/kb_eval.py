@@ -18,6 +18,12 @@ A 를 먼저 시도하고 실패하면 B 로 내려간다. 어느 쪽을 썼는�
   python -m logosfuzz.knowledge.kb_eval run --paths examples/uds --labels examples/uds/labels.json \
       --output build/eval.json
   python -m logosfuzz.knowledge.kb_eval run --paths examples/uds --labels examples/uds/labels.json --report
+  python -m logosfuzz.knowledge.kb_eval run --profile targets/libsndfile.json \
+      --labels targets/labels/libsndfile.json --prefer labels --report
+
+``--profile`` 을 주면 KB 를 프로필로 만들고(``KnowledgeBase.build(profile=...)``),
+정답셋도 ``profile.apis`` 로 좁힌다. 프로필 KB 는 그 API 만 담으므로, 좁히지 않으면
+라이브러리 내부 함수가 전부 "놓친 API" 로 잡힌다.
 """
 from __future__ import annotations
 
@@ -304,12 +310,13 @@ def resolve_ground_truth(paths: Sequence[str], labels: Optional[str] = None,
         return label_ground_truth(labels)
     if prefer in ("clang", "nm"):
         return (clang_ground_truth(paths, clang_args=clang_args) if prefer == "clang"
-                else nm_ground_truth(paths))
+                else nm_ground_truth(paths, cc_args=clang_args))
 
     reasons: List[str] = []
     for provider in (
         lambda: clang_ground_truth(paths, clang_args=clang_args),
-        lambda: nm_ground_truth(paths),
+        # 프로필의 compile_db 플래그(-I 등)는 nm 경로의 컴파일에도 필요하다.
+        lambda: nm_ground_truth(paths, cc_args=clang_args),
     ):
         try:
             truth = provider()
@@ -520,17 +527,38 @@ def evaluate_retrieval(kb: KnowledgeBase, queries: Sequence[dict],
 # ---------------------------------------------------------------------------
 
 
+def restrict_to_apis(truth: GroundTruth, apis: Sequence[str]) -> GroundTruth:
+    """정답셋을 프로필의 대상 API 로 좁힌다. ``apis`` 가 비면 그대로."""
+    if not apis:
+        return truth
+    wanted = set(apis)
+    kept = {name: entry for name, entry in truth.apis.items() if name in wanted}
+    note = f"{truth.note} (profile.apis {len(wanted)}개로 제한)".strip()
+    return GroundTruth(source=truth.source, apis=kept, note=note)
+
+
 def evaluate(paths: Sequence[str], labels: Optional[str] = None,
              queries_path: Optional[str] = None,
-             prefer: str = "auto", top_k: int = 5) -> dict:
-    kb = KnowledgeBase.build(paths=list(paths) or None)
-    truth = resolve_ground_truth(paths, labels=labels, prefer=prefer)
+             prefer: str = "auto", top_k: int = 5,
+             profile=None) -> dict:
+    kb = KnowledgeBase.build(paths=list(paths) or None, profile=profile)
+    truth_paths = list(paths)
+    clang_args = None
+    if profile is not None:
+        unit = kb.build_units[0] if kb.build_units else {}
+        if not truth_paths:
+            truth_paths = list(unit.get("sources") or [str(profile.root)])
+        clang_args = list(unit.get("compile_flags") or []) or None
+    truth = resolve_ground_truth(truth_paths, labels=labels, prefer=prefer,
+                                 clang_args=clang_args)
+    if profile is not None:
+        truth = restrict_to_apis(truth, profile.apis)
 
     queries = load_queries(queries_path) if queries_path else build_auto_queries(kb)
 
     return {
         "version": EVAL_VERSION,
-        "target": list(paths),
+        "target": list(paths) or ([profile.name] if profile is not None else []),
         "ground_truth": {
             "source": truth.source,
             "apis": len(truth.apis),
@@ -610,6 +638,7 @@ def parse_args(argv=None):
 
     run_parser = subparsers.add_parser("run", help="평가 실행")
     run_parser.add_argument("--paths", nargs="*", default=[])
+    run_parser.add_argument("--profile", help="targets/*.json — 프로필로 KB 를 만들고 정답을 apis 로 제한")
     run_parser.add_argument("--labels", help="clang 을 쓸 수 없을 때 사용할 라벨 JSON")
     run_parser.add_argument("--queries", help="RAG 질의 JSON (없으면 자동 생성)")
     run_parser.add_argument("--prefer", choices=["auto", "clang", "labels"],
@@ -625,13 +654,18 @@ def main(argv=None):
     args = parse_args(argv)
     if args.command != "run":
         return
-    if not args.paths:
-        raise SystemExit("--paths 가 필요합니다")
+    if not args.paths and not args.profile:
+        raise SystemExit("--paths 또는 --profile 이 필요합니다")
+    profile = None
+    if args.profile:
+        from logosfuzz.common.target_profile import load_profile
+        profile = load_profile(args.profile)
 
     try:
         result = evaluate(
             args.paths, labels=args.labels,
             queries_path=args.queries, prefer=args.prefer, top_k=args.top_k,
+            profile=profile,
         )
     except GroundTruthUnavailable as exc:
         raise SystemExit(
