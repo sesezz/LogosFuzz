@@ -1,5 +1,56 @@
 # LogosFuzz
 
+LLM 기반 C/C++ 임베디드 범용(자동차 프로필 포함) 퍼징 하네스 자동 생성 시스템.
+대상 하나를 프로필(`targets/*.json`) 한 파일로 적으면 API 추출부터 하네스 생성,
+빌드 자가치유, 격리 퍼징, 커버리지, 크래시 판별까지 한 줄로 돈다.
+
+## 범용 대상 빠른 시작
+
+리눅스(Ubuntu 24.04) 기준. CMake 로 빌드하는 C/C++ 라이브러리 예시로 libsndfile 1.2.2 를 쓴다.
+
+```bash
+# 0. 준비: clang/compiler-rt(libFuzzer·ASan), llvm(profdata/cov), cmake, ninja, docker
+sudo apt-get install -y clang libclang-rt-18-dev llvm cmake ninja-build docker.io
+python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt -e .
+export OPENAI_API_KEY=...                       # 하네스 생성·자가치유
+
+# 1. 대상 소스 받기 (프로필의 source_root 로 받는다)
+bash scripts/fetch_libsndfile.sh
+
+# 2. 한 줄 E2E: EXT → SCH → GEN(LLM) → 자가치유 → 퍼징 → 커버리지 → ANA
+logosfuzz run --profile targets/libsndfile.json --budget 600 -o out/libsndfile
+#   --max-round 3   자가치유 LLM 수정 최대 라운드
+#   --no-docker     Docker 없이 호스트에서 퍼징(격리 없음)
+```
+
+결과는 `out/libsndfile/` 에 모인다.
+
+| 파일 | 내용 |
+| --- | --- |
+| `run_summary.json` | 단계별 성공 여부·시간, 그룹별 자가치유 결과·실행 수·크래시·커버리지 |
+| `kb.json` | 추출한 API·제약조건 지식베이스 |
+| `gen/` | LLM 프롬프트와 첫 초안 |
+| `build/harness/`, `build/bin/`, `build/bin-cov/` | 최종 하네스, 퍼저 바이너리, 커버리지 바이너리 |
+| `corpus/<group>/` | 시드에서 시작해 퍼징으로 자란 최종 코퍼스 |
+| `crashes/`, `fuzz_summary.json` | 크래시 입력과 퍼징 요약 |
+| `coverage/<group>.summary.json` | 최종 코퍼스 재생 커버리지(하네스 소스 제외) |
+| `analysis.json`, `validation-summary.json` | 크래시 중복 제거·판별, 공유용 요약 |
+
+다른 대상은 프로필만 새로 쓰면 된다. 필드 설명은
+[docs/GENERIC-A-target-profile.md](docs/GENERIC-A-target-profile.md), 임베디드(HAL 스텁) 예시는
+`targets/embedded-sample.json` 이다. 단계를 따로 돌리려면:
+
+```bash
+python -m logosfuzz.generate.build --profile targets/libsndfile.json --harness my_fuzz.c   # 수동 하네스 빌드
+logosfuzz fuzz --profile targets/libsndfile.json --timeout 300                             # 시드·하네스 위치를 프로필에서
+logosfuzz analyze out/fuzz_summary.json --profile targets/libsndfile.json -o out/analysis.json
+```
+
+자동차(S-CORE, Bazel) 대상은 아래의 기존 `ctr_06_01_controller --mode bazel` 경로를 그대로 쓴다.
+범용화 전후로 그 경로가 바뀌지 않았는지는 `python3 scripts/check_automotive_golden.py`
+(골든 비교, `pytest` 에도 포함)로 확인한다. 검증 절차와 실측은
+[docs/VERIFY-GENERIC-libsndfile.md](docs/VERIFY-GENERIC-libsndfile.md) 에 있다.
+
 ## 저장소 구조
 
 기능(파이프라인 단계) 기준으로 `logosfuzz/` 패키지 아래에 모아 두었다.
