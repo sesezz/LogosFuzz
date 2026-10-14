@@ -453,6 +453,9 @@ class GenericRun:
         except StageFailed as exc:
             self._log(f"\n[중단] {exc}")
             rc = 1
+        except Exception as exc:  # LLM 연결 오류 등 예상 못 한 실패도 요약은 남긴다
+            self._log(f"\n[중단] {type(exc).__name__}: {exc}")
+            rc = 1
 
         self.write_summary(started, fuzz_summary, analysis, rc)
         return rc

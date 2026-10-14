@@ -282,3 +282,16 @@ def test_real_e2e_embedded_sample_no_docker(tmp_path):
     assert files and not any("harness" in f for f in files)
     analysis = json.loads((out / "analysis.json").read_text())
     assert analysis["findings"]                           # ANA 까지 크래시가 넘어갔다
+
+
+def test_unexpected_llm_error_still_writes_summary(tmp_path):
+    class BrokenLLM:
+        def complete(self, prompt, system=""):
+            raise ConnectionError("Connection error.")
+
+    run, rc, out, _ = _fake_run(tmp_path, llm=BrokenLLM())
+    assert rc == 1
+    summary = json.loads((out / "run_summary.json").read_text())
+    assert summary["ok"] is False
+    assert summary["stages"][-1] == {**summary["stages"][-1], "stage": "GEN", "ok": False}
+    assert "Connection error" in summary["stages"][-1]["error"]
