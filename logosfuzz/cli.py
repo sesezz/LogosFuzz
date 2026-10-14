@@ -155,6 +155,9 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--target", default="", help="검증 대상 이름")
     s.add_argument("--commit", dest="commit_sha", default="", help="검증한 커밋 SHA")
 
+    from logosfuzz.control.generic_run import add_run_parser
+    add_run_parser(sub)
+
     r = sub.add_parser(
         "regression",
         help="매니페스트 기반 컴파일/실행 회귀 스위트 실행",
@@ -228,6 +231,10 @@ def main(argv: list | None = None) -> int:
         # ANA 파트로 위임(설계서 기능 흐름도의 analyze 명령)
         from logosfuzz.analyze.cli import _run_analyze
         return _run_analyze(args)
+
+    if args.command == "run":
+        from logosfuzz.control.generic_run import main_run
+        return main_run(args)
 
     if args.command == "regression":
         from logosfuzz.execute.regression import RegressionRunner

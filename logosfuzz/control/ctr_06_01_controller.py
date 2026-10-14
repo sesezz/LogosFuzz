@@ -1149,8 +1149,9 @@ def run_generic_mode(args) -> int:
     여기서 프로필(``profile.build.system``)로 어댑터를 만들어 ``BuildStage(...,
     adapter=generic_adapter, build_system="generic")`` 로 넘긴다.
     """
-    print("[ERROR] --mode generic 은 GENERIC-A-profile(base.py) 병합 후 활성화된다. "
-          "현재 dev 에는 범용 빌드 어댑터/TargetProfile 이 없다.", file=sys.stderr)
+    print("[ERROR] 범용(비-Bazel) 대상은 이 컨트롤러가 아니라 "
+          "`logosfuzz run --profile targets/<name>.json --budget <sec>` 로 돌린다 "
+          "(EXT 부터 ANA 까지 한 줄).", file=sys.stderr)
     return 2
 
 
