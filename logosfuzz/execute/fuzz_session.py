@@ -89,11 +89,8 @@ class FuzzSession:
         self.stream.flush()
 
     def _crash_search_dirs(self, group: LogicGroup) -> list:
-        # libFuzzer artifact_prefix(/out/crashes/) 와 AFL++(/out/afl/**/crashes)
-        return [
-            self.config.crashes_dir,
-            self.config.output_dir / "afl",
-        ]
+        # libFuzzer artifact_prefix(/out/crashes/)
+        return [self.config.crashes_dir]
 
     def run(self, groups: list, ensure_image: bool = True) -> SessionSummary:
         self.config.ensure_dirs()
