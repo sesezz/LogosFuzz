@@ -6,8 +6,14 @@ from logosfuzz.execute.errors import InvalidEngineError
 
 def test_engine_parse_aliases():
     assert Engine.parse("libfuzzer") is Engine.LIBFUZZER
-    assert Engine.parse("afl++") is Engine.AFLPP
-    assert Engine.parse("AFL") is Engine.AFLPP
+    assert Engine.parse("LibFuzzer") is Engine.LIBFUZZER
+
+
+@pytest.mark.parametrize("name", ["afl++", "AFL", "aflpp"])
+def test_engine_parse_rejects_aflpp_not_in_image(name):
+    # 실행 이미지(docker/Dockerfile*)에 AFL++ 가 없으므로 받지 않는다.
+    with pytest.raises(InvalidEngineError, match="AFL"):
+        Engine.parse(name)
 
 
 def test_engine_parse_invalid():

@@ -93,12 +93,23 @@ def test_local_argv_injects_asan_and_tsan_options(tmp_path):
     assert env_pairs.get("TSAN_OPTIONS") == cfg.tsan_options
 
 
-def test_build_run_argv_aflpp(tmp_path):
-    cfg = _config(tmp_path, engine=Engine.AFLPP)
+def test_build_run_argv_has_no_aflpp_branch(tmp_path):
+    cfg = _config(tmp_path)
     runner = DockerIsolationRunner(cfg)
     grp = _make_harness(cfg)
-    joined = " ".join(runner.build_run_argv(grp))
-    assert "afl-fuzz" in joined and "-V 60" in joined
+    joined = " ".join(runner.build_run_argv(grp)) + " ".join(runner._local_argv(grp))
+    assert "afl-fuzz" not in joined
+
+
+def test_corpus_is_mounted_writable_so_final_corpus_grows(tmp_path):
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg)
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    grp = LogicGroup(name="g", harness_path=_make_harness(cfg).harness_path, corpus_dir=corpus)
+    argv = runner.build_run_argv(grp)
+    assert f"{corpus.resolve()}:/corpus" in argv
+    assert argv[-1].endswith(" /corpus")
 
 
 def test_run_group_missing_harness(tmp_path):

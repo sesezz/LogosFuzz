@@ -198,6 +198,10 @@ class CMakeAdapter:
         flags = " ".join(self.compile_flags())
         env = dict(os.environ)
         env.update({"CC": self.cc, "CXX": self.cxx, "CFLAGS": flags, "CXXFLAGS": flags})
+        if self.coverage:
+            # configure 의 검사 프로그램(try_run)도 계측돼 실행되므로, 지정하지 않으면
+            # 작업 디렉터리(저장소 루트)에 default.profraw 를 흘린다.
+            env["LLVM_PROFILE_FILE"] = str(self.build_dir / "configure-%p.profraw")
         return env
 
     def _bin_dir(self) -> Path:
