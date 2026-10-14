@@ -11,23 +11,26 @@ from pathlib import Path
 
 
 class Engine(str, enum.Enum):
-    """지원하는 퍼징 엔진."""
+    """지원하는 퍼징 엔진.
+
+    libFuzzer 만 지원한다. 실행 이미지(docker/Dockerfile, docker/Dockerfile.generic)에
+    AFL++ 가 없고, 빌드 어댑터도 ``-fsanitize=fuzzer`` 하네스만 만든다.
+    """
 
     LIBFUZZER = "libfuzzer"
-    AFLPP = "afl++"
 
     @classmethod
     def parse(cls, value: str) -> "Engine":
         from logosfuzz.execute.errors import InvalidEngineError
 
         norm = value.strip().lower()
-        alias = {"aflpp": cls.AFLPP, "afl": cls.AFLPP, "afl++": cls.AFLPP,
-                 "libfuzzer": cls.LIBFUZZER, "libf": cls.LIBFUZZER}
-        if norm not in alias:
+        if norm in ("libfuzzer", "libf"):
+            return cls.LIBFUZZER
+        if norm in ("afl++", "aflpp", "afl"):
             raise InvalidEngineError(
-                f"지원하지 않는 엔진: {value!r} (libfuzzer | afl++)"
+                "AFL++ 는 지원하지 않는다: 실행 이미지에 AFL++ 가 없다 (libfuzzer 를 쓴다)"
             )
-        return alias[norm]
+        raise InvalidEngineError(f"지원하지 않는 엔진: {value!r} (libfuzzer)")
 
 
 class CoverageMode(str, enum.Enum):
@@ -84,7 +87,7 @@ class FuzzConfig:
     """`logosfuzz fuzz` 한 회 실행의 전체 설정.
 
     설계서 EXE-04-00 화면 명세를 반영:
-      logosfuzz fuzz --engine <libfuzzer|afl++> --timeout <sec> --docker
+      logosfuzz fuzz --engine libfuzzer --timeout <sec> --docker
     """
 
     engine: Engine = Engine.LIBFUZZER
