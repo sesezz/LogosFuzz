@@ -72,6 +72,7 @@ class GroupResult:
     coverage: object = None  # EXE-04-04 CoverageSummary(없으면 None); fuzz_session이 채움
     stdout_log: Optional[str] = None  # 표준 출력 로그 파일 경로(저장 실패 시 None)
     stderr_log: Optional[str] = None  # 표준 오류 로그 파일 경로
+    timeout_sec: Optional[int] = None  # 그룹별 시간을 따로 준 경우(run 의 SCH 배분)
 
     @property
     def failed_to_start(self) -> bool:

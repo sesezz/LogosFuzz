@@ -67,6 +67,8 @@ class SessionSummary:
                     if getattr(g, "coverage", None) is not None else None,
                     "stdout_log": getattr(g, "stdout_log", None),
                     "stderr_log": getattr(g, "stderr_log", None),
+                    **({"timeout_sec": g.timeout_sec}
+                       if getattr(g, "timeout_sec", None) is not None else {}),
                 }
                 for g in self.groups
             ],
@@ -92,8 +94,15 @@ class FuzzSession:
         # libFuzzer artifact_prefix(/out/crashes/)
         return [self.config.crashes_dir]
 
-    def run(self, groups: list, ensure_image: bool = True) -> SessionSummary:
+    def run(self, groups: list, ensure_image: bool = True,
+            timeouts: Optional[dict] = None) -> SessionSummary:
+        """그룹을 순서대로 퍼징한다.
+
+        ``timeouts`` 를 주면 ``{그룹 이름: 초}`` 로 그룹마다 퍼징 시간을 따로 쓴다
+        (``logosfuzz run`` 이 SCH 자원 배분 결과를 넘긴다). 없는 그룹은 ``config.timeout_sec``.
+        """
         self.config.ensure_dirs()
+        default_timeout = self.config.timeout_sec
         if self.config.use_docker and ensure_image:
             self.runner.ensure_image()
 
@@ -123,10 +132,17 @@ class FuzzSession:
 
             # 그룹 실행 전 크래시 baseline
             before = set(self.config.crashes_dir.rglob("*"))
-            result: GroupResult = self.runner.run_group(
-                group, monitor=monitor, sanitizer_monitor=sanitizer_monitor
-            )
+            group_timeout = (timeouts or {}).get(group.name)
+            self.config.timeout_sec = group_timeout or default_timeout
+            try:
+                result: GroupResult = self.runner.run_group(
+                    group, monitor=monitor, sanitizer_monitor=sanitizer_monitor
+                )
+            finally:
+                self.config.timeout_sec = default_timeout
             result.stats = stats
+            if group_timeout:
+                result.timeout_sec = group_timeout
             if result.sanitizer_findings:
                 write_findings(
                     self.config.logs_dir / "sanitizer" / f"{group.name}.jsonl",
