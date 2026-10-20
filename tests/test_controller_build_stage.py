@@ -726,7 +726,7 @@ def test_generation_artifacts_keep_prompt_and_first_draft(tmp_path):
 # ---------------------------------------------------------------------
 
 def test_build_system_is_read_from_adapter(tmp_path):
-    """build_system 은 "bazel" 하드코딩이 아니라 어댑터에서 받는다."""
+    """build_system 의 어댑터 수신 확인"""
     adapter = FakeAdapter(tmp_path)
     adapter.build_system = "cmake"
     result = _stage(tmp_path, adapter).run([_pair("g")])
@@ -736,7 +736,7 @@ def test_build_system_is_read_from_adapter(tmp_path):
 
 
 def test_build_system_falls_back_to_param_when_adapter_silent(tmp_path):
-    """어댑터가 build_system 을 안 주면 build_system= 파라미터를 쓴다."""
+    """어댑터 build_system 부재 시 build_system= 파라미터 사용"""
     result = _stage(tmp_path, FakeAdapter(tmp_path),
                     build_system="generic").run([_pair("g")])
     assert result.build_system == "generic"
@@ -744,7 +744,7 @@ def test_build_system_falls_back_to_param_when_adapter_silent(tmp_path):
 
 
 def test_classify_errors_defaults_to_adapter(tmp_path):
-    """classify_errors 미주입 시 어댑터의 classify_build_error 를 쓴다."""
+    """classify_errors 미주입 시 어댑터의 classify_build_error 사용"""
     adapter = FakeAdapter(tmp_path)
     adapter.classify_build_error = lambda log, bin_label: None
     stage = _stage(tmp_path, adapter)
@@ -760,5 +760,5 @@ def test_default_exec_image_selects_by_build_system():
 
 
 def test_mode_generic_not_available_until_profile_merge():
-    """--mode generic 은 GENERIC-A-profile 병합 전까지 명확히 2 로 거절한다."""
+    """범용 어댑터 부재 시 --mode generic 의 종료코드 2 거절"""
     assert main(["--mode", "generic", "--skip-check"]) == 2

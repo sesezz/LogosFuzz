@@ -124,7 +124,7 @@ class BuildAdapter(Protocol):
     """
 
     #: 이 어댑터가 다루는 빌드 시스템 이름(예: "bazel", "cmake", "prebuilt").
-    #: build_summary.json 의 ``build_system`` 필드가 이 값을 그대로 쓴다.
+    #: build_summary.json 의 ``build_system`` 필드 값
     build_system: str
 
     def emit_build_definition(self, spec: HarnessSpecLike, harness_source: str) -> Path:
