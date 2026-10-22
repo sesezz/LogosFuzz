@@ -1130,9 +1130,10 @@ def run_pipeline_mode(args) -> int:
 
 
 def run_generic_mode(args) -> int:
-    """비-Bazel(cmake/ninja 등) 대상 BUILD 단계 (범용 어댑터 주입 시 동작)"""
-    print("[ERROR] --mode generic 은 GENERIC-A-profile(base.py) 병합 후 활성화된다. "
-          "현재 dev 에는 범용 빌드 어댑터/TargetProfile 이 없다.", file=sys.stderr)
+    """비-Bazel(cmake/ninja 등) 대상 BUILD 단계 (``logosfuzz run`` 안내 후 종료)"""
+    print("[ERROR] 범용(비-Bazel) 대상은 이 컨트롤러가 아니라 "
+          "`logosfuzz run --profile targets/<name>.json --budget <sec>` 로 돌린다 "
+          "(EXT 부터 ANA 까지 한 줄).", file=sys.stderr)
     return 2
 
 

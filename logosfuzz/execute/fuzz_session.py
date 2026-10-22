@@ -67,6 +67,8 @@ class SessionSummary:
                     if getattr(g, "coverage", None) is not None else None,
                     "stdout_log": getattr(g, "stdout_log", None),
                     "stderr_log": getattr(g, "stderr_log", None),
+                    **({"timeout_sec": g.timeout_sec}
+                       if getattr(g, "timeout_sec", None) is not None else {}),
                 }
                 for g in self.groups
             ],
@@ -89,14 +91,17 @@ class FuzzSession:
         self.stream.flush()
 
     def _crash_search_dirs(self, group: LogicGroup) -> list:
-        # libFuzzer artifact_prefix(/out/crashes/) 와 AFL++(/out/afl/**/crashes)
-        return [
-            self.config.crashes_dir,
-            self.config.output_dir / "afl",
-        ]
+        # libFuzzer artifact_prefix(/out/crashes/)
+        return [self.config.crashes_dir]
 
-    def run(self, groups: list, ensure_image: bool = True) -> SessionSummary:
+    def run(self, groups: list, ensure_image: bool = True,
+            timeouts: Optional[dict] = None) -> SessionSummary:
+        """그룹 순차 퍼징
+
+        ``timeouts`` (``{그룹 이름: 초}``) 지정 시 그룹별 퍼징 시간 적용 (미지정 그룹은 ``config.timeout_sec``)
+        """
         self.config.ensure_dirs()
+        default_timeout = self.config.timeout_sec
         if self.config.use_docker and ensure_image:
             self.runner.ensure_image()
 
@@ -125,10 +130,17 @@ class FuzzSession:
 
             # 그룹 실행 전 크래시 baseline
             before = set(self.config.crashes_dir.rglob("*"))
-            result: GroupResult = self.runner.run_group(
-                group, monitor=monitor, sanitizer_monitor=sanitizer_monitor
-            )
+            group_timeout = (timeouts or {}).get(group.name)
+            self.config.timeout_sec = group_timeout or default_timeout
+            try:
+                result: GroupResult = self.runner.run_group(
+                    group, monitor=monitor, sanitizer_monitor=sanitizer_monitor
+                )
+            finally:
+                self.config.timeout_sec = default_timeout
             result.stats = stats
+            if group_timeout:
+                result.timeout_sec = group_timeout
             if result.sanitizer_findings:
                 write_findings(
                     self.config.logs_dir / "sanitizer" / f"{group.name}.jsonl",

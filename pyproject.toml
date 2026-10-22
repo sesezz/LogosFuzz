@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "logosfuzz"
 version = "0.1.0"
-description = "LLM 기반 자동차 오픈소스 특화 퍼저 - EXE 파트 (격리 퍼징 실행)"
+description = "LLM 기반 C/C++ 임베디드 범용(자동차 프로필 포함) 퍼징 하네스 자동 생성 퍼저"
 requires-python = ">=3.10"
 authors = [{ name = "sesezz" }]
 dependencies = []

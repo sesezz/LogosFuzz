@@ -214,6 +214,8 @@ def test_coverage_variant_uses_a_separate_instrumented_build_dir(tmp_path):
     assert result.ok and result.target == "cmake:x:cov"
     cflags = runner.calls[0].env["CFLAGS"]
     assert "-fprofile-instr-generate" in cflags and "-fcoverage-mapping" in cflags
+    # configure 검사 프로그램의 profraw 저장소 루트 유출 없음
+    assert runner.calls[0].env["LLVM_PROFILE_FILE"].startswith(str(profile.abs("build-fuzz-cov")))
 
     plain, _ = make_adapter(tmp_path)
     assert "-fprofile-instr-generate" not in " ".join(plain.compile_flags())

@@ -391,6 +391,133 @@ class CoverageCollector:
         return summary
 
 
+# ---------------------------------------------------------------------------
+# 비-Bazel 경로: 커버리지 빌드 바이너리로 최종 코퍼스 재생 (GENERIC)
+# ---------------------------------------------------------------------------
+# 퍼징 바이너리와 별도인 커버리지 바이너리(``CMakeAdapter(coverage=True)`` 의 ``bin-cov/``)로
+# 퍼징 종료 후 최종 코퍼스 재생 (퍼징 속도 영향 없음)
+#
+#   1. 재생   : LLVM_PROFILE_FILE=<dir>/%m.profraw <cov-bin> -runs=0 <corpus...>
+#   2. 병합   : llvm-profdata merge -sparse <dir>/*.profraw -o <group>.profdata
+#   3. 요약   : llvm-cov export -summary-only -ignore-filename-regex=<re> \
+#                 -instr-profile=<group>.profdata <cov-bin>
+#
+# Bazel 경로(bazel_coverage_configs, bazel_fuzz_coverage_build_argv)는 별도
+
+# 하네스 및 퍼징 전용 소스는 대상 커버리지에서 제외
+DEFAULT_IGNORE_FILENAME_REGEX = r"(harness|_fuzzer|/fuzz/)"
+
+# 재생 중 프로세스 종료 시 입력별 개별 재생 (과대 코퍼스는 상한에서 절단)
+_MAX_SINGLE_REPLAY_INPUTS = 5000
+
+
+def replay_corpus_argv(binary: Path | str, corpus_dirs: list, *,
+                       profile_file: str, asan_options: str = "detect_leaks=0") -> list:
+    """커버리지 바이너리의 코퍼스 1회 실행 argv (``env`` 프리픽스 포함, ``-runs=0``)"""
+    return ["env", f"LLVM_PROFILE_FILE={profile_file}", f"ASAN_OPTIONS={asan_options}",
+            str(binary), "-runs=0", *[str(d) for d in corpus_dirs]]
+
+
+def merge_profraw_argv(profraws: list, profdata: Path | str, *,
+                       llvm_profdata: str = "llvm-profdata") -> list:
+    return [llvm_profdata, "merge", "-sparse", *[str(p) for p in profraws],
+            "-o", str(profdata)]
+
+
+def export_summary_argv(binary: Path | str, profdata: Path | str, *,
+                        llvm_cov: str = "llvm-cov",
+                        ignore_filename_regex: str = DEFAULT_IGNORE_FILENAME_REGEX) -> list:
+    argv = [llvm_cov, "export", "-summary-only", f"-instr-profile={profdata}"]
+    if ignore_filename_regex:
+        argv.append(f"-ignore-filename-regex={ignore_filename_regex}")
+    argv.append(str(binary))
+    return argv
+
+
+def _corpus_files(corpus_dirs: list) -> list:
+    files: list = []
+    for d in corpus_dirs:
+        p = Path(d)
+        if p.is_file():
+            files.append(p)
+        elif p.is_dir():
+            files.extend(sorted(f for f in p.rglob("*") if f.is_file()))
+    return files
+
+
+def collect_corpus_coverage(
+    binary: Path | str,
+    corpus_dirs: list,
+    out_dir: Path | str,
+    *,
+    group: str,
+    runner: Optional[CommandRunner] = None,
+    llvm_profdata: str = "llvm-profdata",
+    llvm_cov: str = "llvm-cov",
+    ignore_filename_regex: str = DEFAULT_IGNORE_FILENAME_REGEX,
+) -> Optional[CoverageSummary]:
+    """비-Bazel 대상 최종 코퍼스 재생 기반 커버리지 요약
+
+    Args:
+        binary: ``-fprofile-instr-generate -fcoverage-mapping`` 빌드 하네스 실행 파일
+        corpus_dirs: 재생할 최종 코퍼스 디렉터리(또는 파일) 목록
+        out_dir: ``<group>/*.profraw``, ``<group>.profdata``, ``<group>.coverage.json`` 위치
+        group: 로직 그룹 이름
+        runner: 외부 명령 실행기 (테스트 주입용)
+        ignore_filename_regex: llvm-cov 제외 파일 경로 정규식 (기본: 하네스·퍼징 소스)
+
+    Returns:
+        :class:`CoverageSummary` (코퍼스 없음·profraw 미생성·도구 실패 시 ``None``)
+    """
+    base_run = runner or _default_runner
+
+    def run(argv: list) -> CmdResult:
+        try:
+            return base_run(argv)
+        except OSError as exc:  # llvm 도구 부재
+            return CmdResult(127, "", str(exc))
+
+    out = Path(out_dir)
+    raw_dir = out / group
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    for stale in raw_dir.glob("*.profraw"):
+        stale.unlink()
+
+    inputs = _corpus_files(corpus_dirs)
+    if not inputs:
+        return None
+
+    pattern = (raw_dir / "%m.profraw").as_posix()
+    run(replay_corpus_argv(binary, [str(d) for d in corpus_dirs], profile_file=pattern))
+    profraws = sorted(raw_dir.glob("*.profraw"))
+    if not profraws:
+        # 재생 중 종료 시 입력별 개별 실행 (%m 병합 풀에 누적)
+        for item in inputs[:_MAX_SINGLE_REPLAY_INPUTS]:
+            run(replay_corpus_argv(binary, [str(item)], profile_file=pattern))
+        profraws = sorted(raw_dir.glob("*.profraw"))
+    if not profraws:
+        return None
+
+    profdata = out / f"{group}.profdata"
+    if run(merge_profraw_argv(profraws, profdata, llvm_profdata=llvm_profdata)).returncode != 0:
+        return None
+    exported = run(export_summary_argv(binary, profdata, llvm_cov=llvm_cov,
+                                       ignore_filename_regex=ignore_filename_regex))
+    if exported.returncode != 0:
+        return None
+
+    summary = parse_llvm_cov_export(exported.stdout, group=group,
+                                    mode=CoverageMode.LLVM_COV.value)
+    summary.profdata_path = str(profdata)
+    export_path = out / f"{group}.coverage.json"
+    try:
+        export_path.write_text(exported.stdout, encoding="utf-8")
+        summary.export_path = str(export_path)
+    except OSError:
+        pass
+    return summary
+
+
 def write_coverage(path: Path, summary: CoverageSummary) -> None:
     """그룹 커버리지 요약 JSON 기록"""
     path.parent.mkdir(parents=True, exist_ok=True)

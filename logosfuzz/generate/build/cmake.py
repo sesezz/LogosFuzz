@@ -198,6 +198,9 @@ class CMakeAdapter:
         flags = " ".join(self.compile_flags())
         env = dict(os.environ)
         env.update({"CC": self.cc, "CXX": self.cxx, "CFLAGS": flags, "CXXFLAGS": flags})
+        if self.coverage:
+            # configure 검사 프로그램의 default.profraw 저장소 루트 유출 방지
+            env["LLVM_PROFILE_FILE"] = str(self.build_dir / "configure-%p.profraw")
         return env
 
     def _bin_dir(self) -> Path:

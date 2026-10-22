@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from logosfuzz.config import Engine, FuzzConfig, LogicGroup
+from logosfuzz.config import FuzzConfig, LogicGroup
 from logosfuzz.execute.errors import (
     DockerUnavailableError,
     HarnessNotFoundError,
@@ -71,6 +71,7 @@ class GroupResult:
     coverage: object = None  # EXE-04-04 CoverageSummary (없으면 None)
     stdout_log: Optional[str] = None  # 표준 출력 로그 파일 경로(저장 실패 시 None)
     stderr_log: Optional[str] = None  # 표준 오류 로그 파일 경로
+    timeout_sec: Optional[int] = None  # 그룹별 퍼징 시간 (run 의 SCH 배분)
 
     @property
     def failed_to_start(self) -> bool:
@@ -247,27 +248,17 @@ class DockerIsolationRunner:
 
     # ---- 실행 커맨드 구성 ---------------------------------------------
     def _in_container_cmd(self, group: LogicGroup) -> str:
-        """엔진별 컨테이너 내부 실행 셸 명령 문자열"""
+        """컨테이너 내부 libFuzzer 실행 셸 명령 문자열"""
         harness = f"/harness/{group.harness_path.name}"
-        corpus = "/corpus" if group.corpus_dir else ""
-        t = self.config.timeout_sec
-        if self.config.engine is Engine.LIBFUZZER:
-            parts = [
-                shlex.quote(harness),
-                f"-max_total_time={t}",
-                "-artifact_prefix=/out/crashes/",
-                "-print_final_stats=1",
-            ]
-            if corpus:
-                parts.append(shlex.quote(corpus))
-            return "chmod +x %s 2>/dev/null; %s" % (shlex.quote(harness), " ".join(parts))
-        # AFL++
-        indir = shlex.quote(corpus) if corpus else "/tmp/seed"
-        seed_prep = "" if corpus else "mkdir -p /tmp/seed && printf a > /tmp/seed/seed;"
-        return (
-            f"{seed_prep} chmod +x {shlex.quote(harness)} 2>/dev/null; "
-            f"afl-fuzz -i {indir} -o /out/afl -V {t} -- {shlex.quote(harness)} @@"
-        )
+        parts = [
+            shlex.quote(harness),
+            f"-max_total_time={self.config.timeout_sec}",
+            "-artifact_prefix=/out/crashes/",
+            "-print_final_stats=1",
+        ]
+        if group.corpus_dir:
+            parts.append("/corpus")
+        return "chmod +x %s 2>/dev/null; %s" % (shlex.quote(harness), " ".join(parts))
 
     def _host_user(self) -> str | None:
         """호스트 uid:gid. Windows 등 uid 개념이 없는 플랫폼이면 None."""
@@ -303,7 +294,8 @@ class DockerIsolationRunner:
             "-v", f"{c.output_dir.resolve()}:/out",
         ]
         if group.corpus_dir:
-            argv += ["-v", f"{group.corpus_dir.resolve()}:/corpus:ro"]
+            # 쓰기 가능 마운트 (최종 코퍼스를 커버리지 바이너리로 재생하기 위함)
+            argv += ["-v", f"{group.corpus_dir.resolve()}:/corpus"]
         argv += [
             "-e", f"ASAN_OPTIONS={c.asan_options}",
             "-e", f"TSAN_OPTIONS={c.tsan_options}",
@@ -327,17 +319,11 @@ class DockerIsolationRunner:
     def _local_argv(self, group: LogicGroup) -> list:
         """Docker 미사용 시 호스트 직접 실행 커맨드"""
         harness = str(self.harness_binary_path(group))
-        t = self.config.timeout_sec
-        if self.config.engine is Engine.LIBFUZZER:
-            argv = [harness, f"-max_total_time={t}",
-                    f"-artifact_prefix={self.config.crashes_dir}/",
-                    "-print_final_stats=1"]
-            if group.corpus_dir:
-                argv.append(str(group.corpus_dir))
-        else:
-            argv = ["afl-fuzz", "-i", str(group.corpus_dir or "/tmp/seed"),
-                    "-o", str(self.config.output_dir / "afl"), "-V", str(t),
-                    "--", harness, "@@"]
+        argv = [harness, f"-max_total_time={self.config.timeout_sec}",
+                f"-artifact_prefix={self.config.crashes_dir}/",
+                "-print_final_stats=1"]
+        if group.corpus_dir:
+            argv.append(str(group.corpus_dir))
         # 호스트 실행에서는 env 프리픽스로 환경변수를 주입한다(기본 executor
         # 시그니처를 바꾸지 않기 위함). Docker 경로(build_run_argv)는
         # `-e ASAN_OPTIONS=...`로 넘기지만, 이 로컬 경로는 그동안 ASAN_OPTIONS/
