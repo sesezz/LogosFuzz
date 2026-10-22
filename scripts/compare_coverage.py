@@ -1,18 +1,9 @@
 #!/usr/bin/env python3
-"""유닛테스트 커버리지와 퍼징 커버리지를 라인 단위로 비교한다 (C 파트 4주차).
-
-왜 총합 비교로는 부족한가
--------------------------
-"퍼징 62% vs 유닛테스트 71%" 같은 총합만 내면 퍼징이 진 것처럼 보인다.
-하지만 둘은 성격이 다르다. 유닛테스트는 API 표면을 **넓게** 훑고, 퍼징은 입력
-파싱 경로를 **깊게** 판다. 총합이 낮아도 유닛테스트가 전혀 밟지 않은 분기를
-퍼징이 밟고 있을 수 있고, 그게 바로 퍼징을 돌리는 이유다.
-
-그래서 이 스크립트는 네 가지를 나눠서 센다.
+"""유닛테스트 커버리지와 퍼징 커버리지의 라인 단위 비교
 
     둘 다 밟음        - 중복 구간
-    퍼징만 밟음       <- **핵심 수치.** 퍼징이 벌어준 것
-    유닛테스트만 밟음 - 퍼징 하네스가 아직 못 닿는 API 표면
+    퍼징만 밟음       - 핵심 수치 (퍼징 기여분)
+    유닛테스트만 밟음 - 퍼징 하네스 미도달 API 표면
     둘 다 못 밟음     - 남은 미탐색 영역
 
 사용:
@@ -30,15 +21,13 @@ from pathlib import Path
 
 
 def parse_lcov(path: Path) -> dict:
-    """lcov 트레이스 파일을 ``{소스파일: {행번호: 실행횟수}}`` 로 읽는다.
+    """lcov 트레이스 파일의 ``{소스파일: {행번호: 실행횟수}}`` 변환
 
-    lcov 의 최소 문법만 본다.
         SF:<소스 경로>     레코드 시작
         DA:<행>,<횟수>     행 단위 실행 횟수
         end_of_record      레코드 끝
 
-    같은 파일이 여러 레코드로 쪼개져 나오는 경우가 있어(타깃별 측정 등)
-    횟수는 누적한다.
+    같은 파일의 여러 레코드는 횟수 누적
     """
     files: dict = defaultdict(dict)
     current = None
@@ -61,12 +50,7 @@ def parse_lcov(path: Path) -> dict:
 
 
 def normalize_path(path: str) -> str:
-    """빌드 환경마다 다른 경로 접두사를 걷어낸다.
-
-    유닛테스트는 bazel coverage 가, 퍼징은 llvm-cov 가 경로를 찍는데 둘의
-    접두사가 다르다. 정규화하지 않으면 같은 파일이 서로 다른 파일로 잡혀
-    교집합이 통째로 0 이 된다.
-    """
+    """빌드 환경별 경로 접두사 제거 (bazel coverage / llvm-cov 경로 통일)"""
     text = path.replace("\\", "/")
     for marker in ("/execroot/_main/", "/proc/self/cwd/", "/execroot/"):
         idx = text.find(marker)
@@ -76,12 +60,7 @@ def normalize_path(path: str) -> str:
 
 
 def is_harness_file(path: str) -> bool:
-    """측정 도구 쪽 코드(퍼징 하네스, 유닛테스트 본문)인가.
-
-    하네스 파일은 퍼징 lcov 에만, 테스트 본문은 유닛 lcov 에만 나온다. 비교에
-    넣으면 각자 "혼자만 밟은 라인" 으로 잡혀 수치가 부풀려진다. 대상 코드만
-    비교해야 한다.
-    """
+    """측정 도구 쪽 코드(퍼징 하네스, 유닛테스트 본문) 여부 (비교 대상에서 제외)"""
     norm = normalize_path(path)
     stem = Path(norm).stem
     return (
@@ -94,12 +73,7 @@ def is_harness_file(path: str) -> bool:
 
 def filter_lcov(lcov: dict, include: "list[str] | None" = None,
                 exclude_harness: bool = False) -> dict:
-    """비교 범위를 대상 코드로 좁힌다.
-
-    baselibs 의 유닛테스트 커버리지는 커버리지 scope 전체(5주차 실측 457개
-    파일)를 담는다. 퍼징 하네스가 닿을 수 없는 모듈까지 "유닛테스트만" 으로
-    세면 비교가 무의미해지므로 ``include`` 접두사(정규화 경로 기준)로 자른다.
-    """
+    """``include`` 접두사(정규화 경로 기준)로 비교 범위를 대상 코드로 제한"""
     result = {}
     for path, lines in lcov.items():
         norm = normalize_path(path)
@@ -112,7 +86,7 @@ def filter_lcov(lcov: dict, include: "list[str] | None" = None,
 
 
 def covered_lines(lcov: dict) -> dict:
-    """``{정규화 경로: {실제로 실행된 행 번호}}``."""
+    """``{정규화 경로: {실행된 행 번호}}``"""
     result: dict = defaultdict(set)
     for path, lines in lcov.items():
         key = normalize_path(path)
@@ -123,7 +97,7 @@ def covered_lines(lcov: dict) -> dict:
 
 
 def all_known_lines(*lcovs: dict) -> dict:
-    """측정 대상이 된 전체 행(실행 여부 무관). 미탐색 영역 계산용."""
+    """측정 대상 전체 행 (미탐색 영역 계산용)"""
     result: dict = defaultdict(set)
     for lcov in lcovs:
         for path, lines in lcov.items():
@@ -156,8 +130,7 @@ def compare(unit_lcov: dict, fuzz_lcov: dict) -> dict:
             "neither": len(neither),
             "unit_covered": len(u),
             "fuzz_covered": len(f),
-            # 퍼징이 새로 연 라인은 실제 번호까지 남긴다. 발표에서 "이 분기를
-            # 유닛테스트는 안 밟는다" 를 코드로 보여줄 수 있어야 한다.
+            # 퍼징만 도달한 라인은 행 번호까지 기록
             "fuzz_only_lines": sorted(fuzz_only)[:50],
         }
         per_file.append(entry)

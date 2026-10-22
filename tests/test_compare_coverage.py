@@ -1,9 +1,4 @@
-"""유닛테스트 vs 퍼징 커버리지 비교 로직 단위 테스트 (C 파트 4주차).
-
-측정 자체는 baselibs + Bazel 환경이 있어야 하지만, lcov 파싱과 차집합 계산은
-순수 로직이라 지금 검증할 수 있다. 실제 측정이 가능해졌을 때 이 부분이
-맞는지부터 의심하지 않아도 되게 한다.
-"""
+"""유닛테스트 vs 퍼징 커버리지 비교 로직 단위 테스트 (lcov 파싱, 차집합 계산)"""
 
 import importlib.util
 from pathlib import Path
@@ -34,7 +29,7 @@ def test_parses_lines_and_counts(tmp_path):
 
 
 def test_accumulates_counts_when_file_appears_twice(tmp_path):
-    """타깃별로 따로 측정되면 같은 파일이 여러 레코드로 나온다."""
+    """타깃별 측정으로 같은 파일이 여러 레코드인 경우"""
     text = (
         "SF:x.cc\nDA:1,2\nend_of_record\n"
         "SF:x.cc\nDA:1,3\nend_of_record\n"
@@ -63,7 +58,7 @@ def test_normalizes_proc_self_cwd_prefix():
 
 
 def test_differently_prefixed_paths_are_matched(tmp_path):
-    """정규화가 없으면 같은 파일이 다른 파일로 잡혀 교집합이 0 이 된다."""
+    """경로 정규화로 같은 파일 인식"""
     unit = _lcov(tmp_path, "u.lcov", {"/x/execroot/_main/score/json.cc": {1: 1}})
     fuzz = _lcov(tmp_path, "f.lcov", {"/proc/self/cwd/score/json.cc": {1: 1}})
     report = cc.compare(cc.parse_lcov(unit), cc.parse_lcov(fuzz))
@@ -84,22 +79,18 @@ def test_counts_four_buckets(tmp_path):
 
 
 def test_fuzz_only_is_reported_even_when_total_is_lower(tmp_path):
-    """총합이 낮아도 퍼징만 밟은 라인이 있으면 드러나야 한다.
-
-    이 실험의 존재 이유다. 총합만 보면 퍼징이 져 보이지만, 유닛테스트가
-    전혀 안 밟는 깊은 경로를 퍼징이 열고 있을 수 있다.
-    """
+    """총합이 낮아도 퍼징만 밟은 라인 집계"""
     unit = _lcov(tmp_path, "u.lcov", {"x.cc": {1: 1, 2: 1, 3: 1, 9: 0}})
     fuzz = _lcov(tmp_path, "f.lcov", {"x.cc": {1: 1, 2: 0, 3: 0, 9: 1}})
     t = cc.compare(cc.parse_lcov(unit), cc.parse_lcov(fuzz))["totals"]
     assert t["unit_covered"] == 3
-    assert t["fuzz_covered"] == 2          # 총합은 퍼징이 낮다
-    assert t["fuzz_only"] == 1             # 그래도 퍼징만 연 라인이 있다
+    assert t["fuzz_covered"] == 2          # 총합은 퍼징이 낮음
+    assert t["fuzz_only"] == 1             # 퍼징만 연 라인 존재
     assert t["fuzz_percent"] < t["unit_percent"]
 
 
 def test_records_actual_fuzz_only_line_numbers(tmp_path):
-    """발표에서 '이 분기를 유닛테스트는 안 밟는다'를 코드로 보여줘야 한다."""
+    """퍼징만 연 라인의 행 번호 기록"""
     unit = _lcov(tmp_path, "u.lcov", {"x.cc": {1: 1, 42: 0, 77: 0}})
     fuzz = _lcov(tmp_path, "f.lcov", {"x.cc": {1: 1, 42: 1, 77: 1}})
     entry = cc.compare(cc.parse_lcov(unit), cc.parse_lcov(fuzz))["files"][0]
@@ -130,9 +121,9 @@ def test_markdown_highlights_fuzz_only(tmp_path):
     assert "`x.cc`" in md
 
 
-# --- 비교 범위 (5주차 실측 반영) --------------------------------------------
+# --- 비교 범위 --------------------------------------------------------------
 def test_include_prefix_drops_modules_the_harness_cannot_reach():
-    """baselibs 유닛 커버리지는 scope 전체(457개 파일)를 담는다. 대상만 남긴다."""
+    """baselibs 유닛 커버리지 scope 중 대상만 유지"""
     lcov = {
         "score/json/json_parser.cpp": {1: 1},
         "score/filesystem/path.cpp": {1: 0},
@@ -142,13 +133,13 @@ def test_include_prefix_drops_modules_the_harness_cannot_reach():
 
 
 def test_include_prefix_matches_after_normalization():
-    """퍼징 lcov 는 /proc/self/cwd/ 접두사가 붙는다. 정규화 후 비교해야 한다."""
+    """퍼징 lcov 의 /proc/self/cwd/ 접두사 정규화 후 비교"""
     lcov = {"/proc/self/cwd/score/json/any.cpp": {1: 1}}
     assert cc.filter_lcov(lcov, include=["score/json/"]) == lcov
 
 
 def test_exclude_harness_drops_fuzz_harness_and_test_bodies():
-    """하네스는 퍼징에만, 테스트 본문은 유닛에만 나와 한쪽 수치를 부풀린다."""
+    """하네스·테스트 본문 파일 비교 제외"""
     lcov = {
         "/proc/self/cwd/score/json/fuzz/json_parser_fuzz.cc": {1: 1},
         "score/json/json_test.cpp": {1: 1},

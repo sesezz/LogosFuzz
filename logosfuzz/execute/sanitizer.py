@@ -1,28 +1,20 @@
-"""EXE-04-02: Sanitizer 로그 스트림 모니터링과 크래시 시그니처화.
+"""EXE-04-02: Sanitizer 로그 스트림 모니터링 및 크래시 시그니처화
 
-ASan/LSan/TSAN 에 더해 **UBSan** 출력을 파싱한다.
+ASan/LSan/TSAN 및 UBSan 출력 파싱
 
-UBSan 을 따로 다뤄야 하는 이유
+UBSan 별도 처리 이유
 ------------------------------
-ASan/LSan/TSAN 은 ``ERROR: AddressSanitizer:`` 같은 헤더 한 줄로 시작하지만,
-UBSan 은 형식이 완전히 다르다.
+UBSan 은 ``ERROR: AddressSanitizer:`` 같은 헤더 없이 아래 형식으로 출력
 
     score/json/json.cc:38:11: runtime error: signed integer overflow: ...
         #0 ... in score::json::Dispatch(...) /proc/self/cwd/score/json/json.cc:38:11
         ...
     SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior score/json/json.cc:38:11
 
-헤더가 없으므로 ``ERROR:`` 기반 정규식으로는 **한 건도 잡히지 않는다.**
+* ``ERROR:`` 기반 정규식으로 검출 불가
+* 기본(복구 가능) 모드에서는 종료코드 0 으로 정상 종료하므로 출력 파싱 필수
 
-그리고 더 위험한 성질이 하나 있다. UBSan 은 기본값(복구 가능)에서 진단만
-찍고 **실행을 계속하며, 프로세스는 종료코드 0 으로 끝난다.**
-``-fno-sanitize-recover=undefined`` 가 붙어야 비로소 죽는다(종료코드 1).
-즉 종료코드만 보면 "정상 종료 · 크래시 없음" 으로 보이지만 실제로는 UB 가
-여러 건 터진 상태일 수 있다. **UBSan 결함은 반드시 출력 파싱으로 잡아야 한다.**
-
-이 모듈의 파서는 GEN 파트가 실제 Bazel 빌드에서 수집해 둔 출력 원문
-(``tests/fixtures/sanitizer_logs/``, clang 18.1.3)을 정답지로 삼아 작성했다.
-포맷을 추측하지 않았다.
+파서 기준: ``tests/fixtures/sanitizer_logs/`` 실제 출력 원문 (clang 18.1.3)
 """
 
 from __future__ import annotations
@@ -35,13 +27,12 @@ from typing import Callable
 
 _ERROR_START = re.compile(r"(?:ERROR: (?:Address|Leak)Sanitizer:|WARNING: ThreadSanitizer:)\s*(.+)", re.IGNORECASE)
 
-# UBSan 진단의 시작 줄. "<파일>:<행>:<열>: runtime error: <내용>" 형태다.
-# 파일 경로에 공백이 없다는 전제는 _SOURCE_LOCATION 과 동일하다.
+# UBSan 진단 시작 줄: "<파일>:<행>:<열>: runtime error: <내용>"
+# 파일 경로 공백 없음 전제 (_SOURCE_LOCATION 과 동일)
 _UBSAN_RUNTIME_ERROR = re.compile(
     r"^(?P<file>\S+):(?P<line>\d+):(?P<col>\d+):\s*runtime error:\s*(?P<message>.+)$"
 )
-# UBSan 블록의 끝. 여기서 끊어야 뒤따르는 libFuzzer 요약줄이 결함에 섞이지 않고,
-# 복구 가능 모드에서 연속으로 터지는 UB 여러 건이 한 덩어리로 합쳐지지 않는다.
+# UBSan 블록 끝 (libFuzzer 요약줄 혼입 및 연속 UB 병합 방지)
 _UBSAN_SUMMARY = re.compile(r"^SUMMARY:\s*UndefinedBehaviorSanitizer:", re.IGNORECASE)
 
 _SOURCE_LOCATION = re.compile(r"(?P<file>(?:[A-Za-z]:)?[^\s():]+\.(?:c|cc|cpp|cxx|h|hh|hpp)):(?P<line>\d+)(?::\d+)?")
@@ -55,7 +46,7 @@ class SourceLocation:
 
 @dataclass
 class SanitizerFinding:
-    """ANA-05-01/ANA-05-04에 전달할 정규화된 Sanitizer 결함 이벤트."""
+    """ANA-05-01/ANA-05-04 전달용 정규화 Sanitizer 결함 이벤트"""
     sanitizer: str
     category: str
     error_reason: str
@@ -77,11 +68,10 @@ class SanitizerFinding:
 
 
 def classify_ubsan_error(message: str) -> str:
-    """UBSan 진단 메시지를 결함 분류로 매핑한다.
+    """UBSan 진단 메시지의 결함 분류 매핑
 
-    분기 조건은 전부 수집된 출력 원문(tests/fixtures/sanitizer_logs)의 실제
-    문구에서 가져왔다. 표본에 없는 UB 종류는 ``undefined-behavior`` 로 떨어져,
-    "UB 이긴 한데 분류가 아직 없다" 가 "결함이 아니다" 로 오인되지 않게 한다.
+    분기 조건은 tests/fixtures/sanitizer_logs 실제 문구 기준
+    미분류 UB는 ``undefined-behavior`` 로 처리
     """
     text = message.lower()
     if "signed integer overflow" in text or "unsigned integer overflow" in text:
@@ -106,12 +96,7 @@ def classify_ubsan_error(message: str) -> str:
 
 
 def classify_sanitizer_error(sanitizer: str, reason: str) -> str:
-    """Sanitizer 별 결함 분류 규칙.
-
-    참고 - 차량 특화 분류였던 ``watchdog-timeout`` 은 제거했다. 대상이
-    dlt-daemon(차량 RT)에서 Eclipse S-CORE 로 바뀌면서 워치독/실시간성 위반을
-    나타내는 로그가 더는 나오지 않아, 잡히지 않는 분기만 남아 있었다.
-    """
+    """Sanitizer 별 결함 분류 규칙"""
     if sanitizer.upper() == "UBSAN":
         return classify_ubsan_error(reason)
 
@@ -127,22 +112,20 @@ def classify_sanitizer_error(sanitizer: str, reason: str) -> str:
     if "allocation-size-too-big" in text or "exceeds maximum supported" in text:
         return "bad-alloc"
     if "segv" in text:
-        # null 역참조 UB 직후 실제 SEGV 로 죽는 경우가 있다(픽스처
-        # ubsan_null_deref.txt 에서 확인). 분류가 없으면 unknown 으로 빠져
-        # ANA 가 판정 근거를 잃는다.
+        # null 역참조 UB 직후 SEGV 종료 케이스 대응
         return "segv"
     if "lock-order-inversion" in text or "deadlock" in text:
         return "deadlock"
     if "data race" in text or "race condition" in text:
         return "race-condition"
     if "mock" in text or "unimplemented protocol" in text:
-        # GEN-03-03 mock 주입이 만든 가짜 크래시. ANA(triage)가 오탐 신호로 쓴다.
+        # GEN-03-03 mock 주입 가짜 크래시 (ANA triage 오탐 신호)
         return "mocking-fail-fp"
     return "unknown"
 
 
 class SanitizerMonitor:
-    """프로세스 출력 한 줄씩을 받아 Sanitizer 결함 블록을 수집한다."""
+    """프로세스 출력 줄 단위 Sanitizer 결함 블록 수집기"""
     def __init__(self, on_finding: Callable[[SanitizerFinding], None] | None = None):
         self.on_finding = on_finding
         self.findings: list[SanitizerFinding] = []
@@ -167,8 +150,7 @@ class SanitizerMonitor:
 
         ubsan = _UBSAN_RUNTIME_ERROR.match(line.strip())
         if ubsan:
-            # 복구 가능 모드에서는 UB 가 연속으로 여러 건 터진다. 앞 건을 먼저
-            # 닫아야 각각 별개 결함으로 남는다.
+            # 연속 UB를 별개 결함으로 남기기 위해 이전 블록 종료
             self._flush()
             self._sanitizer = "UBSAN"
             self._reason = ubsan.group("message").strip()
@@ -177,8 +159,7 @@ class SanitizerMonitor:
 
         if self._sanitizer is not None:
             self._lines.append(line)
-            # UBSan 은 SUMMARY 로 블록이 끝난다. 여기서 닫지 않으면 뒤따르는
-            # libFuzzer 실행 요약("Executed ... in N ms")까지 결함 로그에 붙는다.
+            # UBSan 블록은 SUMMARY 에서 종료 (libFuzzer 실행 요약 혼입 방지)
             if self._sanitizer == "UBSAN" and _UBSAN_SUMMARY.match(line.strip()):
                 self._flush()
 
@@ -204,6 +185,6 @@ class SanitizerMonitor:
 
 
 def write_findings(path: Path, findings: list[SanitizerFinding]) -> None:
-    """원문 traceback을 보존한 ANA 입력 JSON Lines 파일을 기록한다."""
+    """원문 traceback 보존 ANA 입력 JSON Lines 기록"""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(f.to_dict(), ensure_ascii=False) + "\n" for f in findings), encoding="utf-8")

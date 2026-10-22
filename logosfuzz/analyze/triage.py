@@ -1,31 +1,16 @@
-"""ANA-05-01: LLM 기반 정탐/오탐(True/False Positive) 자동 판별.
+"""ANA-05-01: LLM 기반 정탐/오탐(True/False Positive) 자동 판별
 
-입력: ANA-05-04(Crash Deduplication)가 만든 :class:`CrashCluster` 목록
-      (설계서: "5주 Dedup 결과 입력받아 진행").
-출력: 클러스터별 :class:`TriageResult`. 각 결과의 ``to_triage_dict()``는
-      ANA-05-02 ``build_cve_report(triage_result=...)`` 입력 계약과 일치한다.
+입력: ANA-05-04(Crash Deduplication)의 :class:`CrashCluster` 목록
+출력: 클러스터별 :class:`TriageResult` (``to_triage_dict()`` 는 ANA-05-02 입력 계약과 일치)
 
-왜 중복 제거 결과를 입력으로 받나
---------------------------------
-정/오탐 판별은 비싸다(LLM 추론 호출). Dedup으로 버그 1개당 대표 1건만 남겨,
-같은 버그를 수백 번 다시 판별하지 않는다. 대표에 대한 판정을 그 묶음 전체에
-적용한다.
+대표 1건 판정 결과를 클러스터 전체에 적용해 LLM 호출 최소화
 
-두 가지 판별기
+판별기
 --------------
-- :class:`RuleBasedTriager` (기본): 표준 라이브러리만 쓰는 결정적 휴리스틱.
-  설계서의 결함 분류 규칙(특히 ``mocking-fail-fp`` = 가짜 크래시)과 콜스택
-  위치·재현성 신호를 결합한다. 의존성/네트워크 없이 항상 같은 결과를 낸다.
-- :class:`LLMTriager`: 설계서가 명시한 "추론 특화 LLM"(예: DeepSeek-R1) 연동
-  자리. ``logosfuzz.generate.llm.LLMClient`` 인터페이스를 재사용하며, 실제
-  모델이 없으면 규칙 기반으로 안전하게 폴백한다.
+- :class:`RuleBasedTriager` (기본): 결함 분류 규칙과 콜스택 위치·재현성 신호 기반 결정적 휴리스틱
+- :class:`LLMTriager`: 추론 특화 LLM 연동 (모델 부재 시 규칙 기반 폴백)
 
-설계 근거(설계서에 판정 규약이 명시되지 않아 합리적 기본값 + 근거 기록)
----------------------------------------------------------------------
-설계서는 "LLM이 실행 로그와 Sanitizer 결과를 분석해 정/오탐 분류"라고만 하고
-구체적 규칙·점수·임계값을 정의하지 않는다. 그래서 아래 신호를 근거로
-투명한 점수화를 구현하고, 각 판정에 사용한 신호를 ``signals``로 남겨
-설명가능성(HITL 검토)을 확보한다.
+판정에 사용한 신호는 HITL 검토용으로 ``signals`` 에 기록
 """
 
 from __future__ import annotations
@@ -34,7 +19,7 @@ from logosfuzz.analyze import contracts as _contracts
 from logosfuzz.analyze.models import CrashCluster, TriageResult, Verdict
 from logosfuzz.analyze.signature import application_frames, has_application_frame
 
-# 전통적 메모리 커럽션 계열: sanitizer 탐지 신뢰도가 높아 정탐 사전확률이 크다.
+# 메모리 커럽션 계열: sanitizer 탐지 신뢰도가 높아 정탐 사전확률 높음
 _MEMORY_BUGS = {
     "use-after-free",
     "double-free",
@@ -45,12 +30,12 @@ _MEMORY_BUGS = {
     "bad-alloc",
     "null-pointer-dereference",
 }
-# 동시성 계열: 실재하지만 문맥(락 순서/공유자원) 확인이 필요.
+# 동시성 계열: 문맥(락 순서/공유자원) 확인 필요
 _CONCURRENCY_BUGS = {"race-condition", "data-race", "deadlock"}
 
 RULE_MODEL_NAME = "logosfuzz-rule-triage/v1"
 
-# 판정 임계값(정탐 점수 기준). 근거는 모듈 docstring 참조.
+# 판정 임계값 (정탐 점수 기준)
 _TP_THRESHOLD = 0.65
 _FP_THRESHOLD = 0.35
 
@@ -142,20 +127,20 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None,
         signals.append("concurrency-needs-context")
     elif cat == "watchdog-timeout":
         score = 0.35
-        signals.append("realtime-timeout")  # 타임아웃 임계치 튜닝(EXE-04-03) 사안일 수 있음
+        signals.append("realtime-timeout")  # 타임아웃 임계치 튜닝(EXE-04-03) 대상 가능성
     else:  # unknown 등
         score = 0.30
         signals.append("unclassified-category")
 
-    # (2) 크래시 위치: 대상 라이브러리 코드인가, 하네스뿐인가
+    # (2) 크래시 위치: 대상 라이브러리 코드 또는 하네스
     if has_application_frame(rep):
         score += 0.20
         signals.append("target-code-frame")
     else:
         score -= 0.35
-        signals.append("harness-only-frame")  # 대상 코드가 아닌 하네스/드라이버 문제일 가능성
+        signals.append("harness-only-frame")  # 하네스/드라이버 문제 가능성
 
-    # (3) 재현성: 같은 시그니처로 여러 입력이 모였는가
+    # (3) 재현성: 같은 시그니처의 입력 수
     if cluster.count >= 3:
         score += 0.10
         signals.append("highly-reproducible")
@@ -192,7 +177,7 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None,
     loc = f"{top[0].file}:{top[0].line}" if top else "위치 미상"
     if score >= _TP_THRESHOLD:
         verdict = Verdict.TRUE_POSITIVE
-        # 자동 판정은 절대 확신(1.0)을 피한다: 최종 확정은 HITL(사람)이 한다.
+        # 자동 판정은 1.0 미만으로 제한 (최종 확정은 HITL)
         confidence = _clamp(score, hi=0.95)
         rationale = (
             f"{rep.sanitizer}가 {cat.replace('-', ' ')}를 탐지했고 대상 코드({loc})에서 "
@@ -284,7 +269,7 @@ def _safe_context(provider, cluster):
 
 
 # --------------------------------------------------------------------------- #
-# LLM 연동 판별기 (설계서의 추론형 LLM 자리)
+# LLM 연동 판별기
 # --------------------------------------------------------------------------- #
 
 _TRIAGE_SYSTEM = (
@@ -368,7 +353,7 @@ def build_triage_prompt(cluster: CrashCluster, context=None, contract=None,
 
 
 def parse_llm_verdict(text: str) -> dict | None:
-    """LLM 응답 텍스트에서 판정 JSON을 추출한다. 실패 시 None."""
+    """LLM 응답 텍스트의 판정 JSON 추출 (실패 시 None)"""
     import json
     import re
 
@@ -389,16 +374,12 @@ def parse_llm_verdict(text: str) -> dict | None:
 
 
 class LLMTriager:
-    """추론형 LLM(예: DeepSeek-R1) 기반 판별기.
-
-    실제 모델 호출은 주입된 ``LLMClient``(``logosfuzz.generate.llm``)가 담당한다.
-    모델이 없거나 응답 파싱에 실패하면 규칙 기반으로 폴백해 파이프라인을
-    멈추지 않는다.
+    """추론형 LLM 기반 판별기 (모델 부재·파싱 실패 시 규칙 기반 폴백)
 
     Args:
-        client: ``complete(prompt, system=...) -> str`` 를 제공하는 LLM 클라이언트.
-        model_name: 판정 결과에 기록할 모델 식별자.
-        fallback: 폴백 판별기(기본 RuleBasedTriager).
+        client: ``complete(prompt, system=...) -> str`` 제공 LLM 클라이언트
+        model_name: 판정 결과에 기록할 모델 식별자
+        fallback: 폴백 판별기 (기본 RuleBasedTriager)
     """
 
     def __init__(self, client, model_name: str = "deepseek-r1", fallback=None,
@@ -449,13 +430,13 @@ class LLMTriager:
 
 
 def triage_clusters(clusters: list[CrashCluster], triager=None) -> list[TriageResult]:
-    """클러스터 목록을 판별한다(기본: 규칙 기반)."""
+    """클러스터 목록 판별 (기본: 규칙 기반)"""
     triager = triager or RuleBasedTriager()
     return [triager.triage(c) for c in clusters]
 
 
 def summarize(results: list[TriageResult]) -> dict:
-    """판정 결과 개수 요약."""
+    """판정 결과 개수 요약"""
     summary = {v.value: 0 for v in Verdict}
     for r in results:
         summary[r.verdict.value] += 1
