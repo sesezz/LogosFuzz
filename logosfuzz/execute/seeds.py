@@ -1,9 +1,7 @@
-"""프로필 시드를 그룹별 코퍼스 초기값으로 복사한다 (GENERIC).
+"""프로필 시드의 그룹별 코퍼스 초기값 복사 (GENERIC)
 
-``logosfuzz fuzz --profile`` 과 ``logosfuzz run`` 이 쓴다. libFuzzer 는 새 경로를 연
-입력을 첫 코퍼스 디렉터리에 저장하므로, 사용자의 시드 디렉터리를 그대로 넘기면
-원본이 오염된다. 그래서 출력 폴더 아래 ``corpus/<group>/`` 에 복사본을 만들어
-넘기고, 퍼징이 끝나면 그 디렉터리가 "최종 코퍼스"가 된다(커버리지 재생 입력).
+원본 시드 오염 방지를 위해 출력 폴더 ``corpus/<group>/`` 에 복사본 생성
+퍼징 후 해당 디렉터리가 최종 코퍼스 (커버리지 재생 입력)
 """
 
 from __future__ import annotations
@@ -18,7 +16,7 @@ from logosfuzz.config import LogicGroup
 
 
 def profile_seed_paths(profile) -> List[Path]:
-    """프로필 ``seeds`` 를 절대경로로. 경로는 source_root 기준이다(target_profile 규칙)."""
+    """프로필 ``seeds`` 의 절대경로 변환 (source_root 기준)"""
     return [profile.abs(s) for s in getattr(profile, "seeds", ()) or ()]
 
 
@@ -34,7 +32,7 @@ def _seed_files(paths: Iterable[Path]) -> List[Path]:
 
 
 def copy_seeds(seed_paths: Sequence[Path], dest: Path) -> int:
-    """시드 파일들을 ``dest`` 에 복사한다. 이름이 겹치면 내용 해시를 붙인다. 복사한 수."""
+    """시드 파일의 ``dest`` 복사 및 복사 수 반환 (이름 중복 시 내용 해시 추가)"""
     dest.mkdir(parents=True, exist_ok=True)
     copied = 0
     for src in _seed_files(seed_paths):
@@ -51,10 +49,9 @@ def copy_seeds(seed_paths: Sequence[Path], dest: Path) -> int:
 
 def seed_group_corpora(groups: Sequence[LogicGroup], seed_paths: Sequence[Path],
                        corpus_root: Path) -> List[LogicGroup]:
-    """그룹마다 ``corpus_root/<group>/`` 를 만들고 시드(와 기존 코퍼스)를 복사한다.
+    """그룹별 ``corpus_root/<group>/`` 생성 및 시드(와 기존 코퍼스) 복사
 
-    반환하는 그룹은 ``corpus_dir`` 이 새 디렉터리를 가리킨다. 시드가 없어도 디렉터리는
-    만든다 - 그래야 퍼징이 찾은 입력이 남아 최종 코퍼스로 쓸 수 있다.
+    반환 그룹의 ``corpus_dir`` 은 새 디렉터리 (시드가 없어도 생성)
     """
     seeded: List[LogicGroup] = []
     for group in groups:

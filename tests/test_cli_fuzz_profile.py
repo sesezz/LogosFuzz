@@ -1,4 +1,4 @@
-"""``logosfuzz fuzz --profile``: 프로필에서 하네스 위치·빌드 시스템·시드를 읽는다."""
+"""``logosfuzz fuzz --profile``: 프로필 기반 하네스 위치·빌드 시스템·시드 로드"""
 
 import json
 from pathlib import Path
@@ -126,5 +126,5 @@ def test_seed_copy_keeps_user_seeds_untouched_and_merges_existing_corpus(tmp_pat
                                  [seeds], tmp_path / "corpus")
     names = sorted(p.name for p in group.corpus_dir.iterdir())
     assert names[0] == "x" and names[1].startswith("x-") and len(names) == 2
-    assert copy_seeds([seeds], group.corpus_dir) == 0   # 같은 내용은 다시 복사하지 않는다
+    assert copy_seeds([seeds], group.corpus_dir) == 0   # 같은 내용 재복사 없음
     assert sorted(p.name for p in seeds.iterdir()) == ["x"]

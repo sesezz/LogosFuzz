@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""``logosfuzz run`` 의 run_summary.json 을 검증 문서용 Markdown 표로 바꾼다.
+"""``logosfuzz run`` 의 run_summary.json 을 검증 문서용 Markdown 표로 변환
 
-docs/VERIFY-GENERIC-libsndfile.md 에 붙일 실측값만 뽑는다(값을 만들어 넣지 않는다).
+docs/VERIFY-GENERIC-libsndfile.md 첨부용 실측값만 추출
 
     python3 scripts/render_run_report.py out/libsndfile/run_summary.json [--env env.txt] [-o report.md]
 """

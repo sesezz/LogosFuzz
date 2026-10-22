@@ -37,8 +37,7 @@ _GENERIC_EXEC_IMAGE = "logosfuzz-exec:generic"
 _GENERIC_DOCKERFILE = Path("docker/Dockerfile.generic")
 _BAZEL_DOCKERFILE = Path("docker/Dockerfile")
 
-# CMakeAdapter / PrebuiltAdapter 의 기본 출력 위치(generate/build). 프로필만 주면
-# 여기서 하네스 바이너리를 찾는다.
+# CMakeAdapter / PrebuiltAdapter 기본 출력 위치 (프로필만 주면 여기서 하네스 바이너리 탐색)
 GENERIC_WORK_ROOT = Path("out") / "generic"
 
 
@@ -48,14 +47,14 @@ def default_exec_image(build_system: str | None) -> str:
 
 
 def default_exec_dockerfile(build_system: str | None) -> Path:
-    """이미지를 자동 빌드할 때 쓸 Dockerfile. 범용 이미지 태그를 Bazel 판으로 빌드하지 않게 한다."""
+    """이미지 자동 빌드용 Dockerfile 선택 (범용 태그의 Bazel 판 빌드 방지)"""
     if (build_system or "bazel").lower() == "bazel":
         return _BAZEL_DOCKERFILE
     return _GENERIC_DOCKERFILE
 
 
 def profile_harness_dir(profile) -> Path:
-    """프로필 대상의 하네스 바이너리 기본 위치(빌드 어댑터의 ``bin/``)."""
+    """프로필 대상 하네스 바이너리 기본 위치 (빌드 어댑터의 ``bin/``)"""
     return GENERIC_WORK_ROOT / profile.name / "bin"
 
 

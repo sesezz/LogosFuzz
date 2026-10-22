@@ -96,10 +96,9 @@ class FuzzSession:
 
     def run(self, groups: list, ensure_image: bool = True,
             timeouts: Optional[dict] = None) -> SessionSummary:
-        """그룹을 순서대로 퍼징한다.
+        """그룹 순차 퍼징
 
-        ``timeouts`` 를 주면 ``{그룹 이름: 초}`` 로 그룹마다 퍼징 시간을 따로 쓴다
-        (``logosfuzz run`` 이 SCH 자원 배분 결과를 넘긴다). 없는 그룹은 ``config.timeout_sec``.
+        ``timeouts`` (``{그룹 이름: 초}``) 지정 시 그룹별 퍼징 시간 적용 (미지정 그룹은 ``config.timeout_sec``)
         """
         self.config.ensure_dirs()
         default_timeout = self.config.timeout_sec

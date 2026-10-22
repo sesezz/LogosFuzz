@@ -1,9 +1,9 @@
 """``logosfuzz run --profile <json> --budget <sec> [--max-round 3] [--no-docker] -o out/<name>``.
 
-- 인자 검증과 SCH 시간 배분은 도구 없이 확인한다.
-- 단계 연결은 가짜 LLM·빌드 어댑터·퍼징 세션·커버리지 도구로 확인한다(EXT·ANA 는 실제).
-- clang + compiler-rt + cmake 가 있으면 임베디드 샘플로 처음부터 끝까지 실제로 돌린다
-  (LLM 자리에는 사람이 쓴 하네스를 돌려주는 가짜를 넣는다).
+- 인자 검증과 SCH 시간 배분: 도구 없이 확인
+- 단계 연결: 가짜 LLM·빌드 어댑터·퍼징 세션·커버리지 도구로 확인 (EXT·ANA 는 실제)
+- clang + compiler-rt + cmake 존재 시 임베디드 샘플 전체 실행
+  (LLM 자리에 수동 하네스 반환 가짜 사용)
 """
 
 import json
@@ -25,7 +25,7 @@ MANUAL_HARNESS = (EMBEDDED / "harness" / "fuzz_proto.c").read_text(encoding="utf
 
 
 class HarnessLLM:
-    """생성·수리 프롬프트 모두에 같은 하네스를 돌려준다."""
+    """생성·수리 프롬프트 모두에 같은 하네스 반환"""
 
     def __init__(self, code=MANUAL_HARNESS):
         self.code = code
@@ -247,7 +247,7 @@ def test_no_coverage_skips_coverage_stages(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# 실제 도구로 끝까지
+# 실제 도구 전체 실행
 # --------------------------------------------------------------------------- #
 def _toolchain_ready(tmp_path) -> bool:
     if not all(shutil.which(t) for t in ("clang", "cmake", "llvm-profdata", "llvm-cov")):
@@ -281,7 +281,7 @@ def test_real_e2e_embedded_sample_no_docker(tmp_path):
     files = [f["filename"] for f in export["data"][0]["files"]]
     assert files and not any("harness" in f for f in files)
     analysis = json.loads((out / "analysis.json").read_text())
-    assert analysis["findings"]                           # ANA 까지 크래시가 넘어갔다
+    assert analysis["findings"]                           # ANA 까지 크래시 전달
 
 
 def test_unexpected_llm_error_still_writes_summary(tmp_path):

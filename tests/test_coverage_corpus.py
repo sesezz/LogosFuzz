@@ -1,7 +1,6 @@
-"""비-Bazel 커버리지: 커버리지 빌드 바이너리로 최종 코퍼스 재생 → profdata → llvm-cov 요약.
+"""비-Bazel 커버리지: 커버리지 빌드 바이너리로 최종 코퍼스 재생 → profdata → llvm-cov 요약
 
-가짜 runner 로 명령 순서·인자를 확인하고, clang + compiler-rt + llvm 도구가 있으면
-실제로 작은 하네스를 빌드해 끝까지 돌려 본다.
+가짜 runner 로 명령 순서·인자 확인, clang + compiler-rt + llvm 도구 존재 시 실제 하네스 전체 실행
 """
 
 import json
@@ -32,7 +31,7 @@ _EXPORT = json.dumps({"data": [{
 
 
 class FakeRunner:
-    """재생 명령이 오면 profraw 를 떨구고, export 에는 고정 JSON 을 돌려준다."""
+    """재생 명령 시 profraw 생성, export 시 고정 JSON 반환"""
 
     def __init__(self, *, replay_writes=True, fail_bulk=False):
         self.calls = []
@@ -174,5 +173,5 @@ def test_real_coverage_replay_excludes_harness(tmp_path):
     files = [f.filename for f in summary.files]
     assert any(f.endswith("lib.c") for f in files)
     assert not any("harness" in f for f in files)
-    # "B" 분기는 코퍼스에 없으므로 리전 일부만 덮인다.
+    # 코퍼스에 없는 "B" 분기로 인해 리전 일부만 커버
     assert 0 < summary.regions.covered < summary.regions.count

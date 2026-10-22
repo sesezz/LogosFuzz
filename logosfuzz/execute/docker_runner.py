@@ -71,7 +71,7 @@ class GroupResult:
     coverage: object = None  # EXE-04-04 CoverageSummary (없으면 None)
     stdout_log: Optional[str] = None  # 표준 출력 로그 파일 경로(저장 실패 시 None)
     stderr_log: Optional[str] = None  # 표준 오류 로그 파일 경로
-    timeout_sec: Optional[int] = None  # 그룹별 시간을 따로 준 경우(run 의 SCH 배분)
+    timeout_sec: Optional[int] = None  # 그룹별 퍼징 시간 (run 의 SCH 배분)
 
     @property
     def failed_to_start(self) -> bool:
@@ -294,9 +294,7 @@ class DockerIsolationRunner:
             "-v", f"{c.output_dir.resolve()}:/out",
         ]
         if group.corpus_dir:
-            # 쓰기 가능하게 붙인다. libFuzzer 는 새 경로를 연 입력을 첫 코퍼스
-            # 디렉터리에 저장하고, 퍼징이 끝난 뒤 이 "최종 코퍼스"를 커버리지
-            # 바이너리로 재생한다(:ro 면 코퍼스가 시드에서 자라지 않는다).
+            # 쓰기 가능 마운트 (최종 코퍼스를 커버리지 바이너리로 재생하기 위함)
             argv += ["-v", f"{group.corpus_dir.resolve()}:/corpus"]
         argv += [
             "-e", f"ASAN_OPTIONS={c.asan_options}",

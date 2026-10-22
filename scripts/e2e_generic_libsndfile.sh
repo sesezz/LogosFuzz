@@ -2,21 +2,21 @@
 # GENERIC 마지막 단계: libsndfile 1.2.2 E2E + 커버리지 → 자동차 회귀 → 결과 Markdown
 # =====================================================================================
 #
-# EC2(r5.2xlarge, Ubuntu 24.04) 기준. 저장소 루트에서 실행한다.
+# EC2(r5.2xlarge, Ubuntu 24.04) 기준, 저장소 루트에서 실행
 #
 #   export OPENAI_API_KEY=...            # 하네스 자동 생성·자가치유에 필요
 #   bash scripts/e2e_generic_libsndfile.sh               # 기본 600초, Docker 격리
 #   BUDGET=600 DOCKER=0 bash scripts/e2e_generic_libsndfile.sh   # 호스트 실행
 #
-# 하는 일
+# 수행 단계
 #   1. 도구 확인 + 환경 기록 (out/libsndfile/env.txt)
-#   2. libsndfile 고정 커밋 받기 (scripts/fetch_libsndfile.sh)
+#   2. libsndfile 고정 커밋 다운로드 (scripts/fetch_libsndfile.sh)
 #   3. logosfuzz run --profile targets/libsndfile.json --budget $BUDGET --max-round 3
 #      (BUILD → EXT → SCH → GEN(LLM) → 자가치유 → EXE → 커버리지 → ANA, 사람 개입 없음)
 #   4. 자동차 회귀: scripts/check_automotive_golden.py (골든 비교) + pytest 전체
-#   5. out/libsndfile/e2e-report.md 생성 (실측값만, docs/VERIFY-GENERIC-libsndfile.md 에 붙인다)
+#   5. out/libsndfile/e2e-report.md 생성 (실측값만, docs/VERIFY-GENERIC-libsndfile.md 첨부용)
 #
-# 어느 단계든 실패하면 멈추고 0 이 아닌 코드로 끝난다.
+# 단계 실패 시 즉시 중단 및 0 이 아닌 코드로 종료
 set -euo pipefail
 
 BUDGET="${BUDGET:-600}"
@@ -40,7 +40,7 @@ ENV_TXT="$OUT/env.txt"
   echo "date: $(date -Iseconds)"
   echo "commit: $(git rev-parse HEAD) ($(git rev-parse --abbrev-ref HEAD))"
   echo "os: $(. /etc/os-release && echo "$PRETTY_NAME") / $(uname -r)"
-  # EC2 인스턴스 타입 (IMDSv2). EC2 가 아니면 비워 둔다.
+  # EC2 인스턴스 타입 (IMDSv2, EC2 가 아니면 빈 값)
   TOKEN="$(curl -s -m 2 -X PUT http://169.254.169.254/latest/api/token \
             -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' 2>/dev/null || true)"
   ITYPE="$(curl -s -m 2 -H "X-aws-ec2-metadata-token: $TOKEN" \

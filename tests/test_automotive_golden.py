@@ -1,4 +1,4 @@
-"""자동차(Bazel) 모드 골든 회귀 - 범용화 작업이 --mode bazel 산출물을 바꾸지 않았는지."""
+"""자동차(Bazel) 모드 골든 회귀 (범용화 작업의 --mode bazel 산출물 영향 확인)"""
 
 import importlib.util
 from pathlib import Path

@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""자동차(Bazel) 모드 회귀: tests/golden/automotive 골든과 비교한다.
+"""자동차(Bazel) 모드 회귀: tests/golden/automotive 골든 비교
 
-범용화 작업이 기존 ``ctr_06_01_controller --mode bazel`` 경로(S-CORE //score/json)를
-바꾸지 않았는지 본다. ``--emit-only`` 라 Bazel·baselibs·LLM 이 없어도 돈다.
-비교 규칙은 tests/golden/automotive/README.md 와 같다(started_at, finished_at,
-workspace, units[].rounds 는 실행마다 달라서 뺀다).
+범용화 작업의 ``ctr_06_01_controller --mode bazel`` 경로 영향 확인 (``--emit-only``, Bazel·LLM 불필요)
+비교 규칙은 tests/golden/automotive/README.md 와 동일 (실행마다 다른 필드 제외)
 
     python3 scripts/check_automotive_golden.py            # 임시 워크스페이스
     python3 scripts/check_automotive_golden.py --workspace ~/baselibs
 
-종료 코드: 0 일치, 1 불일치.
+종료 코드: 0 일치, 1 불일치
 """
 from __future__ import annotations
 
@@ -47,7 +45,7 @@ def run_emit(workspace: Path, work: Path) -> tuple[dict, str]:
 
 
 def check(workspace: Path | None = None) -> list[str]:
-    """차이 목록(unified diff 줄). 비어 있으면 골든과 같다."""
+    """차이 목록 (unified diff 줄, 비어 있으면 골든과 일치)"""
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         ws = Path(workspace).expanduser() if workspace else work / "ws"

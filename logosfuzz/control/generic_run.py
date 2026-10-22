@@ -1,6 +1,6 @@
-"""``logosfuzz run``: 범용(비-Bazel) 대상 한 줄 E2E.
+"""``logosfuzz run``: 범용(비-Bazel) 대상 한 줄 E2E
 
-프로필 하나로 EXT 부터 ANA 까지 사람 손 없이 이어 돈다::
+프로필 하나로 EXT 부터 ANA 까지 자동 실행::
 
     logosfuzz run --profile targets/libsndfile.json --budget 600 -o out/libsndfile
 
@@ -17,12 +17,10 @@
     ANA     analyze --profile (중복 제거 + 판별)               analysis.json
     요약                                                     run_summary.json, validation-summary.json
 
-``run_summary.json`` 의 ``stages[*].automatic`` 은 모두 ``true`` 다. 이 명령 안에는 사람이
-고르는 단계가 없다. 사람이 개입한 것(수동 하네스, 프로필 수정 등)은 이 요약 밖에서
-따로 기록한다(docs/VERIFY-GENERIC-libsndfile.md).
+``run_summary.json`` 의 ``stages[*].automatic`` 은 모두 ``true`` (사람 개입 단계 없음)
+수동 개입 내역은 docs/VERIFY-GENERIC-libsndfile.md 에 별도 기록
 
-Bazel 프로필은 받지 않는다. 자동차(S-CORE) 대상은 기존 ``ctr_06_01_controller --mode bazel``
-경로를 그대로 쓴다(자동차 회귀 골든이 그 경로를 지킨다).
+Bazel 프로필 미지원 (자동차 대상은 ``ctr_06_01_controller --mode bazel`` 경로 사용)
 """
 
 from __future__ import annotations
@@ -35,8 +33,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
-#: 그룹 하나에 최소로 주는 퍼징 시간(초). SCH 는 점수 0 인 그룹에 0초를 배정하는데,
-#: 하네스까지 만들어 놓고 한 번도 안 돌리면 생성 비용만 쓴 셈이라 바닥값을 둔다.
+#: 그룹별 최소 퍼징 시간(초) (SCH 0초 배정 그룹도 최소한 실행)
 MIN_GROUP_SEC = 30
 
 DEFAULT_MODEL = "gpt-4o-mini"
@@ -70,16 +67,16 @@ class Stage:
 
 
 class StageFailed(RuntimeError):
-    """한 단계가 실패해 뒤 단계를 돌릴 수 없을 때."""
+    """단계 실패로 후속 단계 실행 불가"""
 
 
 # --------------------------------------------------------------------------- #
 # 시간 배분
 # --------------------------------------------------------------------------- #
 def split_budget(schedule: Sequence[Any], budget: int, *, floor: int = MIN_GROUP_SEC) -> Dict[str, int]:
-    """SCH 배분(``allocated_sec``)을 따르되 그룹마다 최소 ``floor`` 초를 보장한다.
+    """SCH 배분(``allocated_sec``) 기반 그룹별 최소 ``floor`` 초 보장
 
-    합은 ``budget`` 을 넘지 않는다. 그룹이 많아 바닥값만으로 예산을 넘으면 균등하게 나눈다.
+    합계는 ``budget`` 이하 (바닥값 합이 예산 초과 시 균등 분배)
     """
     names = [r.group_name for r in schedule]
     if not names or budget <= 0:
@@ -92,7 +89,7 @@ def split_budget(schedule: Sequence[Any], budget: int, *, floor: int = MIN_GROUP
     for name in names:
         share = (rest * weights[name] // total) if total else rest // len(names)
         out[name] = floor + share
-    # 정수 나눗셈으로 남은 초는 첫 그룹(최우선)에 준다.
+    # 정수 나눗셈 나머지는 첫 그룹(최우선)에 배정
     out[names[0]] += budget - sum(out.values())
     return out
 
@@ -101,7 +98,7 @@ def split_budget(schedule: Sequence[Any], budget: int, *, floor: int = MIN_GROUP
 # 실행기
 # --------------------------------------------------------------------------- #
 class GenericRun:
-    """프로필 대상 E2E. 외부 의존(LLM, 빌드 어댑터, 퍼징 세션, 커버리지 도구)은 주입할 수 있다."""
+    """프로필 대상 E2E 실행기 (LLM, 빌드 어댑터, 퍼징 세션, 커버리지 도구 주입 가능)"""
 
     def __init__(
         self,
@@ -344,7 +341,7 @@ class GenericRun:
                 output_dir=self.out,
                 image=self.opts.image or default_exec_image(system),
                 dockerfile=default_exec_dockerfile(system),
-                coverage=CoverageMode.NONE,   # 커버리지는 끝난 뒤 최종 코퍼스 재생으로 잰다
+                coverage=CoverageMode.NONE,   # 커버리지는 종료 후 최종 코퍼스 재생으로 측정
             )
             groups = [LogicGroup(name=e["slug"], harness_path=Path(e["binary"])) for e, _, _ in built]
             seeds = profile_seed_paths(self.profile)
@@ -453,7 +450,7 @@ class GenericRun:
         except StageFailed as exc:
             self._log(f"\n[중단] {exc}")
             rc = 1
-        except Exception as exc:  # LLM 연결 오류 등 예상 못 한 실패도 요약은 남긴다
+        except Exception as exc:  # 예상 못 한 실패(LLM 연결 오류 등)에도 요약 기록
             self._log(f"\n[중단] {type(exc).__name__}: {exc}")
             rc = 1
 

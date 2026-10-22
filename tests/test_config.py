@@ -11,7 +11,7 @@ def test_engine_parse_aliases():
 
 @pytest.mark.parametrize("name", ["afl++", "AFL", "aflpp"])
 def test_engine_parse_rejects_aflpp_not_in_image(name):
-    # 실행 이미지(docker/Dockerfile*)에 AFL++ 가 없으므로 받지 않는다.
+    # 실행 이미지(docker/Dockerfile*)에 AFL++ 가 없으므로 거절
     with pytest.raises(InvalidEngineError, match="AFL"):
         Engine.parse(name)
 
