@@ -1,4 +1,4 @@
-"""LogosFuzz CLI.
+"""LogosFuzz CLI
 
 설계서 EXE-04-00 명세:
   logosfuzz fuzz --engine libfuzzer --timeout <sec> --docker [--profile targets/x.json]
@@ -7,8 +7,7 @@
   logosfuzz run --profile targets/libsndfile.json --budget 600 -o out/libsndfile
 
 로직 그룹 소스:
-  --groups <json> 로 명시하거나, 미지정 시 --harness-dir 안의 실행 파일들을
-  각각 하나의 그룹으로 자동 인식한다(SCH 산출물 연동 전까지의 편의 기능).
+  --groups <json> 로 명시, 미지정 시 --harness-dir 안의 실행 파일별 그룹 자동 인식
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ from logosfuzz.reporting.summary import (
 )
 
 
-# 빌드 시스템별 기본 격리 이미지 태그.
+# 빌드 시스템별 기본 격리 이미지 태그
 #   bazel -> logosfuzz-exec:latest  (docker/Dockerfile, Bazel 구동 환경)
 #   그 외 -> logosfuzz-exec:generic (docker/Dockerfile.generic, clang/cmake/ninja)
 _EXEC_IMAGES = {"bazel": "logosfuzz-exec:latest"}
@@ -44,10 +43,7 @@ GENERIC_WORK_ROOT = Path("out") / "generic"
 
 
 def default_exec_image(build_system: str | None) -> str:
-    """``--image`` 미지정 시 build_system 에 맞는 기본 격리 이미지 태그를 고른다.
-
-    GENERIC-A-profile 병합 후에는 ``profile.build.system`` 값이 그대로 들어온다.
-    """
+    """``--image`` 미지정 시 build_system 별 기본 격리 이미지 태그 선택"""
     return _EXEC_IMAGES.get((build_system or "bazel").lower(), _GENERIC_EXEC_IMAGE)
 
 
@@ -74,7 +70,7 @@ def discover_groups(harness_dir: Path, groups_spec: Path | None) -> list:
                 corpus_dir=Path(g["corpus"]) if g.get("corpus") else None,
             ))
         return out
-    # 자동 탐색: harness_dir 안의 파일 각각을 그룹으로.
+    # 자동 탐색: harness_dir 안의 파일별 그룹 생성
     groups = []
     if harness_dir.exists():
         for f in sorted(harness_dir.iterdir()):
@@ -228,7 +224,7 @@ def main(argv: list | None = None) -> int:
         return args.func(args)
 
     if args.command == "analyze":
-        # ANA 파트로 위임(설계서 기능 흐름도의 analyze 명령)
+        # ANA 파트 위임 (analyze 명령)
         from logosfuzz.analyze.cli import _run_analyze
         return _run_analyze(args)
 
@@ -294,9 +290,9 @@ def main(argv: list | None = None) -> int:
         session = FuzzSession(config)
         summary = session.run(groups, ensure_image=not args.no_build)
         if summary.total_crashes:
-            return 3  # 3: 크래시 발견(analyze 필요)
+            return 3  # 3: 크래시 발견 (analyze 필요)
         if summary.failed_groups:
-            return 4  # 4: 하네스가 실행되지 못한 그룹이 있음(퍼징이 실제로 안 돎)
+            return 4  # 4: 하네스 미실행 그룹 존재
         return 0
     except ExecuteError as e:
         print(f"[EXE 오류] {e}", file=sys.stderr)

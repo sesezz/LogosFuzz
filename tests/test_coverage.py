@@ -1,8 +1,4 @@
-"""EXE-04-04 커버리지 계측 단위 테스트.
-
-실제 llvm 도구(llvm-profdata/llvm-cov)나 Docker 없이도 검증되도록,
-외부 명령 실행은 ``runner`` 콜러블을 주입해 대체한다.
-"""
+"""EXE-04-04 커버리지 계측 단위 테스트 (외부 명령은 ``runner`` 주입으로 대체)"""
 
 import io
 import json
@@ -67,14 +63,14 @@ def test_instrumentation_flags():
     assert instrumentation_flags(CoverageMode.NONE) == ()
 
 
-# --- Bazel 경로의 계측 수급 (3주차) ---------------------------------------
+# --- Bazel 경로의 계측 config ---------------------------------------------
 def test_bazel_coverage_config_for_llvm_cov():
-    """Bazel 빌드는 개별 -f 플래그가 아니라 대상 저장소가 주는 config를 쓴다."""
+    """Bazel 빌드는 개별 -f 플래그 대신 대상 저장소 config 사용"""
     assert bazel_coverage_configs(CoverageMode.LLVM_COV) == ("llvm_cov",)
 
 
 def test_bazel_coverage_config_empty_for_sancov():
-    """엣지 계측은 퍼징 config(cc_engine_instrumentation)가 이미 켜 준다."""
+    """엣지 계측은 퍼징 config(cc_engine_instrumentation)에서 적용"""
     assert bazel_coverage_configs(CoverageMode.SANITIZER_COV) == ()
 
 
@@ -82,9 +78,9 @@ def test_bazel_coverage_config_empty_when_disabled():
     assert bazel_coverage_configs(CoverageMode.NONE) == ()
 
 
-# --- 퍼징 쪽 커버리지 빌드 (5주차 실측) ---------------------------------------
+# --- 퍼징 쪽 커버리지 빌드 -----------------------------------------------------
 def test_fuzz_coverage_build_does_not_use_llvm_cov_config():
-    """llvm_cov 는 coverage: 전용이라 bazel build 에 붙이면 정의 안 됨으로 죽는다."""
+    """llvm_cov 는 coverage: 전용이므로 bazel build 에 미사용"""
     argv = bazel_fuzz_coverage_build_argv("//score/json/fuzz:json_parser_fuzz_test")
     assert argv[:3] == ["bazel", "build", "--config=fuzz"]
     assert "--config=llvm_cov" not in argv
@@ -99,14 +95,14 @@ def test_fuzz_coverage_build_adds_source_based_instrumentation():
 
 
 def test_fuzz_coverage_build_is_separated_from_fuzz_outputs():
-    """계측 빌드가 퍼징 본 빌드 산출물(k8-fastbuild-fuzz)을 덮어쓰면 안 된다."""
+    """계측 빌드의 퍼징 본 빌드 산출물(k8-fastbuild-fuzz) 덮어쓰기 방지"""
     argv = bazel_fuzz_coverage_build_argv("//score/json/fuzz:json_parser_fuzz_test")
     assert "--platform_suffix=fuzz_cov" in argv
     assert argv[-1] == "//score/json/fuzz:json_parser_fuzz_test_bin"
 
 
 def test_bazel_llvm_tool_finds_toolchain_binary(tmp_path):
-    """시스템 llvm-profdata(18)는 clang 22 profraw 를 못 읽는다. 툴체인 쪽을 찾는다."""
+    """툴체인 쪽 llvm-profdata 탐색 (시스템 버전은 clang 22 profraw 미지원)"""
     bin_dir = tmp_path / "external" / "toolchains_llvm++llvm+llvm_toolchain_llvm" / "bin"
     bin_dir.mkdir(parents=True)
     (bin_dir / "llvm-profdata").write_text("")
@@ -118,7 +114,7 @@ def test_bazel_llvm_tool_none_before_toolchain_is_fetched(tmp_path):
 
 
 def test_extract_bazel_lcov_from_baselibs_zip(tmp_path):
-    """baselibs 리포터는 _coverage_report.dat 를 zip 으로 낸다."""
+    """baselibs 리포터의 zip 형식 _coverage_report.dat 처리"""
     import zipfile
 
     report = tmp_path / "_coverage_report.dat"
@@ -137,7 +133,7 @@ def test_extract_bazel_lcov_passes_plain_lcov_through(tmp_path):
 
 
 def test_instrumentation_flags_still_available_for_non_bazel_path():
-    """CMake 대상·빠른 컴파일 검증 경로는 여전히 플래그를 직접 쓴다."""
+    """CMake 대상·빠른 컴파일 검증 경로의 플래그 직접 사용"""
     assert "-fprofile-instr-generate" in instrumentation_flags(CoverageMode.LLVM_COV)
 
 
@@ -199,11 +195,8 @@ def test_build_export_argv_docker(tmp_path):
     assert "/harness/grpA" in joined
 
 
-# --- 하네스 바이너리 위치 해석 (EXE-04-01 Bazel 전환 대응) -----------------
-#
-# GEN 어댑터가 cquery 로 질의해 돌려준 실제 바이너리 경로를 harness_path 에
-# 담아 넘기는 구조다. 경로를 조립하지 않는다 - bazel-bin 심링크는 직전 빌드
-# 설정을 가리켜서 config 가 섞이면 무효가 되기 때문(GEN 파트 실측).
+# --- 하네스 바이너리 위치 해석 ----------------------------------------------
+# GEN 어댑터가 cquery 로 얻은 실제 경로를 harness_path 로 전달 (경로 조립 없음)
 def test_harness_binary_path_uses_explicit_path_as_is(tmp_path):
     cfg = _cfg(tmp_path)
     binary = tmp_path / "ws" / "bazel-out" / "fuzz" / "json_parser_fuzz_test_bin"
@@ -268,7 +261,7 @@ def test_collect_happy_path(tmp_path):
 
     def fake_runner(argv):
         calls.append(argv)
-        # merge는 stdout 불필요, export는 JSON을 돌려준다.
+        # merge는 stdout 불필요, export는 JSON 반환
         stdout = _EXPORT_JSON if "export" in " ".join(argv) else ""
         return CmdResult(0, stdout, "")
 
@@ -278,7 +271,7 @@ def test_collect_happy_path(tmp_path):
     assert s.mode == "llvm-cov"
     assert s.lines.percent == 58.57
     assert len(calls) == 2  # merge + export
-    # export 원문이 보존됐는지
+    # export 원문 보존 여부
     assert (cfg.coverage_dir / "grpA.coverage.json").exists()
 
 
@@ -318,7 +311,7 @@ def test_session_attaches_coverage_report(tmp_path):
 
     def fake_executor(argv, timeout, on_line):
         on_line("#100 pulse cov: 10 exec/s: 50")
-        # 계측된 하네스가 profraw를 떨궜다고 시뮬레이션
+        # 계측 하네스의 profraw 생성 시뮬레이션
         d = cfg.coverage_dir / "grpA"
         d.mkdir(parents=True, exist_ok=True)
         (d / "1.profraw").write_bytes(b"raw")
