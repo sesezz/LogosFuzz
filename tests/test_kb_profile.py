@@ -197,7 +197,7 @@ def test_missing_compile_db_falls_back_to_include_dirs(tmp_path):
     _tree(root, with_db=False)
     kb = KnowledgeBase.build(profile=_profile(root))
 
-    # compile_db 가 없으면 source_root 전체에서 찾되 tests/ 는 뺀다
+    # compile_db 부재 시 source_root 전체 탐색, tests/ 제외
     assert sorted(d["function"] for d in kb.documents) == ["demo_close", "demo_open"]
     include = f"-I{(root / 'include').resolve()}"
     assert kb.api("demo_open")["compile_flags"] == [include]
@@ -283,7 +283,7 @@ def test_bazel_profile_uses_bazel_query_with_profile_location(tmp_path, monkeypa
     assert kb.stats()["build_units_by_system"] == {"bazel": 1}
     document = kb.api("ParseJson")
     assert document["build_target"] == "//score/json:json"
-    # 자동차 프로필이면 score::Result 계약을 기존처럼 뽑는다
+    # 자동차 프로필은 score::Result 계약을 기존처럼 추출
     assert any(c["kind"] == "error_contract" for c in document["constraints"])
 
 
@@ -392,7 +392,7 @@ def test_evaluate_with_profile_and_labels(root, tmp_path):
 
     accuracy = result["extraction_accuracy"]
     assert result["target"] == ["demo"]
-    assert result["ground_truth"]["apis"] == 3  # not_a_target 은 프로필 밖이라 빠진다
+    assert result["ground_truth"]["apis"] == 3  # not_a_target 은 프로필 밖이라 제외
     assert accuracy["true_positive"] == 2
     assert accuracy["false_positive"] == 0
     assert accuracy["false_negative_names"] == ["demo_missing"]

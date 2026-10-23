@@ -103,7 +103,7 @@ class CompatibilityChecker:
         )
 
         # Required tools
-        # bear 는 제외했다 — 빌드를 Bazel 이 소유하므로 컴파일 명령을 가로챌 일이 없다.
+        # bear 제외 (빌드를 Bazel 이 소유하므로 컴파일 명령 가로채기 불필요)
         for tool in ["clang", "clang++"]:
             found = shutil.which(tool) is not None
             self._check(f"Tool: {tool}", found, f"{tool} found", f"{tool} not found in PATH")

@@ -1,9 +1,7 @@
-"""퍼징 대상 프로필(TargetProfile) 계약.
+"""퍼징 대상 프로필(TargetProfile) 계약
 
-LogosFuzz 를 자동차/S-CORE(Bazel) 특화에서 C/C++ 임베디드 범용으로 넓히면서,
-대상마다 흩어져 있던 빌드·API·에러계약 정보를 ``targets/*.json`` 한 파일로 모은다.
-EXT/KB, GEN 빌드 어댑터, EXE, ANA 가 모두 이 모듈의 :func:`load_profile` 결과만
-소비하므로 필드 이름·의미를 바꿀 때는 네 파트가 함께 맞춰야 한다.
+대상별 빌드·API·에러계약 정보를 ``targets/*.json`` 한 파일로 통합
+EXT/KB, GEN 빌드 어댑터, EXE, ANA 공용 (:func:`load_profile`), 필드 변경 시 네 파트 동시 반영 필요
 
 스키마 요약::
 
@@ -27,14 +25,13 @@ EXT/KB, GEN 빌드 어댑터, EXE, ANA 가 모두 이 모듈의 :func:`load_prof
     }
 
 경로 규칙:
-    * ``build.source_root`` 가 상대경로면 ``load_profile(path, base_dir=...)`` 의
-      ``base_dir``(기본: 현재 작업 디렉터리 = 저장소 루트) 기준으로 해석한다.
+    * ``build.source_root`` 상대경로는 ``load_profile(path, base_dir=...)`` 의
+      ``base_dir``(기본: 현재 작업 디렉터리 = 저장소 루트) 기준 해석
     * 나머지 ``build.*`` 경로(build_dir, libraries, include_dirs, compile_commands,
-      bazel.workspace)와 ``seeds`` 는 source_root 기준 상대경로이며
-      :meth:`TargetProfile.abs` 로 절대경로를 얻는다.
+      bazel.workspace)와 ``seeds`` 는 source_root 기준 상대경로,
+      :meth:`TargetProfile.abs` 로 절대경로 획득
 
-``_`` 로 시작하는 키는 주석으로 보고 무시한다. 그 밖의 모르는 키는 오타일
-가능성이 높으므로 :class:`ProfileError` 로 막는다.
+``_`` 로 시작하는 키는 주석으로 무시, 그 밖의 미지 키는 :class:`ProfileError`
 """
 from __future__ import annotations
 
@@ -64,12 +61,12 @@ PathLike = Union[str, "os.PathLike[str]"]
 
 
 class ProfileError(ValueError):
-    """프로필 JSON 이 없거나, 깨졌거나, 스키마를 어길 때."""
+    """프로필 JSON 부재·손상·스키마 위반 시 발생"""
 
 
 @dataclass(frozen=True)
 class BazelSpec:
-    """``build.system == "bazel"`` 일 때만 존재하는 Bazel 위치 정보."""
+    """``build.system == "bazel"`` 일 때만 존재하는 Bazel 위치 정보"""
 
     workspace: str
     target: str
@@ -77,7 +74,7 @@ class BazelSpec:
 
 @dataclass(frozen=True)
 class BuildSpec:
-    """대상 라이브러리를 어떻게 빌드·링크하는지."""
+    """대상 라이브러리 빌드·링크 방식"""
 
     system: str
     source_root: str
@@ -92,13 +89,13 @@ class BuildSpec:
 
 @dataclass(frozen=True)
 class EmbeddedSpec:
-    """크로스컴파일 대상을 호스트에서 분석·퍼징하기 위한 설정.
+    """크로스컴파일 대상의 호스트 분석·퍼징 설정
 
     Attributes:
-        strip_flags: 호스트 clang 에 넘기기 전에 제거할 플래그 glob
-            (예: ``-mcpu=*``, ``-mthumb``, ``--specs=*``).
-        stub_undefined: 링크 시 미정의 심볼을 스텁으로 자동 생성할지.
-        stub_allowlist: 스텁 생성을 허용할 심볼 glob. 비어 있으면 제한 없음.
+        strip_flags: 호스트 clang 전달 전 제거할 플래그 glob
+            (예: ``-mcpu=*``, ``-mthumb``, ``--specs=*``)
+        stub_undefined: 링크 시 미정의 심볼 스텁 자동 생성 여부
+        stub_allowlist: 스텁 생성 허용 심볼 glob (비어 있으면 제한 없음)
     """
 
     strip_flags: Tuple[str, ...] = ()
@@ -108,7 +105,7 @@ class EmbeddedSpec:
 
 @dataclass(frozen=True)
 class TargetProfile:
-    """``targets/*.json`` 하나를 검증해 고정한 값 객체."""
+    """``targets/*.json`` 하나를 검증해 고정한 값 객체"""
 
     name: str
     language: str
@@ -119,9 +116,9 @@ class TargetProfile:
     apis: Tuple[str, ...] = ()
     embedded: EmbeddedSpec = field(default_factory=EmbeddedSpec)
     seeds: Tuple[str, ...] = ()
-    # source_root 를 해석한 절대경로. abs() 의 기준점.
+    # source_root 해석 절대경로 (abs() 기준점)
     root: Path = field(default=Path("."), compare=False)
-    # 프로필 파일 자체의 경로(로그/리포트용). 문자열로 직접 만든 경우 None.
+    # 프로필 파일 경로 (로그/리포트용, 직접 생성 시 None)
     path: Optional[Path] = field(default=None, compare=False)
 
     @property
@@ -133,14 +130,14 @@ class TargetProfile:
         return self.domain == "automotive"
 
     def abs(self, path: PathLike) -> Path:
-        """source_root 기준 상대경로를 절대경로로. 이미 절대경로면 그대로."""
+        """source_root 기준 상대경로의 절대경로 변환 (절대경로는 그대로)"""
         p = Path(path)
         if p.is_absolute():
             return p
         return (self.root / p).resolve()
 
     def to_dict(self) -> dict:
-        """JSON 으로 다시 쓸 수 있는 원래 스키마 형태."""
+        """JSON 재기록 가능한 원래 스키마 형태"""
         build = self.build
         return {
             "name": self.name,
@@ -214,7 +211,7 @@ def _str_list(
     if value is None:
         return ()
     if allow_single and isinstance(value, str):
-        # seeds 처럼 디렉터리 하나만 적는 경우를 허용한다.
+        # seeds 처럼 디렉터리 하나만 적는 경우 허용
         return (value,)
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         raise ProfileError(f"{where}.{key} 는 문자열 배열이어야 한다 (got {value!r})")
@@ -287,7 +284,7 @@ def parse_profile(
     base_dir: Optional[PathLike] = None,
     path: Optional[Path] = None,
 ) -> TargetProfile:
-    """이미 읽은 dict 를 검증해 :class:`TargetProfile` 로 만든다."""
+    """읽은 dict 검증 후 :class:`TargetProfile` 생성"""
     if not isinstance(data, dict):
         raise ProfileError(f"프로필 최상위는 객체여야 한다 (got {type(data).__name__})")
     _check_keys(data, _TOP_KEYS, "profile")
@@ -322,15 +319,14 @@ def parse_profile(
 
 
 def load_profile(path: PathLike, *, base_dir: Optional[PathLike] = None) -> TargetProfile:
-    """``targets/*.json`` 을 읽어 검증한다.
+    """``targets/*.json`` 로드 및 검증
 
     Args:
-        path: 프로필 JSON 경로.
-        base_dir: 상대 ``build.source_root`` 의 기준 디렉터리. 기본은 현재 작업
-            디렉터리(저장소 루트에서 실행한다는 전제).
+        path: 프로필 JSON 경로
+        base_dir: 상대 ``build.source_root`` 기준 디렉터리 (기본: 현재 작업 디렉터리)
 
     Raises:
-        ProfileError: 파일이 없거나 JSON 이 깨졌거나 스키마를 어긴 경우.
+        ProfileError: 파일 부재, JSON 손상, 스키마 위반
     """
     p = Path(path)
     try:

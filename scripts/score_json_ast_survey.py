@@ -1,16 +1,13 @@
-"""`//score/json` 을 현행 `logosfuzz.extract.ast_analyzer` 로 파싱해 C++ 실패 케이스를 목록화한다.
+"""`//score/json` 을 현행 `logosfuzz.extract.ast_analyzer` 로 파싱한 C++ 실패 케이스 목록화
 
-1주차 A(추출·KB) 과제의 산출물 생성기다. 목적은 "고치는 것"이 아니라
-**현행 분석기가 C++ 에서 정확히 어디서 무너지는지**를 재현 가능한 수치로
-남기는 것이다. 따라서 `src.ast_analyzer.analyze_file()` 을 기본 인자 그대로
-호출한다(= 파이프라인이 실제로 부르는 경로).
+1주차 A(추출·KB) 산출물 생성기. 파이프라인과 같은 경로(`analyze_file()` 기본 인자)로
+현행 분석기의 C++ 실패 지점을 재현 가능한 수치로 기록
 
 수집 항목:
-  1. 파싱 실패 — libclang 진단(error/fatal)을 원인별로 분류
-  2. 추출 실패 — 파싱은 됐는데 FUNCTION_DECL 만 보는 탓에 놓치는 C++ 엔티티
+  1. 파싱 실패 — libclang 진단(error/fatal)의 원인별 분류
+  2. 추출 실패 — FUNCTION_DECL 만 보는 탓에 놓치는 C++ 엔티티
      (CXX_METHOD / FUNCTION_TEMPLATE / CLASS_TEMPLATE / NAMESPACE ...)
-  3. 다운스트림 영향 — `logosfuzz.pipeline.ext_to_api_metadata` 규칙을 그대로 적용했을 때
-     남는 API 개수
+  3. 다운스트림 영향 — `logosfuzz.pipeline.ext_to_api_metadata` 규칙 적용 후 남는 API 개수
 
 사용법:
   python -m scripts.score_json_ast_survey \
@@ -45,7 +42,7 @@ SOURCE_SUFFIXES = (".c", ".cc", ".cpp", ".h", ".hpp")
 # S-CORE 테스트 관례: *_test.cc, ut_*.cpp, ct_*.cpp
 TEST_NAME_RE = re.compile(r"(^(ut|ct)_|_test$|_test_suite$|_benchmark$)")
 
-# 진단 메시지 -> 실패 원인 분류. 위에서부터 먼저 맞는 것을 채택한다.
+# 진단 메시지 -> 실패 원인 분류 (위에서부터 첫 일치 채택)
 DIAGNOSTIC_RULES = [
     ("cxx_keyword_under_c_std", re.compile(
         r"unknown type name '(namespace|class|template|constexpr|noexcept|using)'"
@@ -106,10 +103,9 @@ def is_test_source(path: Path) -> bool:
 
 
 def collect_tu(path: Path, args):
-    """진단 원문과 해당 파일 자체의 선언 종류를 모은다.
+    """진단 원문과 해당 파일 자체의 선언 종류 수집
 
-    `analyze_with_clang()` 은 진단을 통째로 버리고 예외만 잡아 폴백하므로,
-    실패 원인을 남기려면 여기서 따로 파싱해야 한다.
+    `analyze_with_clang()` 은 진단을 버리고 예외 시 폴백하므로 실패 원인 기록용 별도 파싱
     """
     if not HAVE_CLANG:
         return None
@@ -160,7 +156,7 @@ def collect_tu(path: Path, args):
 
 
 def api_candidates(analysis: dict) -> int:
-    """logosfuzz.pipeline.ext_to_api_metadata 와 동일한 규칙으로 살아남는 API 수."""
+    """logosfuzz.pipeline.ext_to_api_metadata 와 동일 규칙으로 살아남는 API 수"""
     source_file = analysis.get("file", "")
     count = 0
     for node in analysis.get("nodes", []):
@@ -206,8 +202,7 @@ def survey_file(path: Path, source_root: Path, cxx_args) -> dict:
         for diag in tu_info["diagnostics"]:
             examples.setdefault(diag["category"], diag["message"])
         if tu_info["parse_exception"]:
-            # TU 자체가 안 열린 경우. analyze_with_clang 은 이걸 예외로만 받아
-            # 정규식 폴백으로 내려가므로, 진단 0건을 "성공"으로 세면 안 된다.
+            # TU 로드 실패: 정규식 폴백으로 내려가므로 진단 0건이어도 실패로 집계
             counter["translation_unit_load_error"] += 1
             examples.setdefault("translation_unit_load_error", tu_info["parse_exception"])
         return {
@@ -219,8 +214,7 @@ def survey_file(path: Path, source_root: Path, cxx_args) -> dict:
             "first_errors": tu_info["diagnostics"][:5],
         }
 
-    # C++ 로 제대로 파싱했을 때 이 파일에 실제로 존재하는 선언들.
-    # 현행 분석기가 FUNCTION_DECL 만 보기 때문에 이 중 대부분이 버려진다.
+    # C++ 로 파싱 시 이 파일에 실제 존재하는 선언 (현행 분석기는 FUNCTION_DECL 외 대부분 누락)
     cxx_own_kinds = Counter((cxx_tu or {}).get("own_kind_counts", {}))
 
     return {
@@ -252,7 +246,7 @@ def aggregate(files: list) -> dict:
         return dict(counter.most_common())
 
     def category_detail(key):
-        """분류별로 진단 건수 / 영향받은 파일 수 / 대표 메시지를 뽑는다."""
+        """분류별 진단 건수 / 영향 파일 수 / 대표 메시지 집계"""
         detail = {}
         for f in files:
             diag = f.get(key)
@@ -424,8 +418,7 @@ def render_markdown(summary: dict, files: list, source_root: str) -> str:
         for k, v in summary["missed_cxx_declarations"].items()
     ) or "| (없음) | 0 | - |"
 
-    # 폴백(TU 로드 실패)과 "파싱은 시작됐지만 오류 폭발" 두 유형을 각각 보여준다.
-    # 전자만 나열하면 오류 건수가 전부 0 으로 찍혀 오해를 부른다.
+    # 폴백(TU 로드 실패)형과 오류 폭발형을 각각 표시 (폴백만 나열 시 오류 건수 전부 0)
     by_errors = sorted(
         (f for f in files if not f["clang_fallback"]),
         key=lambda f: -((f["default_c11"] or {}).get("error_count", 0)),
@@ -478,9 +471,7 @@ def main(argv=None):
     if not source_root.is_dir():
         raise SystemExit(f"source root not found: {source_root}")
 
-    # 비교군: bazel 없이 사람이 손으로 추정한 include 경로. 외부 의존
-    # (gtest / nlohmann / score_cpp)은 여기서 해결되지 않는다 — 이게 2주차
-    # `bazel query` 수급이 필요한 이유 그 자체다.
+    # 비교군: bazel 없이 손으로 추정한 include 경로 (gtest / nlohmann / score_cpp 외부 의존 미해결)
     extra_includes = args.include or [
         "score/language/futurecpp/include",
     ]
@@ -518,8 +509,7 @@ def main(argv=None):
     if args.markdown:
         md = Path(args.markdown)
         md.parent.mkdir(parents=True, exist_ok=True)
-        # 재현 명령에는 저장소 기준 상대 경로를 적는다. 측정할 때 절대 경로를
-        # 넘겼더라도 문서에 로컬 홈 디렉터리가 박히면 남이 그대로 못 쓴다.
+        # 재현 명령에는 저장소 기준 상대 경로 기재 (로컬 절대 경로 노출 방지)
         display_root = args.source_root.replace("\\", "/")
         default_root = parse_args([]).source_root
         if display_root.endswith(default_root):

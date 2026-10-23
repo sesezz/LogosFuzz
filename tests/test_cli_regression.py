@@ -6,9 +6,7 @@ import sys
 
 from logosfuzz.cli import _build_parser, main
 
-# `true` / `false` 는 유닉스 실행 파일이라 Windows 에는 없다. 러너가 argv 리스트를
-# 그대로 subprocess.run 에 넘기므로 셸 빌트인으로도 대체되지 않는다. 현재
-# 인터프리터를 쓰면 어느 플랫폼에서든 같은 종료 코드를 얻는다.
+# `true` / `false` 는 Windows 에 없으므로 현재 인터프리터로 종료 코드 재현 (플랫폼 무관)
 EXIT_OK = [sys.executable, "-c", "raise SystemExit(0)"]
 EXIT_FAIL = [sys.executable, "-c", "raise SystemExit(1)"]
 

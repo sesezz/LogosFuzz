@@ -33,12 +33,10 @@ class LLMClient(ABC):
 
 class OpenAILLMClient(LLMClient):
     """
-    GPT-4o-mini 등 OpenAI 호환 모델 연동.
+    GPT-4o-mini 등 OpenAI 호환 모델 연동
 
-    api_key를 명시하지 않으면 OPENAI_API_KEY 환경변수(.env 로드는 호출자 책임)를 사용한다.
-    openai 패키지(>=1.0, `from openai import OpenAI` 스타일)가 필요하다.
-    openai 패키지는 호출 시점에 import하므로 테스트 클라이언트만 사용할 때는
-    해당 의존성이 없어도 모듈을 import할 수 있다.
+    api_key 미지정 시 OPENAI_API_KEY 환경변수 사용 (.env 로드는 호출자 책임)
+    openai 패키지(>=1.0) 필요, 호출 시점 import 라 테스트 클라이언트만 쓸 때는 미설치 가능
     """
 
     def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.2,

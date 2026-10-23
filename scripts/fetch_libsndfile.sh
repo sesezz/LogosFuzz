@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
-# GENERIC-A: libsndfile 1.2.2 소스 준비 (third_party/ 는 커밋하지 않는다)
+# GENERIC-A: libsndfile 1.2.2 소스 준비 (third_party/ 는 커밋 제외)
 # =====================================================================
 #
-# 범용 대상 libsndfile 은 score-baselibs 와 같은 원칙으로 다룬다. 업스트림 소스는
-# 저장소에 넣지 않고(.gitignore 의 third_party/), 고정 커밋으로 받아 오는 이 스크립트만
-# 둔다. 경로·configure 인자는 targets/libsndfile.json 을 그대로 읽으므로 프로필과
-# 어긋나지 않는다.
+# 업스트림 소스는 고정 커밋으로 수신, 경로·configure 인자는 targets/libsndfile.json 에서 로드
 #
 #   bash scripts/fetch_libsndfile.sh              # clone + checkout + 커밋 확인
 #   bash scripts/fetch_libsndfile.sh --configure  # + 프로필 configure_args 로 cmake
 #   bash scripts/fetch_libsndfile.sh --build      # + sndfile 타깃 빌드(libsndfile.a)
 #
-# 저장소 루트에서 실행한다(프로필의 source_root 가 저장소 루트 기준이다).
-# 리눅스/WSL 전용. 필요한 것: git, python3, (configure/build 시) cmake, clang, ninja 또는 make.
+# 저장소 루트에서 실행 (프로필 source_root 가 저장소 루트 기준)
+# 리눅스/WSL 전용, 필요 도구: git, python3, (configure/build 시) cmake, clang, ninja 또는 make
 set -euo pipefail
 
 PROFILE="targets/libsndfile.json"

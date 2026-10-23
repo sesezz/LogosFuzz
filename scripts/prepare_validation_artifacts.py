@@ -1,13 +1,12 @@
-"""최종 EC2 검증 기록을 표준 JSON 입력으로 변환한다.
+"""최종 EC2 검증 기록을 표준 JSON 입력으로 변환
 
 사용 예:
     python scripts/prepare_validation_artifacts.py \
       --legacy validation-summary-ec2-final.json
 
-원본 최종 보고서를 수정하지 않고, 대상 선정 결과·GEN 메타데이터를 별도
-입력으로 만든 뒤 생성된 SCORE 최종 실행을 표준 validation-summary로
-정규화한다. GEN-03-04 실제 게이트 로그가 없는 경우에는 결과에
-``gen.gate_status=not_run``이 남아 과장된 성공으로 기록되지 않는다.
+원본 보고서는 수정하지 않음, 대상 선정 결과·GEN 메타데이터를 별도 입력으로 분리 후
+SCORE 최종 실행을 표준 validation-summary로 정규화
+GEN-03-04 게이트 로그 부재 시 ``gen.gate_status=not_run`` 기록
 """
 
 from __future__ import annotations
@@ -58,8 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         gate = json.loads(args.gen_gate.read_text(encoding="utf-8"))
         compact = gen.get("real", {})
         compact_by_id = compact if isinstance(compact, dict) else {}
-        # 게이트 결과에는 실행 상태가, 기존 최종 기록에는 생성/수선 시도가
-        # 있으므로 두 기록을 group_id 기준으로 합친다.
+        # 게이트 결과(실행 상태)와 기존 최종 기록(생성/수선 시도)을 group_id 기준으로 병합
         merged = dict(gate)
         merged["model"] = (
             compact.get("model", "") if isinstance(compact, dict) else ""

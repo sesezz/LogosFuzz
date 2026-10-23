@@ -1,12 +1,8 @@
-"""EXT-01-02: 제약조건 문서를 위한 경량 RAG 검색 인덱스.
+"""EXT-01-02: 제약조건 문서용 경량 RAG 검색 인덱스
 
-외부 의존성 없이 동작하는 BM25 희소 검색기를 기본으로 쓴다. 코드 식별자를
-잘 다루기 위해 `snake_case`/`camelCase`를 부분 토큰으로 쪼개고, 한국어 질의를
-영문 제약조건 문서에 연결하기 위한 소규모 동의어 사전을 둔다.
-
-`sentence-transformers`가 설치되어 있으면 `DenseIndex`가 활성화되어 RRF
-(reciprocal rank fusion)로 BM25와 결합된다. 설치되어 있지 않으면 BM25만
-사용하며, 이는 저장소의 다른 모듈(clang optional 패턴)과 같은 방식이다.
+- 기본: 외부 의존성 없는 BM25 희소 검색기
+- `snake_case`/`camelCase` 부분 토큰 분해, 한국어 질의용 동의어 사전
+- `sentence-transformers` 설치 시 `DenseIndex` 를 RRF 로 BM25 와 결합 (미설치 시 BM25 만)
 """
 from __future__ import annotations
 
@@ -66,7 +62,7 @@ def split_identifier(token: str) -> List[str]:
 
 
 def tokenize(text: str) -> List[str]:
-    """식별자 원형과 부분 토큰을 함께 담은 토큰 목록."""
+    """식별자 원형과 부분 토큰을 함께 담은 토큰 목록"""
     tokens: List[str] = []
     for raw in TOKEN_RE.findall(text or ""):
         lowered = raw.lower()
@@ -80,7 +76,7 @@ def tokenize(text: str) -> List[str]:
 
 
 def expand_query(text: str) -> List[str]:
-    """질의 토큰에 한국어 동의어를 덧붙인다."""
+    """질의 토큰에 한국어 동의어 추가"""
     tokens = tokenize(text)
     expanded = list(tokens)
     for token in tokens:
@@ -94,7 +90,7 @@ def expand_query(text: str) -> List[str]:
 
 
 class BM25Index:
-    """Okapi BM25 색인. 직렬화 가능하며 파일로 저장/로드된다."""
+    """Okapi BM25 색인 (직렬화 및 파일 저장/로드 지원)"""
 
     def __init__(self, k1: float = 1.5, b: float = 0.75) -> None:
         self.k1 = k1
@@ -107,9 +103,9 @@ class BM25Index:
 
     # -- 색인 구성 ---------------------------------------------------------
     def add_document(self, document: dict, text: Optional[str] = None) -> int:
-        """문서를 추가하고 doc index를 반환한다.
+        """문서 추가 후 doc index 반환
 
-        `text`를 주지 않으면 document['text']를 색인 대상으로 삼는다.
+        `text` 미지정 시 document['text'] 를 색인
         """
         body = text if text is not None else document.get("text", "")
         tokens = tokenize(body)
@@ -151,7 +147,7 @@ class BM25Index:
 
     def search(self, query: str, top_k: int = 5,
                where: Optional[Dict[str, str]] = None) -> List[dict]:
-        """상위 `top_k` 문서를 [{score, document}] 형태로 반환한다."""
+        """상위 `top_k` 문서를 [{score, document}] 형태로 반환"""
         query_tokens = expand_query(query)
         scored: List[dict] = []
         for index, document in enumerate(self.documents):
@@ -199,7 +195,7 @@ class BM25Index:
 
 
 class DenseIndex:
-    """`sentence-transformers`가 있을 때만 동작하는 선택적 밀집 검색기."""
+    """`sentence-transformers` 설치 시에만 동작하는 선택적 밀집 검색기"""
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
         from sentence_transformers import SentenceTransformer  # 지연 임포트
@@ -239,7 +235,7 @@ class DenseIndex:
 
 def reciprocal_rank_fusion(rankings: Sequence[Sequence[dict]], key: str = "id",
                            k: int = 60, top_k: int = 5) -> List[dict]:
-    """여러 검색기의 순위를 RRF로 합친다."""
+    """여러 검색기의 순위 RRF 결합"""
     fused: Dict[str, dict] = {}
     for ranking in rankings:
         for rank, hit in enumerate(ranking):
@@ -254,7 +250,7 @@ def reciprocal_rank_fusion(rankings: Sequence[Sequence[dict]], key: str = "id",
 
 
 class HybridRetriever:
-    """BM25 + (가능하면) 밀집 검색을 RRF로 결합한다."""
+    """BM25 + (가능 시) 밀집 검색 RRF 결합"""
 
     def __init__(self, bm25: BM25Index, dense: Optional[DenseIndex] = None) -> None:
         self.bm25 = bm25

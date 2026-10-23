@@ -86,14 +86,13 @@ def _mocking_rationale(profile) -> str:
 
 def rule_triage(cluster: CrashCluster, context=None, contract=None,
                 profile=None) -> TriageResult:
-    """결정적 휴리스틱으로 하나의 클러스터를 판별한다.
+    """결정적 휴리스틱 기반 단일 클러스터 판별
 
     Args:
-        cluster: 판별 대상.
+        cluster: 판별 대상
         context: :class:`~logosfuzz.analyze.reachability.ReachabilityContext`
-            (선택). 주어지면 정적으로 증명 가능한 도달 가능성 신호를 점수에
-            반영한다. 불변식 추론이 필요한 사안은 여기서 판정하지 않는다 —
-            그건 ``reachability.render_for_prompt()`` 로 LLM 판별기에 넘긴다.
+            (선택). 정적으로 증명 가능한 도달 가능성 신호만 점수에 반영
+            (불변식 추론은 ``reachability.render_for_prompt()`` 로 LLM 판별기에 위임)
         contract: 에러계약 근거(선택). ``analyze.contracts`` 플러그인이 만든 객체
             (``ErrorContractEvidence``/``CReturnCodeEvidence``/...). 없으면 대표 레코드의
             원문 로그만으로 계산한다 — 스택에서 읽히는 계약 위반은 KB 없이도 증명되기
@@ -148,15 +147,14 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None,
         score += 0.05
         signals.append("reproduced")
 
-    # (4) sanitizer 신뢰도: ASAN 메모리 오류는 오탐이 드물다. 다만 프레임이
-    # 하네스에만 있으면 sanitizer가 확인한 것은 대상 라이브러리가 아니라
-    # 하네스의 메모리 접근이므로 이 보너스를 주지 않는다.
+    # (4) sanitizer 신뢰도: ASAN 메모리 오류는 오탐이 드묾
+    # 단, 프레임이 하네스에만 있으면 대상 라이브러리 검증이 아니므로 보너스 미부여
     if (rep.sanitizer.upper() == "ASAN" and cat in _MEMORY_BUGS
             and has_application_frame(rep)):
         score += 0.05
         signals.append("asan-high-fidelity")
 
-    # (5) 도달 가능성: 이 함수를 실제 제품 코드가 부르는가
+    # (5) 도달 가능성: 실제 제품 코드의 호출 여부
     if context is not None:
         from logosfuzz.analyze.reachability import derive_signals
 
@@ -198,7 +196,7 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None,
             f"사람 검토(HITL)로 확정이 필요하다."
         )
 
-    # 도달 가능성 근거는 HITL 검토자가 가장 먼저 봐야 할 정보이므로 근거문에 남긴다.
+    # 도달 가능성 근거는 HITL 검토 우선 정보이므로 근거문에 기록
     if "harness-only-caller" in signals:
         rationale += (
             " 이 함수는 헤더에 선언돼 있지 않고 대상 트리에서 하네스/테스트 코드만 "
@@ -229,12 +227,12 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None,
 
 
 class RuleBasedTriager:
-    """결정적 규칙 기반 판별기(기본).
+    """결정적 규칙 기반 판별기 (기본)
 
     Args:
-        context_provider: ``cluster -> ReachabilityContext`` 콜러블(선택).
-            ``reachability.SourceReachabilityProvider(대상_소스_루트)`` 를 넣으면
-            호출부 증거를 점수에 반영한다. 없으면 기존 동작 그대로다.
+        context_provider: ``cluster -> ReachabilityContext`` 콜러블 (선택)
+            ``reachability.SourceReachabilityProvider(대상_소스_루트)`` 지정 시
+            호출부 증거를 점수에 반영 (없으면 기존 동작)
         contract_provider: ``cluster -> 에러계약 근거`` 콜러블(선택).
             ``contracts.ContractProvider.for_profile(profile, kb)`` 나
             ``error_contract.KnowledgeBaseContractProvider(kb)`` 를 넣으면 KB 에
@@ -259,7 +257,7 @@ class RuleBasedTriager:
 
 
 def _safe_context(provider, cluster):
-    """컨텍스트 수집 실패가 판별 자체를 막지 않게 감싼다."""
+    """컨텍스트 수집 실패가 판별을 막지 않도록 감싸는 래퍼"""
     if provider is None:
         return None
     try:
@@ -282,8 +280,7 @@ _TRIAGE_SYSTEM = (
     "판단이 모호하면 needs_review로 답한다. 반드시 JSON 하나만 출력한다."
 )
 
-# 도달 가능성 판정을 실제로 시키는 질문. 1단계 검증에서 두 판별기가 똑같이
-# 틀린 이유가 "이 질문을 받은 적이 없어서"였다.
+# 도달 가능성 판정을 명시적으로 요구하는 질문 (1단계 검증 공통 오판 원인 보완)
 _REACHABILITY_QUESTION = """\
 판별 절차 — 아래 순서로 따져라.
   1. 크래시가 난 지점에서 무엇을 읽거나 쓰다 경계를 벗어났는가?
@@ -311,14 +308,13 @@ _REACHABILITY_QUESTION = """\
 
 def build_triage_prompt(cluster: CrashCluster, context=None, contract=None,
                         profile=None) -> str:
-    """클러스터 대표 결함을 LLM 판별용 프롬프트로 직렬화한다.
+    """클러스터 대표 결함의 LLM 판별용 프롬프트 직렬화
 
     Args:
-        cluster: 판별 대상.
+        cluster: 판별 대상
         context: :class:`~logosfuzz.analyze.reachability.ReachabilityContext`
-            (선택). 주어지면 호출부·링키지·결함 라인 소스를 증거로 함께 싣는다.
-            이게 없으면 모델이 볼 수 있는 건 콜스택뿐이라 "ASAN 이 잡았으니
-            정탐"이라는 결론밖에 못 낸다.
+            (선택). 호출부·링키지·결함 라인 소스를 증거로 함께 탑재
+            (없으면 콜스택만으로 판단해 "ASAN 검출 = 정탐" 편향)
     """
     rep = cluster.representative
     frames = "\n".join(f"  #{i} {f.file}:{f.line}" for i, f in enumerate(rep.traceback))

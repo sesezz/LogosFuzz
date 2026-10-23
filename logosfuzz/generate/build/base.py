@@ -116,14 +116,13 @@ class HarnessSpec:
 
 
 class BuildAdapter(Protocol):
-    """빌드 시스템 1종을 감싸는 어댑터.
+    """빌드 시스템 1종을 감싸는 어댑터
 
-    컨트롤러(CTR-06-01)는 이 Protocol 로만 빌드 시스템을 다룬다. "bazel" 같은
-    빌드 시스템 이름이나 bazel 전용 에러 분류를 컨트롤러에 하드코딩하지 않고
-    ``build_system`` 속성과 (있으면) ``classify_build_error`` 로 어댑터에서 받아 온다.
+    컨트롤러(CTR-06-01)는 이 Protocol 로만 빌드 시스템 접근
+    빌드 시스템 이름·에러 분류는 ``build_system`` 속성과 ``classify_build_error`` (선택)로 획득
     """
 
-    #: 이 어댑터가 다루는 빌드 시스템 이름(예: "bazel", "cmake", "prebuilt").
+    #: 이 어댑터가 다루는 빌드 시스템 이름(예: "bazel", "cmake", "prebuilt")
     #: build_summary.json 의 ``build_system`` 필드 값
     build_system: str
 

@@ -466,9 +466,7 @@ function renderGenGroups(groups, container) {
   }
 
   container.innerHTML = groups.map(g => {
-    // 숫자 필드도 innerHTML 로 들어가므로 문자열을 그대로 흘리면 안 된다.
-    // 이 파일의 다른 렌더러(fmtNum)와 같이 Number() 로 강제 변환해서,
-    // 손상된 JSON 의 문자열이 마크업으로 해석되지 않게 한다.
+    // 숫자 필드도 innerHTML 에 들어가므로 Number() 강제 변환 (마크업 주입 방지)
     const generated = genNum(g.generation_attempts, 1);
     const repaired = genNum(g.repair_attempts, 0);
     const rounds = genNum(g.rounds, 1);
@@ -493,10 +491,9 @@ function renderGenGroups(groups, container) {
   }).join("");
 }
 
-/** 숫자로 못 읽히는 값(누락·문자열·NaN)만 기본값으로 떨어뜨린다.
+/** 숫자로 못 읽히는 값(누락·문자열·NaN)만 기본값으로 대체
  *
- *  진짜 0 은 0 으로 남긴다. `summary.py` 의 `_int()` 가 필드 누락을 0 으로
- *  기록하므로, 0 을 1 로 바꾸면 JSON 에 없는 수치를 지어내는 셈이 된다.
+ *  실제 0 은 0 으로 유지 (없는 수치 생성 방지)
  */
 function genNum(value, fallback) {
   const n = Number(value);

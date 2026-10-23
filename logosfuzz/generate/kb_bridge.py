@@ -1,12 +1,10 @@
-"""황다연 고도화 4주차: 지식베이스와 GEN 파이프라인 연결.
+"""황다연 고도화 4주차: 지식베이스와 GEN 파이프라인 연결
 
-3주차까지 추출한 API/제약조건/Bazel 빌드 단위를 하네스 초안,
-BUILD 생성, 자가치유 힌트, 검증 계약으로 한 번에 전달한다.
-계획 단계는 subprocess 없이 동작하고, 실제 빌드는 기존 생성기에 위임한다.
+KB 의 API/제약조건/빌드 단위를 하네스 초안, BUILD 생성, 자가치유 힌트, 검증 계약으로 전달
+(계획 단계는 subprocess 없음, 실제 빌드는 기존 생성기에 위임)
 
-GENERIC-A: 프로필로 만든 비-Bazel(cmake/prebuilt) KB 의 빌드 단위도 받는다.
-이때 ``build_deps`` 는 Bazel 라벨이 아니라 링크할 라이브러리 경로이고, BUILD 생성기
-(``build_harness_from_kb``) 대신 ``generate.build.adapter_for(profile)`` 로 빌드한다.
+GENERIC-A: 비-Bazel(cmake/prebuilt) 빌드 단위도 수용, 이때 ``build_deps`` 는 링크할
+라이브러리 경로이며 빌드는 ``generate.build.adapter_for(profile)`` 담당
 """
 from __future__ import annotations
 
@@ -29,7 +27,7 @@ from .models import HarnessDraft
 
 
 class KnowledgeBridgeError(ValueError):
-    """KB 정보를 GEN 입력으로 바꿀 수 없을 때 발생한다."""
+    """KB 정보를 GEN 입력으로 변환할 수 없을 때 발생"""
 
 
 class ApiNotFoundError(KnowledgeBridgeError):
@@ -101,15 +99,15 @@ def _visible_to_fuzz_package(label: str, visibility: Iterable[str],
 
 
 def _is_bazel_unit(unit: dict) -> bool:
-    """빌드 시스템 값이 없는 예전 KB 단위는 Bazel 로 본다(2주차 스키마)."""
+    """빌드 시스템 값이 없는 KB 단위는 Bazel 로 간주 (2주차 스키마)"""
     return str(unit.get("build_system") or "bazel") == "bazel"
 
 
 class KnowledgeBaseDepsProvider:
-    """KB의 Bazel 소유권/직접 의존성을 BUILD 생성기에 공급한다."""
+    """KB의 Bazel 소유권/직접 의존성을 BUILD 생성기에 공급"""
 
     def __init__(self, kb: KnowledgeBase) -> None:
-        # Bazel 단위만 다룬다. cmake/prebuilt 단위의 build_target 은 라벨이 아니다.
+        # Bazel 단위만 대상 (cmake/prebuilt 단위의 build_target 은 라벨 아님)
         self._units = {
             parse_label(unit["build_target"]).text: unit
             for unit in build_unit_metadata(kb)
@@ -139,7 +137,7 @@ class KnowledgeBaseDepsProvider:
 
 @dataclass(frozen=True)
 class HarnessBuildPlan:
-    """KB 한 건에서 결정된 생성·빌드·검증 공통 입력."""
+    """KB 한 건에서 결정된 생성·빌드·검증 공통 입력"""
 
     api_id: int
     api_name: str
@@ -157,8 +155,8 @@ class HarnessBuildPlan:
     logic_group: str
     language: str
     prompt_context: str
-    #: 빌드 단위의 빌드 시스템 ("bazel" / "cmake" / "prebuilt").
-    #: bazel 이 아니면 ``target_label`` 은 프로필 이름, ``build_deps`` 는 라이브러리 경로다.
+    #: 빌드 단위의 빌드 시스템 ("bazel" / "cmake" / "prebuilt")
+    #: bazel 이 아니면 ``target_label`` 은 프로필 이름, ``build_deps`` 는 라이브러리 경로
     build_system: str = "bazel"
 
     @property
@@ -166,7 +164,7 @@ class HarnessBuildPlan:
         return self.build_system == "bazel"
 
     def repair_knowledge(self) -> Dict[str, str]:
-        """SelfHealLoop.knowledge에 바로 전달할 수 있는 힌트."""
+        """SelfHealLoop.knowledge에 바로 전달 가능한 힌트"""
         if not self.is_bazel:
             return {
                 "target_api": self.signature,
@@ -189,7 +187,7 @@ class HarnessBuildPlan:
         }
 
     def configure_self_heal(self, loop: object) -> object:
-        """KB 힌트를 기존 자가치유 루프에 주입하고 같은 객체를 반환한다."""
+        """KB 힌트를 기존 자가치유 루프에 주입 후 같은 객체 반환"""
         current = getattr(loop, "knowledge", None) or {}
         merged = self.repair_knowledge()
         merged.update({str(key): str(value) for key, value in current.items()})
@@ -246,7 +244,7 @@ def plan_harness(
     target_label: str = "",
     logic_group: str = "",
 ) -> HarnessBuildPlan:
-    """API를 정확히 조회하여 GEN 전체가 공유하는 계획을 만든다."""
+    """API 정확 조회 후 GEN 전체가 공유하는 계획 생성"""
     document = kb.api(api)
     if document is None:
         raise ApiNotFoundError(f"지식베이스에서 API를 찾지 못했다: {api!r}")
@@ -266,7 +264,7 @@ def plan_harness(
     if build_system == "bazel":
         deps = KnowledgeBaseDepsProvider(kb).deps_for(requested)
     else:
-        # cmake/prebuilt: 라이브러리 전체가 단위 1개이고 deps 는 링크할 라이브러리다.
+        # cmake/prebuilt: 라이브러리 전체가 단위 1개, deps 는 링크할 라이브러리
         deps = _unique(unit.get("build_deps", []))
     flags = _unique(
         [*unit.get("compile_flags", []), *document.get("compile_flags", [])]
@@ -322,7 +320,7 @@ def build_harness_from_kb(
     corpus_dir: Path | None = None,
     gen_model: str = "",
 ) -> KnowledgeBuildResult:
-    """KB 기반 BUILD를 생성·빌드하고 성공 시 검증용 artifact까지 만든다."""
+    """KB 기반 BUILD 생성·빌드 및 성공 시 검증용 artifact 생성"""
     plan = plan_harness(kb, api, target_label=target_label, logic_group=logic_group)
     if not plan.is_bazel:
         raise KnowledgeBridgeError(
