@@ -5,8 +5,8 @@ Usage:
   python -m logosfuzz.extract.ast_analyzer --profile targets/libsndfile.json --output out.json
 
 ``--profile`` 이 비-Bazel(cmake/prebuilt) 대상이면 compile_commands.json 의
--I/-isystem/-D/-std 를 clang 인자로 쓰고(:mod:`logosfuzz.extract.compile_db`),
-Bazel 대상이면 기존처럼 ``bazel query`` 그래프를 쓴다. 프로필이 없으면 기존 동작 그대로.
+-I/-isystem/-D/-std 를 clang 인자로 사용(:mod:`logosfuzz.extract.compile_db`),
+Bazel 대상이면 ``bazel query`` 그래프 사용 (프로필 없으면 기존 동작)
 
 This script will use clang Python bindings if available; otherwise falls back to a
 lightweight regex-based extractor (includes, simple function names).
@@ -69,8 +69,8 @@ def clang_args_for_path(path, clang_args=None, language=None):
     suffix.  An explicit ``-x`` or ``-std`` supplied by the caller always wins;
     otherwise we add a safe project default.
 
-    ``language`` 는 프로필의 ``language``(``"c"``/``"cpp"``)다. ``"c"`` 이면 ``.h`` 를
-    C 헤더로 파싱한다(libsndfile 같은 C 라이브러리). ``None`` 이면 기존 동작.
+    ``language``: 프로필의 ``language``(``"c"``/``"cpp"``). ``"c"`` 이면 ``.h`` 를
+    C 헤더로 파싱(libsndfile 등 C 라이브러리), ``None`` 이면 기존 동작
     """
     args = list(clang_args or [])
     suffix = os.path.splitext(str(path))[1].lower()
@@ -301,13 +301,11 @@ def _analysis_files(paths):
 
 
 class ProfileCompileContext:
-    """비-Bazel 프로필의 파일별 clang 인자 공급자.
+    """비-Bazel 프로필의 파일별 clang 인자 공급자
 
-    compile_commands.json 에 항목이 있는 소스는 그 파일의 플래그를 쓰고,
-    항목이 없는 파일(주로 헤더)은 전체 합집합을 쓰되 ``-std`` 는 빼서 파일
-    언어 기본값을 따르게 한다(C 프로젝트의 -std=gnu99 가 .hpp 에 붙지 않도록).
-    프로필의 ``build.include_dirs`` 는 항상 뒤에 붙인다. compile_commands.json 이
-    아직 없으면(configure 전) 경고만 남기고 include_dirs 만으로 진행한다.
+    compile_commands.json 항목이 있는 소스는 해당 파일 플래그, 항목 없는 파일(주로 헤더)은
+    ``-std`` 를 뺀 전체 합집합 사용 (C 프로젝트의 -std=gnu99 가 .hpp 에 붙지 않도록)
+    프로필 ``build.include_dirs`` 는 항상 뒤에 추가, compile_commands.json 부재 시 경고 후 include_dirs 만 사용
     """
 
     def __init__(self, profile):
@@ -329,7 +327,7 @@ class ProfileCompileContext:
         self.include_args = [f"-I{profile.abs(d)}" for d in profile.build.include_dirs]
 
     def files(self):
-        """프로필만 주어졌을 때의 분석 후보: compile_db 소스 + include_dirs."""
+        """프로필만 주어졌을 때의 분석 후보: compile_db 소스 + include_dirs"""
         candidates = [path for path in self.by_file if os.path.exists(path)]
         candidates.extend(
             str(self.profile.abs(d)) for d in self.profile.build.include_dirs
@@ -347,8 +345,8 @@ class ProfileCompileContext:
 def analyze_paths(paths, clang_args=None, bazel_graph=None, profile=None):
     """Analyze paths, applying Bazel compile context when it is available.
 
-    ``profile`` 이 비-Bazel 대상이면 compile_db 플래그를 파일별로 덧붙인다.
-    Bazel 프로필은 ``bazel_graph`` 경로를 그대로 쓰므로 언어 정보만 반영된다.
+    ``profile`` 이 비-Bazel 대상이면 compile_db 플래그를 파일별로 추가,
+    Bazel 프로필은 ``bazel_graph`` 경로 그대로 사용 (언어 정보만 반영)
     """
     language = profile.language if profile is not None else None
     profile_ctx = None
@@ -410,7 +408,7 @@ def main(argv=None):
 
     bazel_graph = None
     if profile is not None and profile.is_bazel and not (args.bazel_workspace or args.bazel_target):
-        # 자동차(Bazel) 프로필은 기존 bazel query 경로로 보낸다.
+        # 자동차(Bazel) 프로필은 기존 bazel query 경로 사용
         args.bazel_workspace = str(profile.abs(profile.build.bazel.workspace))
         args.bazel_target = [profile.build.bazel.target]
     if args.bazel_workspace or args.bazel_target:

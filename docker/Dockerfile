@@ -95,10 +95,6 @@ USER fuzzer
 #   docker run -v logosfuzz-bazel-cache:/bazel ...
 VOLUME ["/bazel"]
 
-# ENTRYPOINT를 두지 않는다: logosfuzz/execute/docker_runner.py가 이미
-# `docker run ... image bash -lc "<cmd>"`로 전체 커맨드를 넘긴다. 여기서
-# ENTRYPOINT ["bash","-lc"]를 같이 선언하면 그 뒤에 넘어온 "bash -lc <cmd>"가
-# entrypoint 인자로 다시 이어붙어(`bash -lc bash -lc "<cmd>"`) stdin 없는
-# 내부 bash 셸 하나만 뜨고 즉시 종료된다 - exit code 0, 크래시 없음으로 위장된
-# 채 컨테이너 안에서 실제로는 아무 것도 실행되지 않는 버그 (재도입 금지)
+# ENTRYPOINT 미선언: docker_runner.py 가 `bash -lc "<cmd>"` 전체 커맨드 전달
+# 선언 시 `bash -lc bash -lc "<cmd>"` 로 중첩돼 아무것도 실행되지 않고 exit 0 (재도입 금지)
 CMD ["bash", "-lc", "bazel --version && echo 'LogosFuzz exec image (Bazel/S-CORE) ready'"]

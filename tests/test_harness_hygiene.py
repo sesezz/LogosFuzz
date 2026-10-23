@@ -1,14 +1,9 @@
-"""GEN-03 하네스 품질 게이트 회귀 테스트.
+"""GEN-03 하네스 품질 게이트 회귀 테스트
 
-여기 있는 테스트는 전부 **실측에서 하네스를 못 쓰게 만들었던 것**을 고정한다.
-
-- 2단계 검증에서 하네스 두 개가 첫 입력에 SEGV 로 죽었다. 원인은 `char **text`
-  자리에 `char *` 를 넘긴 것인데, C 에서 이건 경고라 빌드가 "성공"했다.
-- 4단계 검증에서 LLM 이 헤더를 include 하고도 대상 함수를 다시 선언해
-  `conflicting types` 가 났다. 프롬프트로 금지해도 재발했고, **초안에만**
-  후처리를 걸었더니 자가 치유 라운드에서 되살아났다.
-- SCH 가 언어를 구분하지 않아 C++ 대상이 C 로 컴파일되면서 원인과 동떨어진
-  에러가 떴다.
+실측에서 하네스를 무력화한 사례 고정
+- `char **text` 자리의 `char *` 전달 (C 에서는 경고라 빌드 성공 후 SEGV)
+- 헤더 include 후 대상 함수 재선언으로 `conflicting types` (자가 치유 라운드에서도 재발)
+- 언어 미구분으로 C++ 대상의 C 컴파일
 """
 from __future__ import annotations
 
@@ -53,7 +48,7 @@ def test_extern_prototype_is_removed():
 
 
 def test_definition_with_body_is_kept():
-    """하네스가 만든 보조 함수 정의는 지우면 안 된다."""
+    """하네스가 만든 보조 함수 정의는 유지"""
     source = "int dlt_print_hex_string(char *t) { return 0; }\n"
 
     assert "return 0" in strip_redundant_declarations(source, TARGETS)
@@ -78,7 +73,7 @@ def test_empty_target_list_is_a_noop():
 
 
 # --------------------------------------------------------------------------- #
-# 2. 자가 치유 라운드에도 적용되는가 (초안에만 걸면 소용없다)
+# 2. 자가 치유 라운드 적용 여부
 # --------------------------------------------------------------------------- #
 def _draft(source: str) -> HarnessDraft:
     return HarnessDraft(
@@ -87,9 +82,9 @@ def _draft(source: str) -> HarnessDraft:
 
 
 def test_sanitize_applies_to_repair_rounds():
-    """LLM 이 수정본에 재선언을 다시 넣어도 걷어내야 한다."""
+    """수정본에 다시 들어간 재선언도 제거"""
     bad_decl = "void dlt_print_hex_string(char *t, int n, const uint8_t *p, int s);"
-    # 수정 응답에 재선언이 다시 들어있다. 후처리가 없으면 그대로 컴파일된다.
+    # 수정 응답에 재선언 재포함 (후처리 없으면 그대로 컴파일)
     repaired = f"```c\n{bad_decl}\n// COMPILE_OK\nint LLVMFuzzerTestOneInput(void){{return 0;}}\n```"
     loop = SelfHealLoop(
         compiler=FakeCompiler(),
@@ -152,7 +147,7 @@ def test_strict_warnings_are_applied_to_c(tmp_path):
 
 
 def test_strict_warnings_are_skipped_for_cpp(tmp_path):
-    """C++ 에서는 이미 에러라 붙이면 미지원 플래그 경고만 난다."""
+    """C++ 은 이미 에러이므로 미적용 (미지원 플래그 경고 방지)"""
     compiler = SubprocessCompiler(cc="clang++", workdir=str(tmp_path))
     argv = compiler._build_argv(Path("h.cpp"), Path("h.o"), "cpp")
 

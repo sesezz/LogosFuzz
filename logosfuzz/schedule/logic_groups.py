@@ -1,33 +1,21 @@
-"""SCH-02-01: 상태 기반 Logic Group 추출 + 패키징.
+"""SCH-02-01: 상태 기반 Logic Group 추출 + 패키징
 
-통합 지식베이스(EXT-01-04)에서 "같은 상태를 공유하는 API 묶음"을 뽑아
-`logosfuzz.common.models.LogicGroup` 으로 패키징한다. 이 그룹이 SCH-02-02
-(시너지 우선순위) / SCH-02-03 (자원 할당) / GEN (하네스 생성) /
-EXE-04-03 (타임아웃 산정) 의 공통 작업 단위가 된다.
+통합 지식베이스(EXT-01-04)에서 같은 상태를 공유하는 API 묶음을 추출해
+`logosfuzz.common.models.LogicGroup` 으로 패키징
+SCH-02-02 (시너지 우선순위) / SCH-02-03 (자원 할당) / GEN (하네스 생성) /
+EXE-04-03 (타임아웃 산정) 의 공통 작업 단위
 
-무엇을 "같은 상태"로 보는가
----------------------------
-가장 바깥 경계는 **빌드 단위(Bazel target)** 다. 서로 다른 빌드 타깃의 API는
-같은 타입을 쓰거나 서로 호출하더라도 하나의 퍼징 단위로 합치지 않는다. 빌드
-메타데이터가 없는 기존 KB에서는 소스 파일을 호환 경계로 사용한다.
-
-경계 안의 1순위 기준은 **핸들 타입 공유**다. `uds_open(uds_ctx_t *ctx, ...)` 와
-`uds_read_did(uds_ctx_t *ctx, ...)` 처럼 같은 컨텍스트 구조체를 포인터로
-주고받는 API 들은 같은 상태 머신에 속한다고 본다.
-
-여기서 중요한 건 **프로젝트가 정의한 타입만 센다**는 점이다. `size_t` 나
-`uint8_t` 같은 표준 스칼라 타입으로 묶으면 거의 모든 API 가 한 덩어리가 되어
-그룹이 의미를 잃는다. 지식베이스가 타입 정의 위치를 알고 있으므로
-(`kb.defines_type`) 프로젝트 내부에서 정의된 타입인지 확인할 수 있다.
-
-핸들 타입이 없는 API 는 같은 빌드 단위 안의 호출 관계로 잇고, 그것도 없으면
-같은 빌드 단위끼리 묶는다.
+"같은 상태" 기준
+----------------
+- 최외곽 경계: **빌드 단위(Bazel target)** (빌드 메타데이터 없는 KB는 소스 파일)
+- 1순위: **핸들 타입 공유** (예: `uds_ctx_t *ctx` 를 주고받는 `uds_open` / `uds_read_did`)
+- **프로젝트 정의 타입만** 인정 (`size_t`·`uint8_t` 등 표준 스칼라 제외, `kb.defines_type` 으로 확인)
+- 핸들 타입 없는 API 는 같은 빌드 단위 안의 호출 관계로 연결, 그것도 없으면 빌드 단위끼리 묶음
 
 실시간 신호 결합
 ----------------
-`RealtimeSignal` 문서에 적힌 대로, 규격서/주석에서 추출한 타이밍 제약을
-그룹에 붙여 준다. EXE-04-03 은 그룹의 신호 중 가장 빡빡한 주기를 골라
-입력별 타임아웃을 정하고, 신호가 없으면 기본값으로 폴백한다.
+규격서/주석에서 추출한 타이밍 제약을 그룹에 부착
+EXE-04-03 은 가장 빡빡한 주기로 입력별 타임아웃 산정 (신호 없으면 기본값 폴백)
 
 사용법
 ------
@@ -56,8 +44,8 @@ from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
 GROUPS_VERSION = 1
 
-# 타입 문자열에서 식별자를 전부 꺼낸 뒤, 실제 구조체인지는 지식베이스에 묻는다.
-# `*_t` 같은 이름 규칙에 기대면 `PyObject` 처럼 접미사 없는 typedef 를 놓친다.
+# 타입 문자열의 식별자를 전부 추출한 뒤 실제 구조체 여부는 지식베이스로 확인
+# (`*_t` 이름 규칙 의존 시 `PyObject` 같은 접미사 없는 typedef 누락)
 IDENTIFIER_RE = re.compile(r"\b[A-Za-z_]\w*\b")
 
 _C_KEYWORDS = {
@@ -111,14 +99,14 @@ def _duration_to_ms(value: str, unit: str) -> Optional[float]:
 
 def extract_realtime_signals(texts: Iterable[str], source: str = "",
                              domain: str = "automotive") -> List[RealtimeSignal]:
-    """문서/제약조건 텍스트에서 타이밍 신호를 뽑는다.
+    """문서/제약조건 텍스트의 타이밍 신호 추출
 
     워치독·CAN 주기·UDS P2 같은 키워드는 자동차 도메인 용어라 ``domain`` 이
     ``automotive`` 일 때만 뽑는다(그 외에는 빈 목록). 기본값은 프로필 없이 부르는
     기존 호출부의 동작을 지키려고 ``automotive`` 로 둔다.
 
-    한 문장 안에 신호 종류 키워드와 시간 값이 함께 있어야 인정한다. 문서 전체를
-    한 덩어리로 보면 무관한 숫자가 엮이기 때문이다.
+    한 문장 안에 신호 종류 키워드와 시간 값이 함께 있을 때만 인정
+    (문서 전체를 한 덩어리로 보면 무관한 숫자 결합)
     """
     if domain != "automotive":
         return []
@@ -153,7 +141,7 @@ def extract_realtime_signals(texts: Iterable[str], source: str = "",
 
 
 def _candidate_types(text: str) -> List[str]:
-    """타입 문자열에서 타입 이름 후보(식별자)를 뽑는다."""
+    """타입 문자열의 타입 이름 후보(식별자) 추출"""
     names: List[str] = []
     for name in IDENTIFIER_RE.findall(text or ""):
         if name in _C_KEYWORDS or name in names:
@@ -163,9 +151,9 @@ def _candidate_types(text: str) -> List[str]:
 
 
 def state_types_of(document: dict, kb: KnowledgeBase) -> List[str]:
-    """이 API 가 다루는 '상태 핸들' 타입 목록.
+    """이 API 가 다루는 '상태 핸들' 타입 목록
 
-    포인터로 주고받는, 프로젝트가 정의한 비스칼라 타입만 인정한다.
+    포인터로 주고받는, 프로젝트가 정의한 비스칼라 타입만 인정
     """
     found: List[str] = []
     for param in document.get("params", []):
@@ -174,8 +162,8 @@ def state_types_of(document: dict, kb: KnowledgeBase) -> List[str]:
         for name in _candidate_types(param.get("type", "")):
             if _SCALAR_TYPE_RE.match(name):
                 continue
-            # 구조체를 감싼 타입만 상태 핸들로 본다. `Py_ssize_t *out` 처럼
-            # 스칼라 별칭에 대한 포인터는 결과를 받는 out-param 이지 상태가 아니다.
+            # 구조체를 감싼 타입만 상태 핸들로 인정
+            # (`Py_ssize_t *out` 같은 스칼라 별칭 포인터는 out-param)
             if not kb.defines_struct_type(name):
                 continue
             if name not in found:
@@ -208,7 +196,7 @@ class _UnionFind:
             self._size[ra] += self._size[rb]
 
     def size(self, item) -> int:
-        """``item`` 이 속한 묶음의 크기."""
+        """``item`` 이 속한 묶음의 크기"""
         return self._size[self.find(item)]
 
     def connected(self, a, b) -> bool:
@@ -223,7 +211,7 @@ class _UnionFind:
 
 @dataclass
 class GroupInfo:
-    """패키징 전의 그룹 원본 정보."""
+    """패키징 전의 그룹 원본 정보"""
 
     group_id: str
     name: str
@@ -257,18 +245,9 @@ class GroupInfo:
 GENERIC_TYPE_RATIO = 0.3
 MIN_APIS_FOR_RATIO = 20
 
-# 호출 관계로 병합할 때 허용하는 그룹 최대 크기.
-#
-# 왜 상한이 필요한가 — can-utils(API 675개) 실측
-# ------------------------------------------------
-# 호출 관계를 제한 없이 이으면 전이적 병합으로 API 의 **90%(609/675)** 가
-# `isobusfs_priv` 상태 타입 하나 밑으로 전부 빨려 들어갔다. "상태 기반으로
-# 의미 있게 쪼갠다"는 목적과 정반대로, 사실상 "전체를 한 그룹으로" 만드는
-# 것과 같다. 그룹은 GEN 이 하네스 하나를 만드는 단위이므로, 이 크기면
-# 하네스가 라이브러리 전체를 상대해야 해서 퍼징 단위로 쓸 수 없다.
-#
-# 32는 하네스 하나가 다루기 현실적인 API 수의 상한으로 잡은 값이고, CLI
-# `--max-call-group` 으로 조정할 수 있다.
+# 호출 관계 병합 시 허용하는 그룹 최대 크기
+# can-utils(API 675개) 실측에서 무제한 병합 시 전이적 병합으로 API 90%(609/675)가
+# 한 그룹으로 흡수 → 하네스 하나가 다루기 현실적인 상한 32 (CLI `--max-call-group` 으로 조정)
 MAX_CALL_LINK_GROUP = 32
 
 
@@ -285,11 +264,10 @@ def _group_slug(label: str) -> str:
 
 def generic_types(owners_by_type: Dict[str, List[int]], total_apis: int,
                   ratio: float = GENERIC_TYPE_RATIO) -> List[str]:
-    """너무 흔해서 그룹을 구분하지 못하는 타입을 고른다.
+    """그룹 구분력이 없을 만큼 흔한 타입 선정
 
-    `PyObject` 처럼 거의 모든 API 가 받는 타입으로 묶으면 그룹 하나에 API 가
-    전부 들어가 퍼징 단위로 쓸 수 없다. 검색에서 불용어를 빼는 것과 같은 이유다.
-    API 수가 적을 때는 비율이 요동치므로 적용하지 않는다.
+    `PyObject` 처럼 거의 모든 API 가 받는 타입 제외 (검색 불용어 제거와 같은 원리)
+    API 수가 적을 때는 비율 변동이 커서 미적용
     """
     if total_apis < MIN_APIS_FOR_RATIO:
         return []
@@ -302,13 +280,13 @@ def generic_types(owners_by_type: Dict[str, List[int]], total_apis: int,
 def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
                    ratio: float = GENERIC_TYPE_RATIO,
                    max_group: int = MAX_CALL_LINK_GROUP) -> List[GroupInfo]:
-    """지식베이스에서 상태 기반 로직 그룹을 추출한다.
+    """지식베이스에서 상태 기반 로직 그룹 추출
 
     Args:
-        kb: 통합 지식베이스.
-        link_calls: 호출 관계로 타입 없는 API 를 흡수할지.
-        ratio: 이 비율을 넘게 쓰이는 타입은 그룹을 구분 못 하므로 제외한다.
-        max_group: 호출 관계 병합으로 만들 수 있는 그룹 크기 상한.
+        kb: 통합 지식베이스
+        link_calls: 호출 관계로 타입 없는 API 흡수 여부
+        ratio: 이 비율을 넘게 쓰이는 타입은 그룹 구분력이 없어 제외
+        max_group: 호출 관계 병합으로 만들 수 있는 그룹 크기 상한
     """
     documents = sorted(kb.documents, key=lambda d: d["api_id"])
     if not documents:
@@ -348,18 +326,9 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
                 union.union(first, other)
 
     # 2) 호출 관계 (핸들 타입이 없는 API 를 흡수)
-    #
-    # 여기서 두 가지를 지킨다. 전에는 모든 호출 엣지를 무조건 이어서, 서로 다른
-    # 상태 머신 두 개가 호출 한 번으로 통째로 합쳐지고 그게 전이적으로 번졌다.
-    #   (a) 양쪽 다 상태 타입을 가지면 잇지 않는다 - 각자 이미 자기 상태 머신에
-    #       속해 있다. 호출 관계는 위 docstring 대로 "핸들 타입이 없는 API 를
-    #       흡수"하는 용도다.
-    #   (b) 흡수하더라도 그룹이 max_group 을 넘지 않을 때만 잇는다 - 타입 없는
-    #       유틸 함수가 사슬처럼 이어져 눈덩이가 되는 것을 막는다.
-    #
-    # (a) 는 **그룹 단위**로 따져야 한다. 개별 API 두 개만 비교하면, 타입 없는
-    # 유틸 하나가 A 머신에 흡수된 뒤 그 유틸을 B 머신도 부르는 순간 A 와 B 가
-    # 유틸을 다리 삼아 합쳐진다. can-utils 의 609개 그룹이 정확히 이렇게 생겼다.
+    #   (a) 양쪽 다 상태 타입을 가지면 연결하지 않음 (서로 다른 상태 머신 병합 방지)
+    #   (b) 흡수 후 그룹이 max_group 이하일 때만 연결 (유틸 함수 사슬의 눈덩이 방지)
+    # (a) 는 그룹 단위로 판정 (개별 API 비교 시 공용 유틸을 다리 삼아 A·B 머신 병합)
     if link_calls:
         root_types: Dict[int, set] = {}
         for api_id in by_id:
@@ -374,20 +343,20 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
                 if callee_id is None:
                     continue
                 if _build_unit_boundary(document) != _build_unit_boundary(by_id[callee_id]):
-                    continue  # 빌드/링크 경계를 넘는 하네스 그룹은 만들지 않는다
+                    continue  # 빌드/링크 경계를 넘는 하네스 그룹은 생성하지 않음
                 caller_root, callee_root = union.find(caller_id), union.find(callee_id)
                 if caller_root == callee_root:
                     continue
                 if root_types.get(caller_root) and root_types.get(callee_root):
-                    continue  # (a) 서로 다른 상태 머신 두 개를 잇는 셈이다
+                    continue  # (a) 서로 다른 상태 머신 두 개의 연결
                 if union.size(caller_id) + union.size(callee_id) > max_group:
                     continue  # (b) 눈덩이 방지
                 union.union(caller_id, callee_id)
                 merged = root_types.pop(caller_root, set()) | root_types.pop(callee_root, set())
                 root_types[union.find(caller_id)] = merged
 
-    # 3) 남은 단독 API 는 같은 빌드 단위끼리. 빌드 메타데이터가 없는 KB만
-    #    소스 파일이 경계가 된다.
+    # 3) 남은 단독 API 는 같은 빌드 단위끼리
+    #    (빌드 메타데이터 없는 KB만 소스 파일이 경계)
     clusters = union.groups()
     singleton_by_boundary: Dict[str, int] = {}
     for root, members in list(clusters.items()):
@@ -434,10 +403,8 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
             )
         )
 
-    # group_id 충돌 방지. 단순 카운터로 접미사를 붙이면 `util.c` 두 개와
-    # `util_2.c` 가 함께 있을 때 lg_util_2 가 두 번 나온다. group_id 는
-    # SCH-02-02 가 딕셔너리 키로 쓰므로 중복되면 그룹이 통째로 사라진다.
-    # 이미 배정한 id 전체와 대조해서 빈 이름을 찾는다.
+    # group_id 충돌 방지 (SCH-02-02 의 딕셔너리 키라 중복 시 그룹 소실)
+    # 단순 카운터 접미사는 `util.c` 두 개 + `util_2.c` 에서 lg_util_2 중복 → 배정된 id 전체와 대조
     used: set = set()
     for group in groups:
         base = group.group_id
@@ -460,10 +427,9 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
 
 def attach_realtime_signals(groups: Sequence[GroupInfo], kb: KnowledgeBase,
                             domain: str = "automotive") -> None:
-    """그룹에 속한 API 의 문서/제약조건에서 타이밍 신호를 뽑아 붙인다.
+    """그룹에 속한 API 의 문서/제약조건에서 타이밍 신호 추출·부착
 
-    출처는 API 단위로 기록한다(`uds.c:uds_read_did`). 그룹의 첫 파일로 뭉뚱그리면
-    EXE-04-03 이 타임아웃 근거를 로그에 남길 때 엉뚱한 파일을 가리키게 된다.
+    출처는 API 단위로 기록 (`uds.c:uds_read_did`, EXE-04-03 타임아웃 근거 로그의 정확성 확보)
     """
     by_id = {d["api_id"]: d for d in kb.documents}
     for group in groups:
@@ -490,9 +456,9 @@ def attach_realtime_signals(groups: Sequence[GroupInfo], kb: KnowledgeBase,
 
 
 def attach_priorities(groups: Sequence[GroupInfo], kb: KnowledgeBase) -> bool:
-    """SCH-02-02 시너지 점수를 그룹 우선순위로 붙인다.
+    """SCH-02-02 시너지 점수를 그룹 우선순위로 부착
 
-    SCH 모듈을 임포트할 수 없으면 우선순위 0.0 으로 두고 False 를 반환한다.
+    SCH 모듈 임포트 불가 시 우선순위 0.0 유지 후 False 반환
     """
     try:
         from logosfuzz.schedule.sch_02_02_synergy_scheduler import (
@@ -526,7 +492,7 @@ def build_groups(kb: KnowledgeBase, link_calls: bool = True,
 
 
 def to_logic_groups(groups: Sequence[GroupInfo]) -> List[LogicGroup]:
-    """EXE/GEN 이 소비하는 `logosfuzz.common.models.LogicGroup` 으로 변환."""
+    """EXE/GEN 이 소비하는 `logosfuzz.common.models.LogicGroup` 으로 변환"""
     return [
         LogicGroup(
             group_id=g.group_id,
@@ -540,7 +506,7 @@ def to_logic_groups(groups: Sequence[GroupInfo]) -> List[LogicGroup]:
 
 
 def to_group_map(groups: Sequence[GroupInfo]) -> Dict[str, List[int]]:
-    """SCH-02-02 `rank_logic_groups` 가 받는 {group_id: [api_id]} 형태."""
+    """SCH-02-02 `rank_logic_groups` 가 받는 {group_id: [api_id]} 형태"""
     return {g.group_id: list(g.api_ids) for g in groups}
 
 

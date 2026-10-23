@@ -1,8 +1,7 @@
-"""기존에 생성된 하네스 바이너리에 GEN-03-04 게이트를 실행한다.
+"""기존 하네스 바이너리에 GEN-03-04 게이트 실행
 
-이 스크립트는 LLM을 호출하지 않는다. 이미 컴파일된 HarnessArtifact를
-짧은 smoke/coverage/mock 단계로 검증하고, `gen_validation_summary.json`과
-그룹별 로그를 남긴다.
+LLM 미호출, 컴파일된 HarnessArtifact를 smoke/coverage/mock 단계로 검증
+출력: `gen_validation_summary.json`, 그룹별 로그
 """
 
 from __future__ import annotations

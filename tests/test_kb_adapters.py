@@ -195,7 +195,7 @@ def test_source_type_can_be_overridden(kb):
 
 
 def test_synergy_pipeline_runs_on_real_b_modules(kb):
-    """어댑터 출력이 B의 실제 계산 함수를 그대로 통과해야 한다."""
+    """어댑터 출력의 B 실제 계산 함수 통과 확인"""
     sch = pytest.importorskip("logosfuzz.schedule.sch_02_02_synergy_scheduler")
     apis, constraints = to_synergy_inputs(kb)
 
@@ -206,7 +206,7 @@ def test_synergy_pipeline_runs_on_real_b_modules(kb):
 
 
 def test_call_adjacency_is_actually_scored(kb):
-    """call_seq 에 자기 api_id 가 없으면 이 점수가 항상 0 이 된다 (회귀 방지)."""
+    """call_seq 에 자기 api_id 누락 시 점수 항상 0 (회귀 방지)"""
     sch = pytest.importorskip("logosfuzz.schedule.sch_02_02_synergy_scheduler")
     apis, constraints = to_synergy_inputs(kb)
 
@@ -299,10 +299,7 @@ def test_harness_context_exposes_build_unit_contract(bazel_kb):
 
 
 def test_harness_context_emits_header_name_not_full_path(kb):
-    """`#include "a/b/uds.h"` 는 포함하는 파일 기준으로 해석되어 컴파일이 깨진다.
-
-    하네스는 KB 와 다른 폴더에 생성되므로 헤더 이름 + -I 여야 한다.
-    """
+    """하네스는 KB 와 다른 폴더에 생성되므로 전체 경로 대신 헤더 이름 + -I 필요"""
     block = harness_context(kb, "uds_read_did")
 
     assert 'include: #include "uds.h"' in block
@@ -316,7 +313,7 @@ def test_harness_context_supplies_the_include_directory(kb):
 
 
 def test_harness_context_include_actually_compiles(kb, tmp_path):
-    """제안한 include + 플래그로 실제 컴파일되는지 확인한다."""
+    """제안한 include + 플래그로 실제 컴파일 여부 확인"""
     gcc = shutil.which("gcc") or shutil.which("clang")
     if gcc is None:
         pytest.skip("C 컴파일러가 없음")
@@ -327,7 +324,7 @@ def test_harness_context_include_actually_compiles(kb, tmp_path):
     include_stmt = include_line.split("include: ", 1)[1]
     flags = flag_line.split("compile flags: ", 1)[1].split()
 
-    # 하네스는 KB 소스와 다른 폴더에 생성된다
+    # 하네스는 KB 소스와 다른 폴더에 생성
     harness = tmp_path / "harness.c"
     harness.write_text(
         f"{include_stmt}\nint LLVMFuzzerTestOneInput(const char *d, long s) "
@@ -369,7 +366,7 @@ def test_harness_context_limits_constraints(kb):
 
 
 def test_as_include_path_normalizes_backslashes():
-    # `#include "a\b.h"` 는 C 에서 이스케이프로 해석된다
+    # `#include "a\b.h"` 는 C 에서 이스케이프로 해석
     assert as_include_path(r"examples\uds\uds.h") == "examples/uds/uds.h"
 
 
@@ -420,7 +417,7 @@ def test_undefined_reference_points_at_the_source_file(kb):
 
 
 def test_undefined_reference_for_declared_only_symbol(tmp_path):
-    # 헤더만 색인된 라이브러리: 선언은 있고 정의는 지식베이스에 없다
+    # 헤더만 색인된 라이브러리: 선언만 있고 정의는 지식베이스에 없음
     (tmp_path / "ext.h").write_text("int ext_api(int a);\n", encoding="utf-8")
     kb = KnowledgeBase.build(paths=[str(tmp_path)])
 
@@ -512,9 +509,8 @@ def test_constraints_for_triage_unknown_api(kb):
 
 # -- 코드 경로를 여는 설정 API ----------------------------------------------
 #
-# 2단계 검증(Magma libpng)에서 자동 생성 하네스 커버리지가 823, 사람이 쓴
-# OSS-Fuzz 드라이버가 1454 였다. 차이는 하나였다 - 사람 쪽은 png_set_expand 같은
-# 변환 설정 API 를 켜서 디코딩 코드의 큰 덩어리를 연다.
+# png_set_expand 등 변환 설정 API 활성화로 디코딩 코드 경로 확장
+# (Magma libpng 커버리지: 자동 하네스 823 vs OSS-Fuzz 드라이버 1454)
 
 CONFIG_HEADER = """
 #ifndef LIB_H
@@ -565,14 +561,14 @@ def test_configuration_apis_finds_path_opening_setters(config_kb):
 
 
 def test_configuration_apis_excludes_the_main_entry_point(config_kb):
-    """`dec_open` 은 설정이 아니라 진입점이다."""
+    """`dec_open` 은 설정 API 가 아닌 진입점"""
     names = [a["function"] for a in configuration_apis(config_kb, "dec_ctx_t")]
 
     assert "dec_open" not in names
 
 
 def test_configuration_apis_excludes_private_header_declarations(config_kb):
-    """비공개 헤더(libpriv.h)에만 선언된 내부 헬퍼는 제외한다."""
+    """비공개 헤더(libpriv.h)에만 선언된 내부 헬퍼 제외"""
     names = [a["function"] for a in configuration_apis(config_kb, "dec_ctx_t")]
 
     assert "dec_internal_set_state" not in names
@@ -585,7 +581,7 @@ def test_configuration_apis_excludes_static_functions(config_kb):
 
 
 def test_configuration_apis_needs_the_handle_as_first_parameter(config_kb):
-    """다른 핸들 타입을 물으면 아무것도 나오면 안 된다."""
+    """다른 핸들 타입 질의 시 빈 결과"""
     assert configuration_apis(config_kb, "other_ctx_t") == []
 
 

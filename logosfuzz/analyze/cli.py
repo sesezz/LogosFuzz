@@ -64,12 +64,10 @@ def _clusters_from_inputs(inputs: list[str], depth: int) -> tuple[list[CrashClus
 def _triager_for_args(
     args: argparse.Namespace,
 ) -> tuple[RuleBasedTriager | LLMTriager, SourceReachabilityProvider | None]:
-    """CLI 옵션에 따라 도달 가능성 증거를 주입한 판별기를 만든다.
+    """CLI 옵션에 따른 도달 가능성 증거 주입 판별기 생성
 
-    ``--source-root``를 주지 않으면 기존 규칙 기반 동작을 그대로 유지한다.
-    소스 루트를 지정한 경우에만 ANA-05-01이 대상 함수의 정의, 공개 헤더,
-    프로덕션/하네스 호출부를 수집한다. 하네스 디렉터리는 선택 사항이라,
-    크래시 콜스택의 하네스 소스까지 연결할 때만 지정하면 된다.
+    ``--source-root`` 미지정 시 기존 규칙 기반 동작 유지
+    지정 시 대상 함수 정의·공개 헤더·프로덕션/하네스 호출부 수집 (하네스 디렉터리는 선택)
     """
     provider = None
     if getattr(args, "source_root", None):
@@ -248,12 +246,12 @@ def _print_gate(approvals: dict, verified: list) -> None:
 
 
 def _reachability_dict(provider, cluster: CrashCluster) -> dict | None:
-    """판별 결과에 소스 근거를 보존한다(ANA/JSON 소비용)."""
+    """판별 결과에 소스 근거 보존 (ANA/JSON 소비용)"""
     if provider is None:
         return None
     try:
         return provider(cluster).to_dict()
-    except Exception as exc:  # 분석 실패가 판별 전체를 막지 않도록 한다.
+    except Exception as exc:  # 분석 실패가 판별 전체를 막지 않도록 처리
         return {"error": f"reachability analysis failed: {exc}"}
 
 

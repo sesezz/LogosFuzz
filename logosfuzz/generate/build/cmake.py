@@ -110,7 +110,7 @@ def _coverage_flags() -> List[str]:
 class CMakeAdapter:
     """CMake 대상용 빌드 어댑터. ``BuildAdapter`` 계약(emit/build/remove)을 따른다."""
 
-    #: BuildAdapter Protocol 의 build_system (build_summary.json 에 그대로 기록된다).
+    #: BuildAdapter Protocol 의 build_system (build_summary.json 에 그대로 기록)
     build_system = "cmake"
 
     def __init__(

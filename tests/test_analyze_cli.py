@@ -1,4 +1,4 @@
-"""ANA CLI의 도달 가능성 증거 연결 회귀 테스트."""
+"""ANA CLI의 도달 가능성 증거 연결 회귀 테스트"""
 from __future__ import annotations
 
 import json

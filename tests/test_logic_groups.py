@@ -275,10 +275,9 @@ def test_group_ids_are_unique(kb):
 
 
 def test_group_ids_stay_unique_when_the_suffix_itself_collides(tmp_path):
-    """`util.c` 두 개 + `util_2.c` -> lg_util_2 가 두 번 나오면 안 된다.
+    """`util.c` 두 개 + `util_2.c` -> lg_util_2 중복 금지
 
-    group_id 는 SCH-02-02 가 딕셔너리 키로 쓰므로 중복되면 그룹이 통째로
-    사라지고, 그 API 들이 퍼징 대상에서 빠진다.
+    group_id 는 SCH-02-02 의 딕셔너리 키라 중복 시 그룹 소실 및 퍼징 대상 누락
     """
     for folder, func in (("a", "a1"), ("b", "b1")):
         (tmp_path / folder).mkdir()
@@ -374,14 +373,14 @@ def test_priority_is_zero_when_disabled(kb):
 
 
 def test_timeout_manager_uses_the_extracted_signal(kb):
-    """실시간 신호가 붙으면 EXE-04-03 이 기본값 대신 동적 산정을 쓴다."""
+    """실시간 신호 부착 시 EXE-04-03 이 기본값 대신 동적 산정 사용"""
     from logosfuzz.execute.timeout_manager import TimeoutManager
 
     group = next(g for g in to_logic_groups(build_groups(kb)) if g.realtime_signals)
     plan = TimeoutManager().resolve(group)
 
     assert plan.per_input_source.value == "dynamic"
-    assert plan.per_input_timeout_ms < 1000       # 기본값보다 빡빡해야 한다
+    assert plan.per_input_timeout_ms < 1000       # 기본값보다 빡빡해야 함
     assert "uds_p2" in plan.rationale
 
 
@@ -449,10 +448,8 @@ def test_stats_reports_grouping_basis(kb):
 
 # -- 호출 관계 병합 범위 ----------------------------------------------------
 #
-# can-utils(API 675개) 실측에서 호출 관계를 제한 없이 이었더니 전이적 병합으로
-# API 의 90%(609/675)가 상태 타입 하나 밑으로 전부 빨려 들어갔다. 그룹은 GEN 이
-# 하네스 하나를 만드는 단위라, 이 크기면 퍼징 단위로 쓸 수 없다. 아래 테스트가
-# 그 병합 범위를 고정한다.
+# can-utils(API 675개) 실측에서 무제한 호출 관계 병합 시 API 90%(609/675)가
+# 한 그룹으로 흡수된 문제의 병합 범위 고정
 
 TWO_MACHINES_HEADER = """
 #ifndef TWO_H
@@ -497,14 +494,14 @@ def two_machines_kb(tmp_path):
 
 
 def test_call_edge_does_not_merge_two_state_machines(two_machines_kb):
-    """양쪽 다 상태 타입을 가지면 호출 관계로 잇지 않는다."""
+    """양쪽 다 상태 타입을 가지면 호출 관계로 연결하지 않음"""
     groups = extract_groups(two_machines_kb)
 
     assert _group_of(groups, "a_step") is not _group_of(groups, "b_open")
 
 
 def test_state_machine_members_stay_together(two_machines_kb):
-    """같은 핸들 타입을 쓰는 API 는 여전히 한 그룹이다."""
+    """같은 핸들 타입을 쓰는 API 는 여전히 한 그룹"""
     groups = extract_groups(two_machines_kb)
 
     assert _group_of(groups, "a_open") is _group_of(groups, "a_step")
@@ -512,7 +509,7 @@ def test_state_machine_members_stay_together(two_machines_kb):
 
 
 def test_typeless_helper_is_absorbed_by_a_caller(two_machines_kb):
-    """핸들 타입이 없는 유틸은 호출 관계로 흡수된다(원래 의도)."""
+    """핸들 타입이 없는 유틸은 호출 관계로 흡수 (원래 의도)"""
     groups = extract_groups(two_machines_kb)
     helper_group = _group_of(groups, "shared_util")
 
@@ -520,7 +517,7 @@ def test_typeless_helper_is_absorbed_by_a_caller(two_machines_kb):
 
 
 def test_max_group_blocks_call_link_merging(two_machines_kb):
-    """상한을 1로 두면 호출 관계 병합이 아예 일어나지 않는다."""
+    """상한 1이면 호출 관계 병합 미발생"""
     groups = extract_groups(two_machines_kb, max_group=1)
 
     assert _group_of(groups, "shared_util").api_names == ["shared_util"]
