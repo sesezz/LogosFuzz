@@ -10,7 +10,7 @@ LLM이 생성한 퍼징 하네스가 컴파일에 실패하면, **컴파일 에�
 |---|---|
 | `models.py` | `HarnessDraft`, `CompileResult`, `Diagnostic`(+로그 파서), `HealRound`, `GenerateReport`, `HealOutcome` |
 | `compiler.py` | `Compiler` 인터페이스 + `SubprocessCompiler`(clang/gcc) + `FakeCompiler`(테스트) |
-| `llm.py` | `LLMClient` 인터페이스 + `OpenAILLMClient`(GPT-4o-mini 자리) + `Scripted/FnLLMClient`, 코드 추출, `RepairPromptBuilder` |
+| `llm.py` | `LLMClient` 인터페이스 + `OpenAILLMClient`(기본 GPT-4o) + `Scripted/FnLLMClient`, 코드 추출, `RepairPromptBuilder` |
 | `selfheal.py` | **`SelfHealLoop`** — 핵심 재시도 루프 + `summarize` |
 | `cli.py` | `logosfuzz generate` 명령 |
 | `demo.py` | 3개 시나리오 시연 (`python -m logosfuzz.generate.demo`) |
@@ -46,7 +46,7 @@ from logosfuzz.control.hitl import HITLManager
 
 loop = SelfHealLoop(
     compiler=SubprocessCompiler(cc="clang", include_dirs=["/path/inc"]),
-    llm=OpenAILLMClient("gpt-4o-mini"),
+    llm=OpenAILLMClient(),  # 기본 gpt-4o; LOGOSFUZZ_GEN_MODEL로 변경 가능
     max_round=3,
     hitl=HITLManager.create(),   # 실패 시 사람 검토로 에스컬레이션(선택)
 )
@@ -63,7 +63,7 @@ python -m logosfuzz.generate.cli generate --demo --max-round 3 --project dlt-dae
 ## 연결 지점(TODO)
 
 - `OpenAILLMClient.complete()` 에 실제 openai 호출 연결(현재 골격)
-- `SubprocessCompiler` 플래그를 대상 프로젝트 `compile_commands.json`(bear, EXT-01-03)과 연동
+- `SubprocessCompiler` 플래그를 Bazel 타깃 정보(2주차 `extract/bazel_query.py`)와 연동
 - 입력 초안 공급: GEN-03-01 초안 생성기 → `run_many([draft, ...])`
 - `RepairPromptBuilder.knowledge` 에 RAG 지식베이스(EXT-01-02) 힌트 주입
 - GEN-03-03 Mocking 삽입 단계와 파이프라인 연결

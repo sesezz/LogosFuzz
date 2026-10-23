@@ -53,6 +53,7 @@ class SessionSummary:
             "groups": [
                 {
                     "group": g.group,
+                    "status": g.status,
                     "exit_code": g.exit_code,
                     "timed_out": g.timed_out,
                     "crashed": g.crashed,
@@ -61,6 +62,8 @@ class SessionSummary:
                     "execs": g.stats.execs,
                     "exec_per_sec": g.stats.exec_per_sec,
                     "coverage": g.stats.coverage,
+                    "crash_count": len(g.crashes),
+                    "sanitizer_count": len(g.sanitizer_findings),
                     "crashes": [str(p) for p in g.crashes],
                     "sanitizer_findings": [f.to_dict() for f in g.sanitizer_findings],
                     "coverage_report": g.coverage.to_dict()

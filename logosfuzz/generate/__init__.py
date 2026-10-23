@@ -12,7 +12,7 @@ GEN (Generate) 계층 - LLM 기반 퍼징 하네스 자동 생성.
     from logosfuzz.generate.compiler import SubprocessCompiler
     from logosfuzz.generate.llm import OpenAILLMClient
 
-    loop = SelfHealLoop(compiler=SubprocessCompiler(), llm=OpenAILLMClient("gpt-4o-mini"),
+    loop = SelfHealLoop(compiler=SubprocessCompiler(), llm=OpenAILLMClient(),
                         max_round=3, hitl=hitl_manager)
     report = loop.run(draft)
 """

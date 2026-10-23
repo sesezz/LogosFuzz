@@ -169,6 +169,32 @@ def test_run_group_streams_and_returns(tmp_path):
     assert result.stats.exec_per_sec == 512
     assert result.stats.coverage == 231
     assert result.timed_out is False
+    assert result.status == "passed"
+
+
+def test_run_group_status_distinguishes_timeout_and_crash(tmp_path):
+    cfg = _config(tmp_path)
+    grp = _make_harness(cfg, "grp-status")
+
+    def timeout_executor(argv, timeout, on_line):
+        return ProcResult(exit_code=-15, timed_out=True)
+
+    timeout_result = DockerIsolationRunner(cfg, executor=timeout_executor).run_group(grp)
+    assert timeout_result.status == "timeout"
+
+    def crash_executor(argv, timeout, on_line):
+        on_line("#1024 pulse cov: 231 ft: 5 exec/s: 512")
+        return ProcResult(exit_code=1, timed_out=False)
+
+    crash_result = DockerIsolationRunner(cfg, executor=crash_executor).run_group(grp)
+    assert crash_result.status == "crashed"
+
+    # 실행 횟수 0 의 비정상 종료는 크래시가 아닌 시작 실패
+    def start_fail_executor(argv, timeout, on_line):
+        return ProcResult(exit_code=1, timed_out=False)
+
+    start_fail_result = DockerIsolationRunner(cfg, executor=start_fail_executor).run_group(grp)
+    assert start_fail_result.status == "failed"
 
 
 def test_run_group_saves_stdout_and_stderr_logs(tmp_path):

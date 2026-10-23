@@ -5,7 +5,7 @@ GEN-03 하네스 생성 - LLM 클라이언트 & 리페어 프롬프트
 자가 치유 루프(GEN-03-02)가 컴파일 에러를 LLM에 되먹여 소스를 수정할 때 사용한다.
 
 - LLMClient       : 인터페이스(complete)
-- OpenAILLMClient : GPT-4o-mini 등 OpenAI 호환 모델 연동 (openai>=1.0 클라이언트 사용)
+- OpenAILLMClient : GPT-4o 등 OpenAI 호환 모델 연동 (openai>=1.0 클라이언트 사용)
 - ScriptedLLMClient / FnLLMClient : 테스트/데모용
 - RepairPromptBuilder : 컴파일 로그 기반 수정 프롬프트 생성
 - extract_code    : LLM 응답에서 코드 블록만 추출
@@ -18,6 +18,17 @@ from abc import ABC, abstractmethod
 from typing import Callable, Dict, List, Optional
 
 from .models import CompileResult, HarnessDraft
+
+
+DEFAULT_GEN_MODEL = "gpt-4o"
+
+
+def default_gen_model() -> str:
+    """GEN 사용 모델 결정 (기본 gpt-4o, ``LOGOSFUZZ_GEN_MODEL`` 로 변경 가능)
+
+    검증 결과 같은 컨텍스트에서 gpt-4o 가 gpt-4o-mini 보다 컴파일 성공률·수정 라운드 수 안정
+    """
+    return os.environ.get("LOGOSFUZZ_GEN_MODEL", DEFAULT_GEN_MODEL).strip() or DEFAULT_GEN_MODEL
 
 
 # --------------------------------------------------------------------------- #
@@ -33,16 +44,16 @@ class LLMClient(ABC):
 
 class OpenAILLMClient(LLMClient):
     """
-    GPT-4o-mini 등 OpenAI 호환 모델 연동
+    GPT-4o 등 OpenAI 호환 모델 연동
 
     api_key 미지정 시 OPENAI_API_KEY 환경변수 사용 (.env 로드는 호출자 책임)
     openai 패키지(>=1.0) 필요, 호출 시점 import 라 테스트 클라이언트만 쓸 때는 미설치 가능
     """
 
-    def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.2,
+    def __init__(self, model: Optional[str] = None, temperature: float = 0.2,
                  api_key: Optional[str] = None, base_url: Optional[str] = None,
                  max_retries: int = 2, max_tokens: int = 1500) -> None:
-        self.model = model
+        self.model = model or default_gen_model()
         self.temperature = temperature
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self.base_url = base_url
