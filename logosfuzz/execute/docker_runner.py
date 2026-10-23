@@ -98,6 +98,17 @@ class GroupResult:
             and not self.failed_to_start
         )
 
+    @property
+    def status(self) -> str:
+        """공유 결과 JSON 용 단일 실행 상태 (timeout·crashed·failed·passed)"""
+        if self.timed_out:
+            return "timeout"
+        if self.crashed:
+            return "crashed"
+        if self.failed_to_start or self.exit_code not in (0, None):
+            return "failed"
+        return "passed"
+
 
 def _default_executor(argv: list, timeout: float, on_line: OnLine) -> ProcResult:
     """subprocess 기반 기본 실행기.

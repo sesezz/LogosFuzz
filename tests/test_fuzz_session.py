@@ -49,6 +49,10 @@ def test_session_runs_all_groups_and_collects_crash(tmp_path):
     saved = json.loads((cfg.output_dir / "fuzz_summary.json").read_text())
     assert saved["total_crashes"] == 1
     assert saved["total_groups"] == 2
+    assert saved["groups"][0]["status"] == "passed"
+    assert saved["groups"][1]["status"] == "crashed"
+    assert "execs" in saved["groups"][0]
+    assert saved["groups"][1]["crash_count"] == 1
     # crashes/grpB 아래 크래시 보존 여부
     assert (cfg.crashes_dir / "grpB").exists()
 

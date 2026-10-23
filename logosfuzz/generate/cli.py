@@ -17,7 +17,7 @@ import sys
 from typing import List, Optional
 
 from .compiler import FakeCompiler, SubprocessCompiler
-from .llm import OpenAILLMClient, ScriptedLLMClient
+from .llm import OpenAILLMClient, ScriptedLLMClient, default_gen_model
 from .models import HarnessDraft, HealRound
 from .selfheal import SelfHealLoop, summarize
 
@@ -94,7 +94,8 @@ def _cmd_generate(args: argparse.Namespace) -> int:
 
 def register(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = subparsers.add_parser("generate", help="LLM 하네스 생성 + 자가 치유 (GEN-03)")
-    p.add_argument("--model", default="gpt-4o-mini", help="LLM 모델명")
+    p.add_argument("--model", default=default_gen_model(),
+                   help="LLM 모델명 (기본: gpt-4o, LOGOSFUZZ_GEN_MODEL로 변경 가능)")
     p.add_argument("--max-round", type=int, default=3, help="자가 치유 최대 반복 횟수")
     p.add_argument("--project", help="프로젝트명")
     p.add_argument("--cc", default="clang", help="컴파일러 실행 파일")
