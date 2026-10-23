@@ -166,7 +166,7 @@ def _capture_args(monkeypatch):
 def test_c_profile_parses_h_as_c():
     assert clang_args_for_path("demo.h", language="c")[:3] == ["-x", "c", "-std=c11"]
     assert clang_args_for_path("demo.hpp", language="c")[:3] == ["-x", "c++", "-std=c++17"]
-    # 언어를 주지 않으면 기존(S-CORE) 규칙 그대로
+    # 언어 미지정 시 기존(S-CORE) 규칙 그대로
     assert clang_args_for_path("demo.h")[:3] == ["-x", "c++", "-std=c++17"]
 
 
@@ -182,7 +182,7 @@ def test_profile_compile_db_flags_reach_clang(tmp_path, monkeypatch):
     assert "-DDEMO_FEATURE" in src_args
     assert f"-I{os.path.normpath(str(root / 'include'))}" in src_args
     assert "-std=gnu99" in src_args
-    # 항목 없는 헤더는 합집합 플래그를 쓰되 -std 는 언어 기본값에 맡긴다
+    # 항목 없는 헤더는 합집합 플래그 사용, -std 는 언어 기본값에 위임
     hdr_args, _ = calls["demo.h"]
     assert "-DDEMO_FEATURE" in hdr_args
     assert not any(a.startswith("-std=") for a in hdr_args)
@@ -238,7 +238,7 @@ def test_no_profile_keeps_previous_arguments(tmp_path, monkeypatch):
 
     ast_analyzer.analyze_paths([str(source)], clang_args=["-DX"])
 
-    # 프로필이 없으면 language 인자도 넘기지 않는다(기존 호출 형태 유지)
+    # 프로필 없으면 language 인자도 미전달 (기존 호출 형태 유지)
     assert seen == [(["-DX"], {})]
 
 

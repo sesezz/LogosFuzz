@@ -1,27 +1,10 @@
-"""ANA-05-04: 다중 프레임 기반 크래시 시그니처 생성.
+"""ANA-05-04: 다중 프레임 기반 크래시 시그니처 생성
 
-배경
-----
-EXE-04-02는 "결함유형_파일명_줄번호" 형태의 **1-프레임 기본 시그니처**를 만든다
-(예: ``use-after-free_uds_c_73``). EXE-04-02 개발보고서는 "정교한 다중 프레임
-해싱과 중복 병합은 ANA-05-04의 책임으로 남긴다"고 명시한다.
+EXE-04-02의 1-프레임 기본 시그니처(예: ``use-after-free_uds_c_73``) 대신
+상위 N개 애플리케이션 프레임 결합 시그니처 사용 (과분리·과병합 방지)
+런타임/할당자/퍼저 하네스 프레임은 제외
 
-1-프레임만 쓰면 다음 문제가 생긴다.
-- **과분리(over-split)**: 같은 버그가 서로 다른 경로(호출처)로 도달하면, 최상단
-  프레임이 얕은 래퍼/인라인 차이로 달라져 별개 버그처럼 흩어진다.
-- **과병합(under-merge)**: 서로 다른 버그가 우연히 같은 파일·줄에서 최종
-  크래시하면(공용 유틸 함수 등) 하나로 합쳐진다.
-
-그래서 업계 표준(ClusterFuzz, AFL 계열)처럼 **상위 N개 애플리케이션 프레임**을
-결합해 시그니처를 만든다. 런타임/할당자/퍼저 하네스 프레임은 버그 정체성과
-무관한 잡음이므로 걸러낸다.
-
-설계 파라미터 근거
-------------------
-- ``depth`` 기본값 **3**: ClusterFuzz의 스택 기반 중복 판정이 상위 소수 프레임을
-  쓰는 관례를 따랐다. 1은 과분리, 너무 깊으면(전체 스택) 사소한 하단 차이로
-  과분리된다. 자동차 오픈소스 콜스택(dlt-daemon 등)에서 2~3 프레임이면 결함
-  지점과 직접 호출자를 포착하기에 충분하다는 판단. 값은 CLI로 조정 가능하다.
+- ``depth`` 기본값 3 (CLI로 조정 가능)
 """
 
 from __future__ import annotations
@@ -31,11 +14,10 @@ import hashlib
 from logosfuzz.analyze.models import CrashRecord, Frame
 
 # --------------------------------------------------------------------------- #
-# 프레임 분류 — 어떤 프레임이 "버그 정체성"에 기여하는가
+# 프레임 분류
 # --------------------------------------------------------------------------- #
 
-# sanitizer 런타임 / 할당자 / 퍼저 드라이버 프레임: 모든 크래시에 공통으로 끼는
-# 잡음이므로 시그니처에서 제외한다. (경로/파일명 부분 문자열로 판정)
+# sanitizer 런타임 / 할당자 / 퍼저 드라이버 프레임: 시그니처에서 제외 (경로/파일명 부분 문자열로 판정)
 _RUNTIME_MARKERS = (
     "compiler-rt",
     "/asan_",
@@ -61,43 +43,38 @@ _RUNTIME_MARKERS = (
     "libstdc++",
 )
 
-# 퍼징 하네스 프레임: 버그가 애플리케이션 코드에 있는지 판단할 때 필요하므로
-# 별도로 식별한다. (하네스만 등장하면 하네스 자체 문제일 수 있음 → 오탐 신호)
+# 퍼징 하네스 프레임: 별도 식별 (하네스만 등장 시 오탐 신호)
 _HARNESS_MARKERS = (
     "harness",
     "llvmfuzzertestoneinput",
     "fuzz_target",
     "fuzzer_test",
-    # GEN-03-01 산출물은 보통 ``*_generated.c(pp)`` 또는 ``/gen/`` 아래에
-    # 저장된다. 이 경로는 대상 라이브러리와 분리된 하네스 코드이므로
-    # 대상 프레임으로 세면 ANA-05-01이 하네스 자체 버그를 정탐으로 올린다.
+    # GEN-03-01 산출물(``*_generated.c(pp)`` 또는 ``/gen/`` 아래)은 대상과 분리된 하네스 코드
+    # 대상 프레임으로 세면 ANA-05-01이 하네스 자체 버그를 정탐으로 판정
     "_generated.",
     "/gen/",
 )
 
 
 def is_runtime_frame(frame: Frame) -> bool:
-    """sanitizer/할당자/퍼저 런타임 프레임이면 True(시그니처에서 제외 대상)."""
+    """sanitizer/할당자/퍼저 런타임 프레임 여부 (시그니처 제외 대상)"""
     text = frame.file.replace("\\", "/").lower()
     return any(m in text for m in _RUNTIME_MARKERS)
 
 
 def is_harness_frame(frame: Frame) -> bool:
-    """퍼징 하네스 코드 프레임이면 True."""
+    """퍼징 하네스 코드 프레임 여부"""
     text = frame.file.replace("\\", "/").lower()
     return any(m in text for m in _HARNESS_MARKERS)
 
 
 def application_frames(record: CrashRecord) -> list[Frame]:
-    """런타임 프레임을 제거하고, 애플리케이션(+하네스) 프레임만 상단 순서로 반환."""
+    """런타임 프레임 제거 후 애플리케이션(+하네스) 프레임만 상단 순서로 반환"""
     return [f for f in record.traceback if not is_runtime_frame(f)]
 
 
 def has_application_frame(record: CrashRecord) -> bool:
-    """하네스가 아닌 실제 대상 라이브러리 코드 프레임이 하나라도 있으면 True.
-
-    정/오탐 판별(ANA-05-01)에서 "버그가 대상 코드에 있는가"를 판단하는 신호.
-    """
+    """대상 라이브러리 코드 프레임 존재 여부 (ANA-05-01 판별 신호)"""
     return any(
         (not is_runtime_frame(f)) and (not is_harness_frame(f))
         for f in record.traceback
@@ -105,38 +82,17 @@ def has_application_frame(record: CrashRecord) -> bool:
 
 
 def _normalize_token(frame: Frame) -> str:
-    """프레임을 시그니처 토큰(파일명:줄)으로 정규화.
-
-    경로 앞부분(빌드 머신마다 다른 ``/src/...`` 등)은 버리고 파일명만 남겨
-    환경 독립적으로 만든다.
-    """
+    """프레임의 시그니처 토큰(파일명:줄) 정규화 (경로 앞부분 제거)"""
     return f"{frame.basename}:{frame.line}"
 
 
 def collapse_repeated_frames(frames: list[Frame]) -> list[Frame]:
-    """정규화 후 같아지는 **연속** 프레임을 하나로 합친다.
+    """정규화 후 동일한 연속 프레임 병합
 
-    두 상황에서 필요하다.
+    1. UBSan 헤더 줄과 ``#0`` 프레임의 같은 위치 중복 제거
+    2. 재귀 호출로 쌓인 동일 프레임 접기 (과분리 방지)
 
-    1. **UBSan** 진단은 헤더 줄과 스택 프레임 ``#0`` 이 같은 위치를 가리킨다.
-       경로 접두사만 달라서(``score/json/json.cc`` vs
-       ``/proc/self/cwd/score/json/json.cc``) 전체 경로로는 다른 프레임처럼
-       보이지만, 파일명:줄로 정규화하면 같은 한 지점이다. 합치지 않으면
-       시그니처 depth 세 칸 중 한 칸을 중복이 먹어, 남는 실질 정보가 줄고
-       서로 다른 버그가 같은 시그니처로 묶이는 과병합 위험이 커진다.
-
-       실제 출력(tests/fixtures/sanitizer_logs/ubsan_signed_overflow.txt)에서
-       확인한 결과::
-
-           integer-overflow@json.cc:38|json.cc:38|json_fuzzer.cc:10
-                            ^^^^^^^^^^^^^^^^^^^^ 같은 지점이 두 번
-
-    2. **재귀 호출**은 같은 파일:줄이 연속으로 쌓인다. 재귀 깊이는 입력에
-       따라 달라지므로, 합치지 않으면 같은 버그가 깊이별로 흩어진다(과분리).
-       ClusterFuzz 계열이 재귀를 접는 것과 같은 이유다.
-
-    연속된 것만 합친다. 떨어져 있는 같은 위치는 서로 다른 호출 경로를 거쳐
-    다시 도달한 것이므로 버그 정체성에 기여한다.
+    비연속 동일 위치는 다른 호출 경로이므로 유지
     """
     collapsed: list[Frame] = []
     previous_token: str | None = None
@@ -150,12 +106,10 @@ def collapse_repeated_frames(frames: list[Frame]) -> list[Frame]:
 
 
 def signature_key(record: CrashRecord, depth: int = 3) -> str:
-    """사람이 읽는 다중 프레임 시그니처 문자열.
+    """다중 프레임 시그니처 문자열
 
     형식: ``<bug_type>@<file1:line1>|<file2:line2>|...``  (상위 depth개 앱 프레임)
-
-    앱 프레임이 하나도 없으면(예: 런타임/하네스만) 기본 시그니처로 폴백하고,
-    그것도 없으면 ``<bug_type>@unknown``.
+    앱 프레임 부재 시 기본 시그니처, 그것도 없으면 ``<bug_type>@unknown``
     """
     frames = collapse_repeated_frames(application_frames(record))[: max(1, depth)]
     if frames:
@@ -167,10 +121,10 @@ def signature_key(record: CrashRecord, depth: int = 3) -> str:
 
 
 def signature_digest(key: str) -> str:
-    """시그니처 문자열 → 짧고 안정적인 다이제스트(클러스터 ID용)."""
+    """시그니처 문자열의 클러스터 ID용 다이제스트"""
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
 
 
 def cluster_id_for(record: CrashRecord, depth: int = 3) -> str:
-    """레코드의 클러스터 ID(``CL-<digest>``)."""
+    """레코드의 클러스터 ID (``CL-<digest>``)"""
     return "CL-" + signature_digest(signature_key(record, depth))

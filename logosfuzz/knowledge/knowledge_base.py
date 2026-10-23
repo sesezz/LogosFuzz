@@ -1,27 +1,24 @@
-"""EXT-01-04: A파트 산출물을 하나로 묶는 통합 지식베이스 (B/D 지원).
-
-지금까지 A파트가 만든 세 가지를 하나의 아티팩트로 합친다.
+"""EXT-01-04: A파트 산출물을 하나로 묶는 통합 지식베이스 (B/D 지원)
 
   EXT-01-01 AST 분석        -> 함수/포함 헤더/타입 정의
   EXT-01-02 RAG 제약조건    -> 함수별 제약조건 + BM25 검색
 
-파일별 컴파일 플래그(`FileInfo.flags`)를 채우던 EXT-01-03(bear/compile_commands.json)
-은 1주차에 제거했다. S-CORE 는 Bazel 로 빌드하므로 2주차
-`extract/bazel_query.py`가 타깃·deps·include 경로를 공급한다.
+빌드 정보 출처
+  * Bazel(S-CORE): `extract/bazel_query.py` 의 타깃·deps·include 경로
+  * 대상 프로필(`targets/*.json`) cmake/prebuilt: compile_commands.json
+    (`extract/compile_db.py`) 기반 파일별 플래그, 라이브러리 전체를 빌드 단위 1개로 기록
+  * `profile.apis` 지정 시 해당 API 만 수록
 
-여기에 통합 단계에서만 얻을 수 있는 정보를 더한다.
-
-  * `api_id`  : 파일·줄 기준으로 결정적으로 매겨지는 정수 ID.
-                B(SCH)와 D(ANA)가 서로 조인할 때 쓰는 키.
-  * 호출 그래프 : 어떤 API가 어떤 API를 부르는지(정방향/역방향)와
-                호출 순서(call_sequence).
-  * 심볼 -> 헤더 : 이 API를 쓰려면 어떤 헤더를 include 해야 하는지.
-                D의 GEN-03-02(컴파일 에러 자가치유)가 쓴다.
+통합 단계 추가 정보
+  * `api_id`  : 파일·줄 기준 결정적 정수 ID (B(SCH)·D(ANA) 조인 키)
+  * 호출 그래프 : 정방향/역방향 호출 관계와 호출 순서(call_sequence)
+  * 심볼 -> 헤더 : API 사용에 필요한 include 헤더 (GEN-03-02 자가치유용)
 
 B/D가 실제로 소비하는 형태로 바꾸는 어댑터는 `logosfuzz.knowledge.kb_adapters`에 있다.
 
 사용법:
   python -m logosfuzz.knowledge.knowledge_base build --paths examples --output build/kb_full.json
+  python -m logosfuzz.knowledge.knowledge_base build --profile targets/libsndfile.json --output build/sndfile-kb.json
   python -m logosfuzz.knowledge.knowledge_base show --kb build/kb_full.json --api parse_header
   python -m logosfuzz.knowledge.knowledge_base stats --kb build/kb_full.json
 """
@@ -29,11 +26,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence
+
+if TYPE_CHECKING:  # pragma: no cover
+    from logosfuzz.common.target_profile import TargetProfile
 
 from logosfuzz.extract.bazel_query import BazelGraph, query_bazel
 from logosfuzz.extract.constraint_extractor import (
@@ -44,9 +45,12 @@ from logosfuzz.extract.constraint_extractor import (
     extract_from_text,
     iter_source_files,
     mask_source,
+    score_result_enabled,
 )
 from logosfuzz.knowledge.rag_constraints import build_document
 from logosfuzz.knowledge.rag_index import BM25Index, DenseIndex, HybridRetriever
+
+logger = logging.getLogger(__name__)
 
 KB_VERSION = 2
 SUPPORTED_KB_VERSIONS = {1, KB_VERSION}
@@ -61,9 +65,8 @@ TYPEDEF_BLOCK_RE = re.compile(
     r"\btypedef\s+(?:struct|union|enum)\b[^{;]*\{.*?\}\s*([A-Za-z_]\w*)\s*;", re.S
 )
 TAG_RE = re.compile(r"\b(?:struct|union|enum)\s+([A-Za-z_]\w*)\s*\{")
-# 구조체를 감싼 타입만 따로 센다. `typedef struct _object PyObject;` 처럼 본문
-# 없이 태그만 가리키는 형태도 포함한다. SCH-02-01 이 "상태 핸들"을 고를 때
-# 스칼라 별칭(Py_ssize_t 등)과 구분하는 데 쓴다.
+# 구조체/공용체를 감싼 타입만 별도 집계 (`typedef struct _object PyObject;` 형태 포함)
+# SCH-02-01 상태 핸들 선정 시 스칼라 별칭(Py_ssize_t 등)과 구분용
 STRUCT_BLOCK_RE = re.compile(
     r"\btypedef\s+(?:struct|union)\b[^{;]*\{.*?\}\s*([A-Za-z_]\w*)\s*;", re.S
 )
@@ -72,35 +75,24 @@ STRUCT_ALIAS_RE = re.compile(
 )
 STRUCT_TAG_RE = re.compile(r"\b(?:struct|union)\s+([A-Za-z_]\w*)\s*\{")
 
-# 테스트/예제 코드로 볼 경로 표지.
-#
-# 왜 필요한가 - Eclipse S-CORE `logging` 저장소를 색인했더니 API 388개 중
-# **187개(48.2%)가 테스트 코드**였고, SCH 가 뽑은 최우선 로직 그룹이 전부
-# gtest 픽스처(`SetUp`/`TearDown`)였다. 테스트 헬퍼를 퍼징 대상으로 올리면
-# GEN 이 그걸 호출하는 하네스를 만들고, 그 결과는 대상 라이브러리에 대해
-# 아무것도 말해 주지 않는다.
-#
-# `is_static` 과 같은 원칙으로 다룬다. KB 는 **사실만 기록**하고, 거를지 말지는
-# 소비자(SCH/GEN)가 정한다. 테스트 코드도 색인해 두면 ANA 가 "이 크래시가
-# 테스트에서만 불리는 함수에서 났는가"를 판단할 때 쓸 수 있다.
-# 경로 **세그먼트**가 이 중 하나면 테스트 트리로 본다. 절대 경로 전체에 대해
-# 부분 문자열로 찾으면 상위 디렉토리 이름(사용자 폴더, 빌드 임시 경로 등)에
-# 우연히 "test" 가 들어 있을 때 제품 코드를 테스트로 오판한다.
+# 테스트/예제 코드 경로 표지 (S-CORE `logging` 기준 API 48.2%가 테스트 코드)
+# KB 는 is_test 사실만 기록, 제외 여부는 소비자(SCH/GEN) 결정
+# 경로 세그먼트 단위 비교 (부분 문자열 비교 시 상위 디렉토리 이름으로 오판)
 _TEST_DIR_SEGMENTS = {
     "test", "tests", "testing", "ut", "it", "mock", "mocks",
     "gtest", "gmock", "example", "examples", "benchmark", "benchmarks",
     "fuzz", "fuzzing",
-    # Eclipse S-CORE 관례. `unit_test/` 아래에 gtest 픽스처가 들어간다.
+    # Eclipse S-CORE 관례 (`unit_test/` 아래 gtest 픽스처)
     "unit_test", "unit_tests", "component_test", "component_tests",
 }
 
-# 파일 이름 자체가 테스트임을 드러내는 형태: `x_test.cpp`, `test_x.c`, `x.test.ts`.
-# `ut_`/`ct_` 접두사는 S-CORE 의 단위/컴포넌트 테스트 관례다 (`ut_number.cpp`).
+# 파일 이름 자체의 테스트 표지: `x_test.cpp`, `test_x.c`, `x.test.ts`
+# `ut_`/`ct_` 접두사는 S-CORE 단위/컴포넌트 테스트 관례 (`ut_number.cpp`)
 _TEST_FILE_RE = re.compile(
     r"(^|[._-])(test|tests|mock|benchmark|ut|ct|example|examples)([._-]|$)"
 )
 
-# 함수 정의가 아니라 선언으로만 잡히면 안 되는 이름들
+# 함수 선언으로 잡히면 안 되는 이름 목록
 _NON_SYMBOLS = {
     "if", "for", "while", "switch", "return", "sizeof", "defined", "typedef",
     "else", "do", "case", "static", "extern", "inline", "const", "struct",
@@ -111,7 +103,7 @@ _NON_SYMBOLS = {
 
 @dataclass
 class FileInfo:
-    """소스 파일 하나에 대한 빌드/구조 정보."""
+    """소스 파일 하나의 빌드/구조 정보"""
 
     path: str
     includes: List[str] = field(default_factory=list)
@@ -131,14 +123,10 @@ class FileInfo:
 
 
 def is_test_path(path: str, root: Optional[str] = None) -> bool:
-    """이 파일이 테스트/예제 코드인가.
+    """테스트/예제 코드 여부 판별 (디렉토리 세그먼트·파일 이름 기준)
 
-    디렉토리 세그먼트와 파일 이름으로 판단한다. 정확한 분류는 빌드 시스템만 알
-    수 있지만, 이것만으로도 gtest 픽스처가 퍼징 대상으로 올라오는 것은 막는다.
-
-    ``root``가 주어지면 프로젝트 루트 기준 상대 경로로 판별한다. 저장소 자체의
-    이름이 ``fuzz``인 경우처럼 사용자 홈/프로젝트 이름이 테스트 디렉터리 표지와
-    우연히 겹쳐 제품 코드를 전부 테스트로 오인하는 문제를 피하기 위해서다.
+    ``root`` 지정 시 프로젝트 루트 기준 상대 경로로 판별
+    (저장소 이름이 ``fuzz`` 등 테스트 표지와 겹치는 오판 방지)
 
     >>> is_test_path("score/datarouter/test/ut/ut_logging/x.cpp")
     True
@@ -150,7 +138,7 @@ def is_test_path(path: str, root: Optional[str] = None) -> bool:
         try:
             candidate = os.path.relpath(os.path.abspath(path), os.path.abspath(root))
         except (OSError, ValueError):
-            # 드라이브가 다른 Windows 경로 등은 원래 절대 경로 판별로 폴백한다.
+            # 드라이브가 다른 Windows 경로 등은 절대 경로 판별로 폴백
             candidate = str(path)
     parts = [p.lower() for p in candidate.replace("\\", "/").split("/") if p]
     if not parts:
@@ -179,10 +167,9 @@ def _read(path: str) -> str:
 
 
 def header_declaration_docs(text: str) -> Dict[str, str]:
-    """헤더의 함수 선언 위에 붙은 문서 주석을 {함수이름: 문서} 로 뽑는다.
+    """헤더 함수 선언 위 문서 주석을 {함수이름: 문서} 로 추출
 
-    C 프로젝트는 보통 `.h` 의 프로토타입에 문서를 달고 `.c` 의 정의에는 달지
-    않는다. 통합 단계에서 둘을 이어 줘야 제약조건이 살아난다.
+    C 프로젝트는 `.h` 프로토타입에만 문서를 다는 경우가 많아 `.c` 정의와 결합 필요
     """
     masked = mask_source(text)
     docs: Dict[str, str] = {}
@@ -193,7 +180,7 @@ def header_declaration_docs(text: str) -> Dict[str, str]:
         start = match.start()
         cut = max(masked.rfind(ch, 0, start) for ch in ";}{")
         decl_start = start if cut < 0 else cut + 1
-        # 마스킹된 주석은 공백이므로 lstrip 하면 선언 첫 글자로 간다
+        # 마스킹된 주석은 공백이므로 lstrip 시 선언 첫 글자 위치
         offset = len(masked[decl_start:start]) - len(masked[decl_start:start].lstrip())
         doc = extract_doc_comment(text, decl_start + offset)
         if doc:
@@ -202,13 +189,10 @@ def header_declaration_docs(text: str) -> Dict[str, str]:
 
 
 def macro_declared_symbols(masked: str) -> Dict[str, str]:
-    """매크로로 선언된 함수 이름 -> 파라미터 문자열.
+    """매크로로 선언된 함수 이름 -> 반환 타입 문자열
 
-    libpng 은 공개 API 를 전부 `PNG_EXPORT(idx, rettype, name, (params));` 로
-    선언한다. 일반 프로토타입 정규식으로는 이름이 `PNG_EXPORT` 로 잡혀서
-    **헤더가 무엇을 선언하는지 알 수 없게 된다** — png.h 를 스캔하면 인식되는
-    심볼이 매크로 이름 7개뿐이었다. 그러면 `header_for()`/`declaring_files()`
-    가 무용해지고, "이 API 가 공개인가"를 판단할 수 없다.
+    libpng `PNG_EXPORT(idx, rettype, name, (params));` 형태 대응
+    (일반 프로토타입 정규식은 매크로 이름만 인식)
     """
     found: Dict[str, str] = {}
     for match in re.finditer(r"\b([A-Z][A-Z0-9_]{2,})\s*\(", masked):
@@ -231,7 +215,7 @@ def macro_declared_symbols(masked: str) -> Dict[str, str]:
 
 
 def scan_file(path: str, text: Optional[str] = None) -> FileInfo:
-    """파일에서 include / 선언 심볼 / 타입 이름을 뽑는다."""
+    """파일의 include / 선언 심볼 / 타입 이름 추출"""
     if text is None:
         text = _read(path)
     masked = mask_source(text)
@@ -239,7 +223,7 @@ def scan_file(path: str, text: Optional[str] = None) -> FileInfo:
     declares = {
         name for name in DECL_RE.findall(masked) if name not in _NON_SYMBOLS
     }
-    # 매크로로 선언되는 API 도 헤더가 "선언한" 것으로 센다.
+    # 매크로로 선언되는 API 도 헤더 선언으로 집계
     declares |= set(macro_declared_symbols(masked))
     types = set(TYPEDEF_BLOCK_RE.findall(masked))
     types |= {n for n in TYPEDEF_ALIAS_RE.findall(masked) if n not in _NON_SYMBOLS}
@@ -260,16 +244,20 @@ def scan_file(path: str, text: Optional[str] = None) -> FileInfo:
 
 
 class KnowledgeBase:
-    """A파트 통합 지식베이스."""
+    """A파트 통합 지식베이스"""
 
     def __init__(self, documents: Optional[Sequence[dict]] = None,
                  files: Optional[Dict[str, dict]] = None,
                  build_units: Optional[Sequence[dict]] = None,
                  index: Optional[BM25Index] = None,
-                 use_dense: bool = False) -> None:
+                 use_dense: bool = False,
+                 profile: Optional[dict] = None) -> None:
         self.documents: List[dict] = list(documents or [])
         self.files: Dict[str, dict] = dict(files or {})
         self.build_units: List[dict] = list(build_units or [])
+        # 프로필 기반 KB 면 {name, domain, build_system, apis, apis_missing}
+        # 없으면 None (기존 KB 와 같은 형태로 저장)
+        self.profile: Optional[dict] = dict(profile) if profile else None
         if index is None:
             index = BM25Index()
             index.add_documents(self.documents)
@@ -293,7 +281,15 @@ class KnowledgeBase:
               bazel_graph: Optional[BazelGraph] = None,
               bazel_workspace: Optional[str] = None,
               bazel_targets: Optional[Sequence[str]] = None,
-              bazel: Optional[str] = None) -> "KnowledgeBase":
+              bazel: Optional[str] = None,
+              profile: Optional["TargetProfile"] = None) -> "KnowledgeBase":
+        if profile is not None and not profile.is_bazel:
+            return cls._build_from_profile(profile, paths=paths, use_dense=use_dense)
+        if (profile is not None and bazel_graph is None
+                and not (bazel_workspace or bazel_targets)):
+            # Bazel 프로필은 기존 bazel query 경로 사용
+            bazel_workspace = str(profile.abs(profile.build.bazel.workspace))
+            bazel_targets = [profile.build.bazel.target]
         if bazel_graph is None and bazel_workspace and bazel_targets:
             bazel_graph = query_bazel(
                 bazel_workspace, bazel_targets, bazel=bazel
@@ -352,13 +348,18 @@ class KnowledgeBase:
             if source.endswith(HEADER_SUFFIXES):
                 for name, doc in header_declaration_docs(text).items():
                     header_docs.setdefault(name, doc)
-            # score::Result 계약은 자동차(S-CORE) 전용이다. 지금 Bazel 경로는 곧
-            # S-CORE 경로이므로 기존 출력 그대로 켜 두고, 그 밖에서는 끈다.
-            facts.extend(extract_from_text(
-                text, path=source, score_result=bazel_graph is not None,
-            ))
+            # score::Result 계약은 S-CORE 전용: 프로필 있으면 domain 기준,
+            # 없으면 Bazel 경로(=S-CORE)일 때만 활성화
+            use_score = (
+                score_result_enabled(profile) if profile is not None
+                else bazel_graph is not None
+            )
+            facts.extend(extract_from_text(text, path=source, score_result=use_score))
 
         _merge_header_docs(facts, header_docs)
+        meta = None
+        if profile is not None:
+            facts, meta = _select_profile_apis(facts, profile)
         documents = cls._assemble(facts, file_infos, test_roots=test_roots)
         files = {path: info.to_dict() for path, info in file_infos.items()}
         build_units = bazel_graph.build_units() if bazel_graph is not None else []
@@ -367,15 +368,115 @@ class KnowledgeBase:
             files=files,
             build_units=build_units,
             use_dense=use_dense,
+            profile=meta,
+        )
+
+    @classmethod
+    def _build_from_profile(cls, profile: "TargetProfile",
+                            paths: Optional[Sequence[str]] = None,
+                            use_dense: bool = False) -> "KnowledgeBase":
+        """비-Bazel(cmake/prebuilt) 프로필 기반 KB 구축
+
+        * 파일별 플래그: compile_commands.json 항목의 clang 인자, 없으면(헤더 등)
+          전체 합집합에서 ``-std`` 제외. ``include_dirs`` 항상 추가.
+          compile_commands.json 부재 시 경고 후 ``include_dirs`` 만 사용
+        * 빌드 단위: 라이브러리 전체 1개 (``build_target`` = ``profile.name``,
+          ``build_deps`` = ``libraries`` 절대경로)
+        * 대상 파일: ``paths`` 없으면 compile_db 소스 + ``include_dirs``,
+          compile_db 도 없으면 ``source_root`` 전체(테스트·예제 트리 제외)
+        """
+        from logosfuzz.extract.compile_db import (
+            CompileDbError, CompileFlags, compile_db_path, flags_for_profile,
+        )
+
+        root = profile.root
+        try:
+            by_file = flags_for_profile(profile)
+            db_path = str(compile_db_path(profile))
+        except CompileDbError as exc:
+            logger.warning("compile_commands.json 없이 include_dirs 만 사용합니다: %s", exc)
+            by_file, db_path = {}, ""
+        merged = CompileFlags()
+        for flags in by_file.values():
+            merged.merge(flags)
+        merged.std = ""
+        include_dirs = [str(profile.abs(d)) for d in profile.build.include_dirs]
+        include_args = [f"-I{d}" for d in include_dirs]
+
+        if not paths:
+            db_sources = [path for path in sorted(by_file) if os.path.exists(path)]
+            if db_sources:
+                paths = db_sources + [d for d in include_dirs if os.path.isdir(d)]
+            else:
+                # compile_db 부재 시 source_root 전체 대상
+                # (테스트·예제 트리는 test_roots 기준 제외)
+                paths = [str(root)]
+        test_roots = [str(root)]
+        sources: List[str] = sorted(set(iter_source_files(
+            paths,
+            exclude=lambda source: _is_test_path_under_roots(source, test_roots),
+        )))
+
+        unit_target = profile.name
+        unit_deps = [str(profile.abs(lib)) for lib in profile.build.libraries]
+        use_score = score_result_enabled(profile)
+
+        file_infos: Dict[str, FileInfo] = {}
+        facts: List[FunctionFacts] = []
+        header_docs: Dict[str, str] = {}
+        for source in sources:
+            try:
+                text = _read(source)
+            except OSError:
+                continue
+            info = scan_file(source, text)
+            flags = by_file.get(os.path.normpath(os.path.abspath(source)), merged).clang_args()
+            flags.extend(arg for arg in include_args if arg not in flags)
+            info.flags = flags
+            info.directory = str(root)
+            info.build_system = profile.build.system
+            info.build_target = unit_target
+            info.build_rule_kind = f"{profile.build.system}_library"
+            info.build_deps = list(unit_deps)
+            file_infos[source] = info
+            if source.endswith(HEADER_SUFFIXES):
+                for name, doc in header_declaration_docs(text).items():
+                    header_docs.setdefault(name, doc)
+            facts.extend(extract_from_text(text, path=source, score_result=use_score))
+
+        _merge_header_docs(facts, header_docs)
+        facts, meta = _select_profile_apis(facts, profile)
+        documents = cls._assemble(facts, file_infos, test_roots=test_roots)
+        files = {path: info.to_dict() for path, info in file_infos.items()}
+        unit_flags = merged.clang_args()
+        unit_flags.extend(arg for arg in include_args if arg not in unit_flags)
+        build_unit = {
+            "build_system": profile.build.system,
+            "build_target": unit_target,
+            "build_rule_kind": f"{profile.build.system}_library",
+            "build_deps": unit_deps,
+            "compile_flags": unit_flags,
+            "include_dirs": include_dirs,
+            "link_flags": list(profile.build.link_flags),
+            "sources": [p for p in sources if not p.endswith(HEADER_SUFFIXES)],
+            "headers": [p for p in sources if p.endswith(HEADER_SUFFIXES)],
+            "visibility": [],
+            "build_file": db_path,
+        }
+        return cls(
+            documents=documents,
+            files=files,
+            build_units=[build_unit],
+            use_dense=use_dense,
+            profile=meta,
         )
 
     @staticmethod
     def _assemble(facts: Sequence[FunctionFacts],
                   file_infos: Dict[str, FileInfo],
                   test_roots: Optional[Sequence[str]] = None) -> List[dict]:
-        """FunctionFacts 를 api_id·호출그래프·헤더 정보가 붙은 문서로 만든다."""
-        # api_id 는 (파일, 줄) 정렬 기준으로 결정적으로 매긴다. 같은 입력이면
-        # 항상 같은 ID 가 나와야 B/D 가 저장해 둔 ID 로 다시 조인할 수 있다.
+        """FunctionFacts 를 api_id·호출그래프·헤더 정보가 붙은 문서로 변환"""
+        # api_id 는 (파일, 줄) 정렬 기준 결정적 부여 (B/D 저장 ID 재조인용)
         ordered = sorted(facts, key=lambda f: (f.file, f.line, f.name))
 
         documents: List[dict] = []
@@ -390,7 +491,7 @@ class KnowledgeBase:
         for document in documents:
             name_to_ids.setdefault(document["function"], []).append(document["api_id"])
 
-        # 호출 그래프: 알려진 API 만 남긴다 (libc 호출은 제외)
+        # 호출 그래프: 알려진 API 만 유지 (libc 호출 제외)
         callers: Dict[str, List[str]] = {}
         for document in documents:
             internal = [c for c in document["call_sequence"] if c in known]
@@ -403,10 +504,8 @@ class KnowledgeBase:
                 if callee != document["function"]:
                     callers.setdefault(callee, []).append(document["function"])
 
-        # SCH-02-02 의 call_seq: "소비자 코드에서 뽑힌 호출 순서"를 이어붙인 것.
-        # B의 call_adjacency_score 는 시퀀스 안에서 자기 자신의 api_id 를 찾아
-        # 이웃을 세므로, 이 API를 *호출하는* 함수들의 시퀀스를 모아야 한다.
-        # 자기 자신의 호출 목록을 주면 자기 id 가 없어 점수가 항상 0이 된다.
+        # SCH-02-02 call_seq: 이 API 를 호출하는 함수들의 호출 순서 연결
+        # (call_adjacency_score 가 시퀀스 내 자기 api_id 이웃을 세므로 자기 호출 목록은 부적합)
         for document in documents:
             own_id = str(document["api_id"])
             observed: List[str] = []
@@ -420,11 +519,8 @@ class KnowledgeBase:
             if path.endswith(HEADER_SUFFIXES)
         }
         for document in documents:
-            # 내부 링키지 여부. 별도 컴파일 단위인 하네스는 `static` 함수를
-            # extern 으로 링크할 수 없다. 이걸 기록해 두지 않으면 SCH 가 static
-            # 함수를 퍼징 대상 그룹에 넣고, GEN 이 그걸 호출하는 하네스를 만들어
-            # "undefined reference" 로 링크가 깨진다. 소스 수준 에러가 아니라
-            # 자가 치유 루프가 아무리 돌아도 고칠 수 없는 실패다.
+            # 내부 링키지 여부: 하네스에서 `static` 함수 호출 시 링크 실패
+            # ("undefined reference", 자가 치유로 복구 불가)
             document["is_static"] = (
                 document.get("signature", "").lstrip().startswith("static")
             )
@@ -447,7 +543,7 @@ class KnowledgeBase:
 
     # -- 조회 --------------------------------------------------------------
     def api(self, key) -> Optional[dict]:
-        """api_id(int) 또는 함수 이름(str)으로 단일 API를 찾는다."""
+        """api_id(int) 또는 함수 이름(str) 기준 단일 API 조회"""
         if isinstance(key, int):
             return self._by_id.get(key)
         matches = self._by_name.get(str(key))
@@ -471,7 +567,7 @@ class KnowledgeBase:
         return list(document["called_by"]) if document else []
 
     def call_sequence_ids(self, name: str) -> List[str]:
-        """SCH-02-02 의 call_seq 형식(api_id 문자열 목록)."""
+        """SCH-02-02 의 call_seq 형식(api_id 문자열 목록)"""
         document = self.api(name)
         return list(document["call_seq_ids"]) if document else []
 
@@ -484,14 +580,14 @@ class KnowledgeBase:
         return list(info["flags"]) if info else []
 
     def defines_type(self, type_name: str) -> List[str]:
-        """해당 타입 이름을 정의하는 파일 목록."""
+        """해당 타입 이름을 정의하는 파일 목록"""
         bare = type_name.replace("struct ", "").replace("union ", "").strip()
         return sorted(
             path for path, info in self.files.items() if bare in info.get("types", [])
         )
 
     def defines_struct_type(self, type_name: str) -> List[str]:
-        """구조체/공용체를 감싼 타입만. 스칼라 별칭(Py_ssize_t 등)은 제외된다."""
+        """구조체/공용체를 감싼 타입의 정의 파일 목록 (스칼라 별칭 제외)"""
         bare = type_name.replace("struct ", "").replace("union ", "").strip()
         return sorted(
             path for path, info in self.files.items()
@@ -534,6 +630,7 @@ class KnowledgeBase:
                 round(covered / len(self.documents), 4) if self.documents else 0.0
             ),
             "dense_backend": self._dense_enabled,
+            **({"profile": dict(self.profile)} if self.profile else {}),
         }
 
     # -- 저장/로드 ---------------------------------------------------------
@@ -547,6 +644,8 @@ class KnowledgeBase:
             "build_units": self.build_units,
             "index": self.index.to_dict(),
         }
+        if self.profile:
+            payload["profile"] = self.profile
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return str(target)
 
@@ -564,11 +663,12 @@ class KnowledgeBase:
             build_units=payload.get("build_units", []),
             index=BM25Index.from_dict(payload["index"]),
             use_dense=use_dense,
+            profile=payload.get("profile"),
         )
 
 
 def _merge_header_docs(facts: Sequence[FunctionFacts], header_docs: Dict[str, str]) -> None:
-    """헤더 선언부 문서를 구현 함수에 결합하고, 거기서 제약조건을 다시 뽑는다."""
+    """헤더 선언부 문서를 구현 함수에 결합 후 제약조건 재추출"""
     for fact in facts:
         doc = header_docs.get(fact.name)
         if not doc or fact.doc:
@@ -582,13 +682,46 @@ def _merge_header_docs(facts: Sequence[FunctionFacts], header_docs: Dict[str, st
                 existing.add(key)
 
 
+def _select_profile_apis(facts: Sequence[FunctionFacts],
+                         profile: "TargetProfile") -> tuple:
+    """``profile.apis`` 지정 시 해당 API 정의만 선별
+
+    동명 정의가 여럿이면 공개 함수(non-static) 우선, 정의 없는 API 는 ``apis_missing`` 기록
+    반환: (선별된 facts, KB 저장용 프로필 메타데이터)
+    """
+    meta = {
+        "name": profile.name,
+        "domain": profile.domain,
+        "build_system": profile.build.system,
+        "apis": list(profile.apis),
+        "apis_missing": [],
+    }
+    if not profile.apis:
+        return list(facts), meta
+    wanted = set(profile.apis)
+    by_name: Dict[str, List[FunctionFacts]] = {}
+    for fact in facts:
+        if fact.name in wanted:
+            by_name.setdefault(fact.name, []).append(fact)
+    selected: List[FunctionFacts] = []
+    for name in profile.apis:
+        candidates = by_name.get(name, [])
+        public = [
+            fact for fact in candidates
+            if not fact.signature.lstrip().startswith("static")
+        ]
+        selected.extend(public or candidates)
+        if not candidates:
+            meta["apis_missing"].append(name)
+    return selected, meta
+
+
 def _declaring_header(name: str, definition_file: str,
                       headers: Dict[str, FileInfo],
                       test_roots: Sequence[str] = ()) -> Optional[str]:
-    """해당 API를 선언하는 헤더를 고른다.
+    """해당 API 선언 헤더 선택
 
-    같은 basename 의 헤더(foo.c <-> foo.h)를 우선하고, 없으면 선언을 담고
-    있는 헤더 중 경로가 가장 짧은 것을 고른다.
+    같은 basename 헤더(foo.c <-> foo.h) 우선, 없으면 선언 헤더 중 최단 경로
     """
     candidates = [
         path for path, info in headers.items()
@@ -596,7 +729,7 @@ def _declaring_header(name: str, definition_file: str,
         and not _is_test_path_under_roots(path, test_roots)
     ]
     if not candidates:
-        # 헤더 자체에 정의된 static inline 함수라면 그 헤더가 답이다.
+        # 헤더 자체에 정의된 static inline 함수면 해당 헤더 반환
         if definition_file.endswith(HEADER_SUFFIXES) and not _is_test_path_under_roots(
             definition_file, test_roots
         ):
@@ -623,6 +756,10 @@ def parse_args(argv=None):
     build_parser.add_argument("--bazel-workspace")
     build_parser.add_argument("--bazel-target", action="append", default=[])
     build_parser.add_argument("--bazel", help="bazel/bazelisk executable")
+    build_parser.add_argument(
+        "--profile",
+        help="targets/*.json 대상 프로필. bazel 이면 기존 경로, cmake/prebuilt 이면 compile_db 사용",
+    )
 
     show_parser = subparsers.add_parser("show", help="Show a single API entry")
     show_parser.add_argument("--kb", required=True)
@@ -638,12 +775,17 @@ def main(argv=None):
     args = parse_args(argv)
 
     if args.command == "build":
+        profile = None
+        if args.profile:
+            from logosfuzz.common.target_profile import load_profile
+            profile = load_profile(args.profile)
         kb = KnowledgeBase.build(
             paths=args.paths,
             use_dense=args.dense,
             bazel_workspace=args.bazel_workspace,
             bazel_targets=args.bazel_target,
             bazel=args.bazel,
+            profile=profile,
         )
         kb.save(args.output)
         print(json.dumps({"output": args.output, **kb.stats()}, indent=2, ensure_ascii=False))

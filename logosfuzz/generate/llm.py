@@ -33,12 +33,10 @@ class LLMClient(ABC):
 
 class OpenAILLMClient(LLMClient):
     """
-    GPT-4o-mini 등 OpenAI 호환 모델 연동.
+    GPT-4o-mini 등 OpenAI 호환 모델 연동
 
-    api_key를 명시하지 않으면 OPENAI_API_KEY 환경변수(.env 로드는 호출자 책임)를 사용한다.
-    openai 패키지(>=1.0, `from openai import OpenAI` 스타일)가 필요하다.
-    openai 패키지는 호출 시점에 import하므로 테스트 클라이언트만 사용할 때는
-    해당 의존성이 없어도 모듈을 import할 수 있다.
+    api_key 미지정 시 OPENAI_API_KEY 환경변수 사용 (.env 로드는 호출자 책임)
+    openai 패키지(>=1.0) 필요, 호출 시점 import 라 테스트 클라이언트만 쓸 때는 미설치 가능
     """
 
     def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.2,
@@ -161,25 +159,35 @@ def truncate_middle(text: str, limit: int) -> str:
     return text[:head] + marker + text[-tail:]
 
 
+def domain_subject(domain: str) -> str:
+    """시스템 프롬프트가 설명하는 대상. automotive 만 자동차 문구를 쓴다."""
+    if domain == "automotive":
+        return "automotive open-source libraries"
+    return "C/C++ libraries and embedded firmware"
+
+
 class RepairPromptBuilder:
     """컴파일 에러를 고치기 위한 수정 프롬프트를 만든다."""
 
-    SYSTEM = (
+    SYSTEM_TEMPLATE = (
         "You are a C/C++ fuzzing-harness repair assistant for the LogosFuzz project. "
-        "You fix compilation errors in libFuzzer/AFL++ harnesses for automotive open-source "
-        "libraries. Return ONLY the full corrected source file inside a single ```c code block. "
+        "You fix compilation errors in libFuzzer/AFL++ harnesses for {subject}. "
+        "Return ONLY the full corrected source file inside a single ```c code block. "
         "Do not add explanations outside the code block. Preserve the LLVMFuzzerTestOneInput "
         "entry point and the intended target API calls."
     )
+    # 기존 호출부·테스트가 읽는 값(automotive 문구). 도메인별 문구는 system_prompt() 가 만든다.
+    SYSTEM = SYSTEM_TEMPLATE.format(subject=domain_subject("automotive"))
 
-    def __init__(self, max_log_chars: int = 8000) -> None:
+    def __init__(self, max_log_chars: int = 8000, domain: str = "automotive") -> None:
+        self.domain = domain
         # 기본값이 2000 이던 시절엔 `error_digest()`(파싱된 진단 몇 줄)만 넣었다.
         # 이제 로그 **전문**을 넣으므로 한도를 넉넉히 잡는다. Bazel 로그는 진행률
         # 줄이 섞여 길지만, 진단이 로그 전반에 흩어져 있어 요약하면 원인을 잃는다.
         self.max_log_chars = max_log_chars
 
     def system_prompt(self) -> str:
-        return self.SYSTEM
+        return self.SYSTEM_TEMPLATE.format(subject=domain_subject(self.domain))
 
     def build(
         self,

@@ -6,7 +6,7 @@ class ExecuteError(Exception):
 
 
 class DockerUnavailableError(ExecuteError):
-    """docker 실행 파일을 찾을 수 없거나 데몬에 접근할 수 없을 때."""
+    """docker 실행 파일 부재 또는 데몬 접근 불가"""
 
 
 class ImageBuildError(ExecuteError):
@@ -14,8 +14,8 @@ class ImageBuildError(ExecuteError):
 
 
 class HarnessNotFoundError(ExecuteError):
-    """Logic Group의 하네스 산출물(GEN 결과물)이 존재하지 않을 때."""
+    """Logic Group의 하네스 산출물(GEN 결과물) 부재"""
 
 
 class InvalidEngineError(ExecuteError):
-    """지원하지 않는 퍼징 엔진을 지정했을 때."""
+    """미지원 퍼징 엔진 지정"""

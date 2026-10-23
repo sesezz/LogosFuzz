@@ -1,10 +1,10 @@
-"""로직 그룹들을 순차적으로 격리 실행하는 퍼징 세션 오케스트레이터.
+"""로직 그룹 순차 격리 실행 퍼징 세션 오케스트레이터
 
 설계서 EXE-04-00 흐름:
   - Docker 격리 환경에서 Logic Group별로 퍼징 순차 수행
   - --timeout 도달 시 해당 그룹 종료 후 다음 그룹으로 진행
-  - 새 크래시는 강조 출력하고 crashes/ 폴더에 저장
-  - 완료 후 다음 기능(analyze)으로 연결될 요약(JSON) 산출
+  - 새 크래시 강조 출력 및 crashes/ 폴더 저장
+  - 완료 후 analyze 연결용 요약(JSON) 산출
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ class SessionSummary:
 
     @property
     def failed_groups(self) -> list:
-        """하네스가 한 번도 실행되지 못한 그룹 이름들."""
+        """하네스 미실행 그룹 이름 목록"""
         return [g.group for g in self.groups if g.failed_to_start]
 
     def to_dict(self) -> dict:
@@ -67,6 +67,8 @@ class SessionSummary:
                     if getattr(g, "coverage", None) is not None else None,
                     "stdout_log": getattr(g, "stdout_log", None),
                     "stderr_log": getattr(g, "stderr_log", None),
+                    **({"timeout_sec": g.timeout_sec}
+                       if getattr(g, "timeout_sec", None) is not None else {}),
                 }
                 for g in self.groups
             ],
@@ -81,7 +83,7 @@ class FuzzSession:
         self.runner = runner or DockerIsolationRunner(config)
         self.stream = stream
         self.collector = CrashCollector(config.crashes_dir)
-        # EXE-04-04: 커버리지 수집기(테스트에서 주입 가능). NONE이면 사용되지 않음.
+        # EXE-04-04: 커버리지 수집기 (NONE이면 미사용)
         self.coverage_collector = coverage_collector or CoverageCollector(config)
 
     def _log(self, msg: str) -> None:
@@ -89,14 +91,17 @@ class FuzzSession:
         self.stream.flush()
 
     def _crash_search_dirs(self, group: LogicGroup) -> list:
-        # libFuzzer artifact_prefix(/out/crashes/) 와 AFL++(/out/afl/**/crashes)
-        return [
-            self.config.crashes_dir,
-            self.config.output_dir / "afl",
-        ]
+        # libFuzzer artifact_prefix(/out/crashes/)
+        return [self.config.crashes_dir]
 
-    def run(self, groups: list, ensure_image: bool = True) -> SessionSummary:
+    def run(self, groups: list, ensure_image: bool = True,
+            timeouts: Optional[dict] = None) -> SessionSummary:
+        """그룹 순차 퍼징
+
+        ``timeouts`` (``{그룹 이름: 초}``) 지정 시 그룹별 퍼징 시간 적용 (미지정 그룹은 ``config.timeout_sec``)
+        """
         self.config.ensure_dirs()
+        default_timeout = self.config.timeout_sec
         if self.config.use_docker and ensure_image:
             self.runner.ensure_image()
 
@@ -119,24 +124,30 @@ class FuzzSession:
                 )
             )
 
-            # EXE-04-04: 계측 활성 시 실행 전 그룹별 profraw 디렉토리를 준비한다
-            # (컨테이너가 /out 마운트에 profraw를 떨굴 수 있도록).
+            # EXE-04-04: 계측 시 실행 전 그룹별 profraw 디렉토리 준비
             if self.config.coverage is not CoverageMode.NONE:
                 (self.config.coverage_dir / group.name).mkdir(parents=True, exist_ok=True)
 
             # 그룹 실행 전 크래시 baseline
             before = set(self.config.crashes_dir.rglob("*"))
-            result: GroupResult = self.runner.run_group(
-                group, monitor=monitor, sanitizer_monitor=sanitizer_monitor
-            )
+            group_timeout = (timeouts or {}).get(group.name)
+            self.config.timeout_sec = group_timeout or default_timeout
+            try:
+                result: GroupResult = self.runner.run_group(
+                    group, monitor=monitor, sanitizer_monitor=sanitizer_monitor
+                )
+            finally:
+                self.config.timeout_sec = default_timeout
             result.stats = stats
+            if group_timeout:
+                result.timeout_sec = group_timeout
             if result.sanitizer_findings:
                 write_findings(
                     self.config.logs_dir / "sanitizer" / f"{group.name}.jsonl",
                     result.sanitizer_findings,
                 )
 
-            # EXE-04-04: 실행 후 커버리지 후처리(profraw→profdata→llvm-cov export).
+            # EXE-04-04: 실행 후 커버리지 후처리 (profraw→profdata→llvm-cov export)
             if self.config.coverage is not CoverageMode.NONE:
                 cov = self.coverage_collector.collect(group)
                 result.coverage = cov

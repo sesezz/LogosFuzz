@@ -1,9 +1,7 @@
-"""퍼징 실시간 통계 파싱/표시.
+"""퍼징 실시간 통계 파싱/표시
 
-설계서 EXE-04-00: exec/s, coverage, crash 수를 라이브로 갱신 출력.
-EXE-04-01에서는 libFuzzer/AFL++ 표준 출력에서 핵심 지표를 추출하는
-경량 파서만 제공한다. 정밀 coverage 계측(EXE-04-04)과 ASAN/TSAN 스트림
-정밀 전처리(EXE-04-02)는 이후 주차에서 이 모듈을 확장한다.
+설계서 EXE-04-00: exec/s, coverage, crash 수 실시간 갱신 출력
+libFuzzer/AFL++ 표준 출력의 핵심 지표 추출용 경량 파서
 """
 
 from __future__ import annotations
@@ -14,7 +12,7 @@ from dataclasses import dataclass
 
 
 # libFuzzer 진행 라인 예: "#1024 pulse cov: 231 ft: 512 exec/s: 512 ..."
-# 필드가 라인마다 가변적이라 필드별로 독립 검색한다.
+# 라인마다 필드가 가변적이므로 필드별 독립 검색
 _LF_EXECS = re.compile(r"^#(\d+)\s+\w+")
 _LF_COV = re.compile(r"\bcov:\s*(\d+)", re.IGNORECASE)
 _LF_EPS = re.compile(r"\bexec/s:\s*(\d+)", re.IGNORECASE)
@@ -26,7 +24,7 @@ _AFL_CRASHES = re.compile(r"(?:uniq crashes|saved crashes)\s*:\s*(\d+)", re.IGNO
 
 @dataclass
 class LiveStats:
-    """단일 로직 그룹의 누적 통계."""
+    """단일 로직 그룹의 누적 통계"""
 
     group: str
     execs: int = 0
@@ -35,7 +33,7 @@ class LiveStats:
     crashes: int = 0
 
     def update_from_line(self, line: str) -> bool:
-        """엔진 출력 한 줄을 반영. 값이 갱신되면 True."""
+        """엔진 출력 한 줄 반영 (값 갱신 시 True)"""
         changed = False
 
         stripped = line.strip()
@@ -74,10 +72,7 @@ class LiveStats:
 
 
 class StatsMonitor:
-    """라이브 통계를 한 줄로 갱신 출력하는 경량 모니터.
-
-    stream 인자를 주입할 수 있어 테스트에서 캡처가 가능하다.
-    """
+    """실시간 통계 한 줄 갱신 출력 모니터 (stream 주입 가능)"""
 
     def __init__(self, stats: LiveStats, stream=sys.stdout, live: bool = True):
         self.stats = stats

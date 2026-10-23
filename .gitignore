@@ -19,6 +19,8 @@ env/
 
 # Build output
 build/
+# 패키지 소스 디렉터리(GENERIC-B 빌드 어댑터)는 산출물이 아니므로 위 규칙에서 제외
+!logosfuzz/generate/build/
 dist/
 *.o
 *.out
@@ -35,7 +37,7 @@ config/secrets.yaml
 .idea/
 *.code-workspace
 
-# Claude Code local state
+# Local tool state
 .claude/settings.local.json
 .claude/worktrees/
 
@@ -75,10 +77,11 @@ vector_db/
 Bear64.exe
 *.pid
 
-# 분석 대상으로 받아온 업스트림 소스 (sparse clone, 커밋하지 않는다)
+# 분석 대상 업스트림 소스 (sparse clone, 커밋 제외)
 # 재현: git clone --depth 1 --filter=blob:none --sparse \
 #         https://github.com/eclipse-score/baselibs.git third_party/score-baselibs
 #       git -C third_party/score-baselibs sparse-checkout set score
+# libsndfile(범용 대상)은 고정 커밋으로 수신: bash scripts/fetch_libsndfile.sh --build
 third_party/
 
 # LogosFuzz 런타임 상태(HITL 리뷰 저장소, KB 오버라이드, 감사 로그)

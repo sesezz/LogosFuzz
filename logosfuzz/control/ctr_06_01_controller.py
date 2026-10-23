@@ -103,7 +103,7 @@ class CompatibilityChecker:
         )
 
         # Required tools
-        # bear 는 제외했다 — 빌드를 Bazel 이 소유하므로 컴파일 명령을 가로챌 일이 없다.
+        # bear 제외 (빌드를 Bazel 이 소유하므로 컴파일 명령 가로채기 불필요)
         for tool in ["clang", "clang++"]:
             found = shutil.which(tool) is not None
             self._check(f"Tool: {tool}", found, f"{tool} found", f"{tool} not found in PATH")
@@ -268,8 +268,7 @@ class BuildStageResult:
     config: str
     started_at: str
     finished_at: str = ""
-    # 빌드 시스템 이름. BuildStage 가 어댑터(adapter.build_system)에서 받아 넣는다.
-    # "bazel" 을 결과에 하드코딩하지 않기 위한 필드.
+    # 빌드 시스템 이름 (BuildStage 가 adapter.build_system 에서 설정)
     build_system: str = "bazel"
     units: list[dict] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
@@ -375,9 +374,8 @@ def is_source_error(log: str, bin_label: str, classify=None) -> bool:
     2. 분류기가 없거나 못 분류하면 로그로: BUILD 원인 문구가 있으면 False,
        소스 컴파일 에러·링크 에러 문구가 있으면 True
 
-    ``classify`` 는 호출 측이 빌드 시스템별 분류기를 주입한다(컨트롤러는
-    ``BuildStage.classify_errors`` = ``adapter.classify_build_error``). 여기서
-    bazel 전용 분류기를 직접 import 하지 않아 빌드 시스템에 중립적이다.
+    ``classify`` 는 호출 측에서 빌드 시스템별 분류기 주입
+    (컨트롤러는 ``BuildStage.classify_errors`` = ``adapter.classify_build_error``)
     """
     report = classify(log or "", bin_label) if callable(classify) else None
     primary = getattr(report, "primary", None)
@@ -425,20 +423,13 @@ class HealUnavailable(RuntimeError):
 
 
 def _default_build_adapter(build_system, workspace_root, *, config, bazel, timeout_s):
-    """어댑터를 주입하지 않았을 때 ``build_system`` 에 맞는 기본 어댑터를 만든다.
-
-    컨트롤러가 ``BazelAdapter`` 를 직접 import·인스턴스화하지 않도록 빌드 시스템
-    선택을 이 한곳으로 모은다. 범용(generic/cmake) 어댑터는 서원의
-    GENERIC-A-profile(base.py) 병합 후 연결한다 - 그 전까지 ``--mode generic`` 은
-    어댑터를 직접 주입(``adapter=``)해야 한다.
-    """
+    """어댑터 미주입 시 ``build_system`` 별 기본 어댑터 생성"""
     name = (build_system or "bazel").lower()
     if name == "bazel":
         from logosfuzz.generate.bazel.adapter import BazelAdapter
         return BazelAdapter(
             workspace_root, config=config, bazel=bazel, timeout_s=timeout_s)
-    # 범용 어댑터는 아직 dev 에 없다(GENERIC-A-profile 병합 대기). 병합되면
-    # 여기서 generic 어댑터를 만들고, 그 전에는 주입(adapter=)으로만 동작한다.
+    # 범용 어댑터 (미제공 시 adapter= 주입 필요)
     try:
         from logosfuzz.generate.base import make_build_adapter  # type: ignore
     except ImportError as exc:
@@ -502,9 +493,7 @@ class BuildStage:
             build_system, self.workspace_root, config=config, bazel=bazel,
             timeout_s=timeout_s,
         )
-        # 빌드 시스템 이름과 에러 분류기는 컨트롤러에 하드코딩하지 않고 어댑터에서
-        # 받는다(프로필/어댑터 기반). bazel 어댑터는 build_system="bazel" 과
-        # classify_build_error 를 제공한다.
+        # 빌드 시스템 이름과 에러 분류기는 어댑터에서 수신
         self.build_system = getattr(self.adapter, "build_system", build_system)
         self.classify_errors = classify_errors or getattr(
             self.adapter, "classify_build_error", None)
@@ -1141,16 +1130,10 @@ def run_pipeline_mode(args) -> int:
 
 
 def run_generic_mode(args) -> int:
-    """비-Bazel(cmake/ninja 등) 대상의 BUILD 단계.
-
-    컨트롤러의 하드코딩은 제거돼(``build_system``·어댑터·분류기 모두 어댑터에서
-    받음) 범용 어댑터만 주입되면 돈다. 다만 범용 빌드 어댑터와 TargetProfile 은
-    서원의 GENERIC-A-profile(base.py)에 있고 아직 dev 에 병합되지 않았다. 병합되면
-    여기서 프로필(``profile.build.system``)로 어댑터를 만들어 ``BuildStage(...,
-    adapter=generic_adapter, build_system="generic")`` 로 넘긴다.
-    """
-    print("[ERROR] --mode generic 은 GENERIC-A-profile(base.py) 병합 후 활성화된다. "
-          "현재 dev 에는 범용 빌드 어댑터/TargetProfile 이 없다.", file=sys.stderr)
+    """비-Bazel(cmake/ninja 등) 대상 BUILD 단계 (``logosfuzz run`` 안내 후 종료)"""
+    print("[ERROR] 범용(비-Bazel) 대상은 이 컨트롤러가 아니라 "
+          "`logosfuzz run --profile targets/<name>.json --budget <sec>` 로 돌린다 "
+          "(EXT 부터 ANA 까지 한 줄).", file=sys.stderr)
     return 2
 
 

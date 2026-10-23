@@ -16,7 +16,7 @@ GENERIC = load_profile(REPO_ROOT / "targets" / "libsndfile.json", base_dir=REPO_
 
 
 def _extract_automotive(text, path="<memory>"):
-    """score::Result 계약은 자동차 프로필에서만 켜진다."""
+    """score::Result 계약은 자동차 프로필에서만 활성화"""
     return extract_from_text(text, path=path, profile=AUTOMOTIVE)
 
 SAMPLE = """
@@ -106,7 +106,7 @@ def test_extract_null_check_constraint():
     null_checks = _find(decode.constraints, "null_check", "buf")
 
     assert null_checks, f"expected a null_check for buf, got {_kinds(decode.constraints)}"
-    # early return 이 뒤따르므로 신뢰도가 높아야 한다
+    # early return 이 뒤따르므로 높은 신뢰도 필요
     assert null_checks[0].confidence >= 0.9
     assert "NULL" in null_checks[0].description
 
@@ -116,7 +116,7 @@ def test_extract_range_check_flips_operator_on_early_exit():
     range_checks = _find(decode.constraints, "range_check", "len")
 
     assert range_checks
-    # `if (len == 0) return -1;` 은 len != 0 요구가 아니라 비교 기록으로 남는다.
+    # `if (len == 0) return -1;` 은 len != 0 요구가 아닌 비교 기록
     assert any("len" in c.description for c in range_checks)
 
 
@@ -131,9 +131,8 @@ def test_range_check_requires_bound_direction():
     assert checks[0].confidence == 0.8
 
 
-# -- 분기 분류 (실제 CPython 헤더에서 발견한 오탐에 대한 회귀 테스트) ----------
-# `if (x != 0) { return compute(x); }` 는 입력을 거부하는 경로가 아니므로
-# 부등호를 뒤집어 "x == 0 이어야 한다"고 결론내면 안 된다.
+# -- 분기 분류 (CPython 헤더 오탐 회귀 테스트) ----------
+# `if (x != 0) { return compute(x); }` 는 거부 경로가 아니므로 부등호 유지 필요
 
 
 def test_non_rejecting_branch_does_not_flip_the_comparison():
@@ -208,13 +207,13 @@ def test_null_check_without_exit_keeps_lower_confidence():
     )
     checks = _find(facts[0].constraints, "null_check", "p")
 
-    # `return 0` 은 실패인지 정상값인지 단정할 수 없어 신뢰도를 낮춘다
+    # `return 0` 은 실패/정상값 단정 불가라 낮은 신뢰도
     assert checks
     assert checks[0].confidence == 0.6
 
 
 def test_branch_segment_does_not_leak_into_following_code():
-    # if 블록에는 exit 이 없고, 그 뒤 문장에 return -1 이 있다.
+    # if 블록에는 exit 없음, 그 뒤 문장에 return -1 존재
     facts = extract_from_text(
         "int f(int n) { if (n > 10) { n = 10; } if (n < 0) { return -1; } return n; }"
     )
@@ -434,7 +433,7 @@ def test_nullable_when_guarded_positively():
 
 
 def test_repeated_constraints_are_deduped_with_a_count():
-    # 생성된 코드는 같은 assert 를 수천 번 반복하기도 한다.
+    # 생성 코드의 같은 assert 대량 반복 상황
     body = " ".join(["assert(check(x));"] * 50)
     facts = extract_from_text(f"void init(int x) {{ {body} }}")
     asserts = _find(facts[0].constraints, "assert")
@@ -484,10 +483,7 @@ def test_example_source_is_parsed():
 
 # -- 매크로로 감싼 함수 정의 ------------------------------------------------
 #
-# libpng 은 공개 API 를 PNG_FUNCTION / PNG_EXPORT 매크로로 선언·정의한다.
-# 그대로 스캔하면 함수 이름이 `PNG_FUNCTION` 으로 잡히고 진짜 API 가 지식베이스
-# 에서 통째로 사라진다. 실제로 libpng 색인에서 `png_create_read_struct` 가 빠져
-# GEN 이 하네스를 만들 때 참조할 수 없었다(2단계 검증).
+# libpng 의 PNG_FUNCTION / PNG_EXPORT 매크로 선언·정의에서 실제 API 이름 복원 검증
 
 MACRO_WRAPPED = """
 /* Create a PNG structure for reading, and allocate any memory needed. */
@@ -523,14 +519,14 @@ def test_macro_wrapped_definition_keeps_params_and_return_type():
     fact = next(f for f in extract_from_text(MACRO_WRAPPED)
                 if f.name == "png_create_read_struct")
 
-    assert fact.return_type == "png_structp"          # 호출 규약 PNGAPI 는 뺀다
+    assert fact.return_type == "png_structp"          # 호출 규약 PNGAPI 제외
     assert [p.name for p in fact.params] == [
         "user_png_ver", "error_ptr", "error_fn", "warn_fn"
     ]
 
 
 def test_macro_wrapped_definition_with_prefix_still_works():
-    """`static PNG_FUNCTION(...)` 처럼 앞에 토큰이 붙은 형태."""
+    """`static PNG_FUNCTION(...)` 처럼 앞에 토큰이 붙은 형태"""
     fact = next(f for f in extract_from_text(MACRO_WRAPPED)
                 if f.name == "png_default_error")
 
@@ -546,7 +542,7 @@ def test_plain_definition_is_unaffected():
 
 
 def test_declaration_style_macro_is_destructured():
-    """PNG_EXPORT(idx, rettype, name, (params)) 형태 - 색인 번호를 버린다."""
+    """PNG_EXPORT(idx, rettype, name, (params)) 형태 - 색인 번호 제거"""
     parsed = destructure_macro_declaration(
         "64, void, png_destroy_read_struct, "
         "(png_structpp a, png_infopp b, png_infopp c)"
@@ -575,7 +571,7 @@ SCORE_SOURCE = (
 def test_score_result_disabled_without_profile():
     facts = extract_from_text(SCORE_SOURCE)
     assert _find(facts[0].constraints, "error_contract") == []
-    # MakeUnexpected 분기도 오류 탈출로 보지 않으므로 부등호를 뒤집지 않는다.
+    # MakeUnexpected 분기도 오류 탈출로 보지 않으므로 부등호 유지
     checks = _find(facts[0].constraints, "range_check", "value")
     assert all("value > 0" not in c.description for c in checks)
 

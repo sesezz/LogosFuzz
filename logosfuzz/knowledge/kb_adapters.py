@@ -1,26 +1,24 @@
-"""EXT-01-04: 통합 지식베이스를 B/D 파트가 쓰는 형태로 바꾸는 어댑터.
+"""EXT-01-04: 통합 지식베이스를 B/D 파트 입력 형태로 변환하는 어댑터
 
-B/D 파트의 파일은 건드리지 않는다. 각 파트가 이미 정해 둔 입력 형태에
-지식베이스를 맞춰 주는 것이 이 모듈의 역할이다.
+B/D 파트 파일 수정 없이 각 파트의 기존 입력 형태에 맞춤
 
 B (스케줄링, SCH-02-02/02-03)
-    `sch_02_02_synergy_scheduler` 의 `ApiMetadata` / `Constraint` 를 그대로
-    만들어 준다. 지금 목업으로 하드코딩된 API 목록을 아래 한 줄로 바꿀 수 있다.
+    `sch_02_02_synergy_scheduler` 의 `ApiMetadata` / `Constraint` 생성
 
         apis, constraints = to_synergy_inputs(kb)
         results = compute_pairwise_synergy(apis, constraints)
 
 B (하네스 생성, GEN-03-01)
     `harness_context(kb, "parse_header")` -> 시그니처 + 제약조건 + 필요한
-    include + 컴파일 플래그까지 담은 프롬프트 블록.
+    include + 컴파일 플래그를 담은 프롬프트 블록
 
 D (컴파일 에러 자가치유, GEN-03-02)
-    `suggest_fixes(kb, compiler_output)` -> gcc/clang 에러 메시지를 파싱해
-    지식베이스에서 찾은 수정 방법을 돌려준다.
+    `suggest_fixes(kb, compiler_output)` -> gcc/clang 에러 메시지 파싱 후
+    지식베이스 기반 수정 방법 반환
 
 D (CVE 리포팅, ANA-05-02)
-    `api_reference(kb, name)` -> 리포트의 affected 필드에 넣을 수 있는
-    api_id/파일/시그니처 참조.
+    `api_reference(kb, name)` -> 리포트 affected 필드용
+    api_id/파일/시그니처 참조
 """
 from __future__ import annotations
 
@@ -35,28 +33,24 @@ from logosfuzz.knowledge.knowledge_base import HEADER_SUFFIXES, KnowledgeBase
 # B (SCH-02-02 / SCH-02-03) 지원
 # ---------------------------------------------------------------------------
 
-# 제약조건 종류를 B의 source_type(같은 규격/출처인지) 으로 바꾸는 기본 규칙.
-# 규격서(UDS/CAN) 기반 제약이 들어오면 그 규격명을 쓰도록 바꾸면 된다.
+# 제약조건 종류를 B의 source_type(규격/출처 동일성)으로 바꾸는 기본 규칙
+# 규격서(UDS/CAN) 기반 제약 도입 시 규격명으로 교체 가능
 _DOC_KINDS = {"doc"}
 
 
 def _build_unit_ref(document: dict) -> str:
     """Return the scheduler boundary for an API.
 
-    Bazel ownership is the authoritative boundary when it is available.  Older
-    knowledge bases do not carry build metadata, so retaining the source file as
-    a fallback keeps their grouping behaviour deterministic and backwards
-    compatible.
+    Bazel build target when available; source file fallback for older KBs.
     """
     return str(document.get("build_target") or document.get("file") or "unknown")
 
 
 def default_source_type(constraint: dict, document: dict) -> str:
-    """제약조건의 출처를 나타내는 문자열.
+    """제약조건 출처 문자열
 
-    B의 `constraint_overlap_score` 는 두 API가 같은 source_type 을 공유하는지로
-    "같은 상태 머신에 속하는가"를 판단한다. 소스코드 기반 제약에서는 같은
-    모듈(정의 파일)에서 나온 제약이 그 역할에 가장 가깝다.
+    B `constraint_overlap_score` 의 같은 상태 머신 판단 기준.
+    소스코드 기반 제약은 정의 모듈(빌드 타깃/파일) 단위
     """
     import os
 
@@ -71,10 +65,9 @@ def to_synergy_inputs(
     source_type: Optional[Callable[[dict, dict], str]] = None,
     min_confidence: float = 0.0,
 ) -> Tuple[List, List]:
-    """SCH-02-02 의 (ApiMetadata 목록, Constraint 목록) 을 만든다.
+    """SCH-02-02 의 (ApiMetadata 목록, Constraint 목록) 생성
 
-    `sch_02_02_synergy_scheduler` 를 임포트할 수 있으면 그 데이터클래스를 쓰고,
-    없으면 같은 필드를 가진 가벼운 대체 객체를 쓴다(테스트/독립 실행용).
+    `sch_02_02_synergy_scheduler` 임포트 불가 시 동일 필드의 대체 객체 사용
     """
     api_cls, constraint_cls = _synergy_classes()
     source_type = source_type or default_source_type
@@ -89,9 +82,7 @@ def to_synergy_inputs(
                 api_id=document["api_id"],
                 func_signature=document["signature"],
                 call_seq=[str(i) for i in document.get("call_seq_ids", [])],
-                # `dep_graph_ref` is the only build/dependency boundary field in
-                # B's existing data model.  Point it at the owning build unit;
-                # legacy KBs still fall back to the source path.
+                # `dep_graph_ref`: owning build unit (source path for legacy KBs)
                 dep_graph_ref=_build_unit_ref(document),
             )
         )
@@ -112,7 +103,7 @@ def to_synergy_inputs(
 
 
 def _synergy_classes():
-    try:  # 실제 B 모듈이 있으면 그대로 쓴다
+    try:  # 실제 B 모듈 우선 사용
         from logosfuzz.schedule.sch_02_02_synergy_scheduler import ApiMetadata, Constraint
 
         return ApiMetadata, Constraint
@@ -137,10 +128,7 @@ def _synergy_classes():
 
 
 def call_sequences_by_file(kb: KnowledgeBase) -> Dict[str, List[str]]:
-    """파일별로 관찰된 내부 API 호출 순서.
-
-    SCH-02-01(Logic Group 추출, 5주차)의 입력 후보로 쓸 수 있다.
-    """
+    """파일별 관찰된 내부 API 호출 순서 (SCH-02-01 입력 후보)"""
     sequences: Dict[str, List[str]] = {}
     for document in sorted(kb.documents, key=lambda d: (d["file"], d["line"])):
         if document["calls_internal"]:
@@ -151,9 +139,7 @@ def call_sequences_by_file(kb: KnowledgeBase) -> Dict[str, List[str]]:
 def build_unit_metadata(kb: KnowledgeBase) -> List[dict]:
     """Expose normalized build-unit records to scheduler/generator consumers.
 
-    Week 2 stores Bazel rules at ``kb.build_units`` and repeats ownership on each
-    API document.  This adapter joins both views and adds the APIs owned by each
-    unit, so downstream parts do not need to know the KB's internal schema.
+    Joins ``kb.build_units`` with per-API ownership and adds owned API ids/names.
     """
     units: Dict[str, dict] = {}
     for raw in kb.build_units:
@@ -238,10 +224,9 @@ def call_sequences_by_build_unit(kb: KnowledgeBase) -> Dict[str, List[str]]:
 
 
 def harness_context(kb: KnowledgeBase, target: int | str, max_constraints: int = 12) -> str:
-    """하네스 생성 프롬프트에 그대로 넣을 수 있는 컨텍스트 블록.
+    """하네스 생성 프롬프트용 컨텍스트 블록
 
-    EXT-01-02 의 제약조건 블록에 "컴파일에 필요한 정보"를 더한 것이다.
-    하네스는 결국 컴파일되어야 하므로 include 와 플래그가 함께 있어야 한다.
+    EXT-01-02 제약조건 블록 + 컴파일 정보(include, 플래그)
     """
     document = kb.api(target)
     if document is None:
@@ -268,9 +253,7 @@ def harness_context(kb: KnowledgeBase, target: int | str, max_constraints: int =
         if document.get("build_deps"):
             lines.append("build deps: " + " ".join(document["build_deps"]))
     if document.get("header"):
-        # 헤더 이름만 쓰고 디렉터리는 -I 로 넘긴다. `#include "..."` 는 그 문을
-        # 포함한 파일 기준으로 해석되므로, 저장소 기준 전체 경로를 넣으면
-        # 하네스가 다른 폴더에 있을 때 컴파일이 깨진다(suggest_fixes 와 같은 규칙).
+        # 헤더 이름만 include, 디렉터리는 -I 전달 (하네스 위치 무관, suggest_fixes 와 동일 규칙)
         include_name, include_dir = _include_parts(document["header"])
         lines.append(f'include: #include "{include_name}"')
         flags = list(document.get("compile_flags") or [])
@@ -336,10 +319,10 @@ _UNDEFINED_REF_RE = re.compile(
 
 
 def suggest_fixes(kb: KnowledgeBase, compiler_output: str) -> List[dict]:
-    """gcc/clang 출력에서 고칠 수 있는 항목을 찾아 수정안을 만든다.
+    """gcc/clang 출력에서 수정 가능한 항목의 수정안 생성
 
     각 항목: {"error", "symbol", "action", "detail", "confidence"}
-    `action` 은 D가 자동 적용을 판단하기 쉽도록 정해진 값만 쓴다.
+    `action` 은 D 자동 적용 판단용 고정 값
     """
     suggestions: List[dict] = []
     seen: set = set()
@@ -358,8 +341,7 @@ def suggest_fixes(kb: KnowledgeBase, compiler_output: str) -> List[dict]:
             "confidence": confidence,
         }
         if include_dir is not None:
-            # `#include "..."` 는 포함하는 파일 기준으로 해석되므로, 헤더 이름만
-            # 쓰고 디렉터리는 -I 로 넘겨야 하네스 위치와 무관하게 컴파일된다.
+            # 헤더 이름만 include, 디렉터리는 -I 전달 (하네스 위치 무관)
             suggestion["include_dir"] = include_dir
             suggestion["compile_flag"] = f"-I{include_dir}"
         suggestions.append(suggestion)
@@ -414,8 +396,7 @@ def suggest_fixes(kb: KnowledgeBase, compiler_output: str) -> List[dict]:
                 f"'{name}' is defined in {document['file']}; compile/link that "
                 f"translation unit", 0.85)
             continue
-        # 선언만 있고 정의가 지식베이스에 없는 경우(예: 헤더만 색인한 라이브러리).
-        # 침묵하는 것보다 "어디에 선언되어 있고 왜 못 찾는지"를 알려주는 편이 낫다.
+        # 선언만 있고 정의 미색인(예: 헤더만 색인한 라이브러리) 시 선언 위치 안내
         declared_in = kb.declaring_files(name)
         if declared_in:
             add("undefined_reference", name, "link_library",
@@ -426,16 +407,12 @@ def suggest_fixes(kb: KnowledgeBase, compiler_output: str) -> List[dict]:
 
 
 def as_include_path(path: str) -> str:
-    """C 소스에 넣을 수 있는 include 경로로 정규화한다.
-
-    Windows 에서 수집한 경로에는 역슬래시가 섞이는데, `#include "a\\b.h"` 는
-    C 에서 이스케이프로 해석되므로 슬래시로 통일해야 한다.
-    """
+    """C 소스용 include 경로 정규화 (Windows 역슬래시를 슬래시로 통일)"""
     return path.replace("\\", "/")
 
 
 def _include_parts(path: str) -> Tuple[str, str]:
-    """헤더 경로를 (#include 에 쓸 이름, -I 로 넘길 디렉터리) 로 나눈다."""
+    """헤더 경로를 (#include 용 이름, -I 용 디렉터리) 로 분리"""
     import os
 
     normalized = as_include_path(path)
@@ -471,7 +448,7 @@ def _suggest_for_type(kb: KnowledgeBase, name: str, add, error: str) -> None:
 
 
 def api_reference(kb: KnowledgeBase, name: str) -> Optional[dict]:
-    """CVE 리포트의 affected/참조 필드에 넣을 최소 정보."""
+    """CVE 리포트 affected/참조 필드용 최소 정보"""
     document = kb.api(name)
     if document is None:
         return None
@@ -492,7 +469,7 @@ def api_reference(kb: KnowledgeBase, name: str) -> Optional[dict]:
 
 def constraints_for_triage(kb: KnowledgeBase, name: str,
                            min_confidence: float = 0.7) -> List[dict]:
-    """ANA-05-01(정탐/오탐 판별)에 근거로 넣을 신뢰도 높은 제약조건만."""
+    """ANA-05-01(정탐/오탐 판별) 근거용 고신뢰 제약조건 목록"""
     document = kb.api(name)
     if document is None:
         return []
@@ -506,26 +483,18 @@ def constraints_for_triage(kb: KnowledgeBase, name: str,
 # 코드 경로를 여는 설정 API (GEN-03-01 하네스 프롬프트용)
 # ---------------------------------------------------------------------------
 #
-# 2단계 검증(Magma libpng)에서 자동 생성 하네스의 커버리지가 823, 사람이 쓴
-# OSS-Fuzz 드라이버가 1454 였다. 원인을 확인하니 차이는 하나였다 - 사람 쪽은
-# `png_set_expand` / `png_set_gray_to_rgb` / `png_set_scale_16` 같은
-# **변환 설정 API 를 의도적으로 켠다.** 그 하나하나가 디코딩 코드의 큰 덩어리를
-# 연다. 자동 생성 하네스는 기본 읽기 경로만 걸었다.
+# `png_set_expand` 등 변환 설정 API 활성화로 디코딩 코드 경로 확장
+# (Magma libpng 커버리지: 자동 하네스 823 vs OSS-Fuzz 드라이버 1454)
 #
-# 지식베이스는 API 목록과 시그니처를 알지만 "이 setter 가 코드 경로를 여는
-# 스위치"라는 것은 모른다. 그래서 이름과 타입만으로 후보를 좁혀 GEN 에 넘긴다.
+# 후보 선정 기준 (이름 패턴 + KB 기존 정보)
+#   1. 대상과 같은 상태 핸들을 첫 인자로 받는 함수
+#   2. 헤더에 선언된 공개 API (내부 헬퍼 png_colorspace_set_* 제외)
 #
-# 좁히는 기준 두 가지 (둘 다 KB 가 이미 아는 사실이다)
-#   1. 대상과 **같은 상태 핸들**을 첫 인자로 받는다 - 그 핸들의 동작을 바꾼다
-#   2. 헤더에 선언된 **공개 API** 다 - 내부 헬퍼(png_colorspace_set_*)를 뺀다
-#
-# libpng 실측: 이 기준으로 OSS-Fuzz 가 켜는 7개를 모두 회수한다.
+# libpng 실측: OSS-Fuzz 활성화 API 7개 전부 회수
 
 _CONFIG_NAME_RE = re.compile(r"_(set|option|enable|disable|add|with)(_|$)")
 
-# 비공개 헤더 표지. `pngpriv.h` 처럼 라이브러리 내부용으로만 배포되는 헤더에
-# 선언된 것은 공개 API 가 아니다. 이걸 구분하지 않으면 `png_colorspace_set_*`
-# 같은 내부 헬퍼가 하네스 프롬프트에 섞인다.
+# 비공개 헤더 표지 (`pngpriv.h` 등 내부용 헤더 선언은 공개 API 에서 제외)
 _PRIVATE_HEADER_RE = re.compile(r"(priv|private|internal|impl|detail)", re.I)
 
 
@@ -545,18 +514,17 @@ def _first_param_type(document: dict) -> str:
 def configuration_apis(kb: KnowledgeBase, handle_type: str,
                        public_only: bool = True,
                        limit: int = 60) -> List[dict]:
-    """``handle_type`` 의 동작을 바꾸는 공개 설정 API 목록.
+    """``handle_type`` 의 동작을 바꾸는 공개 설정 API 목록
 
     Args:
-        kb: 통합 지식베이스.
+        kb: 통합 지식베이스
         handle_type: 상태 핸들 타입 이름의 일부(예: ``"png_struct"``).
-            libpng 처럼 ``png_structp``/``png_structrp``/``png_const_structrp``
-            로 갈라지는 별칭을 한 번에 잡으려고 부분 일치를 쓴다.
-        public_only: 헤더에 선언된 API 만 남긴다.
-        limit: 최대 개수.
+            ``png_structp``/``png_const_structrp`` 등 별칭 포괄용 부분 일치
+        public_only: 헤더에 선언된 API 만 유지
+        limit: 최대 개수
 
     Returns:
-        ``{"function", "signature", "doc"}`` dict 목록. 이름 순 정렬.
+        ``{"function", "signature", "doc"}`` dict 목록 (이름 순 정렬)
     """
     if not handle_type:
         return []
@@ -584,7 +552,7 @@ def configuration_apis(kb: KnowledgeBase, handle_type: str,
 
 
 def render_configuration_apis(entries: Sequence[dict]) -> str:
-    """설정 API 목록을 하네스 프롬프트 조각으로 직렬화한다."""
+    """설정 API 목록의 하네스 프롬프트 조각 직렬화"""
     if not entries:
         return ""
     lines = [

@@ -102,10 +102,9 @@ def test_nm_ground_truth_finds_definitions(tree):
 
 
 def test_nm_ground_truth_keeps_underscore_prefixed_functions(tmp_path):
-    """`_internal` 은 C 에서 정상인 이름이다.
+    """`_internal` 은 C 에서 정상 이름
 
-    정답셋에서 빠지면 정상 추출이 오탐으로 잘못 채점된다(precision 이 실제보다
-    낮게 나온다). 일부 툴체인이 모든 C 심볼에 밑줄을 덧붙이는 것과 혼동하면 안 된다.
+    정답셋 누락 시 정상 추출이 오탐으로 채점됨 (툴체인의 밑줄 접두와 구분 필요)
     """
     if not (shutil.which("gcc") and shutil.which("nm")):
         pytest.skip("gcc/nm 이 없음")
@@ -156,7 +155,7 @@ def test_resolve_falls_back_and_records_the_reason(tree):
     path = _labels(tree, ["lib_open", "lib_read"])
     truth = resolve_ground_truth([str(tree)], labels=path)
 
-    # 이 환경에는 libclang 이 없으므로 clang 은 건너뛰어야 한다
+    # libclang 부재 환경이므로 clang 은 건너뜀
     assert truth.source in ("clang", "nm", "labels")
     if truth.source != "clang":
         assert "폴백 사유" in truth.note or truth.source == "labels"
@@ -204,7 +203,7 @@ private:
     assert "-std=c++17" in truth.note
 
 
-# -- 추출 정확도 (평가기가 오류를 실제로 잡아내는가) -------------------------
+# -- 추출 정확도 (평가기의 실제 오류 검출 여부) -----------------------------
 
 
 def test_perfect_extraction_scores_one(kb, tree):
@@ -216,7 +215,7 @@ def test_perfect_extraction_scores_one(kb, tree):
 
 
 def test_missing_api_lowers_recall(kb, tree):
-    # 정답에는 있는데 추출기가 못 찾은 함수
+    # 정답에는 있으나 추출기가 놓친 함수
     truth = label_ground_truth(_labels(tree, ["lib_open", "lib_read", "lib_close"]))
     result = evaluate_extraction(kb, truth)
 
@@ -226,7 +225,7 @@ def test_missing_api_lowers_recall(kb, tree):
 
 
 def test_extra_api_lowers_precision(kb, tree):
-    # 추출기가 찾았지만 정답에 없는 함수
+    # 추출기가 찾았으나 정답에 없는 함수
     truth = label_ground_truth(_labels(tree, ["lib_open"]))
     result = evaluate_extraction(kb, truth)
 
@@ -243,7 +242,7 @@ def test_param_count_mismatch_is_detected(kb, tree):
 
 
 def test_detail_metrics_are_none_when_not_comparable(kb, tree):
-    """nm 정답셋처럼 인자/반환형 정보가 없으면 0% 가 아니라 미측정이어야 한다."""
+    """nm 정답셋처럼 인자/반환형 정보가 없으면 0% 가 아닌 미측정 처리"""
     truth = GroundTruth(source="nm", apis={
         "lib_open": {"params": None, "return_type": ""},
         "lib_read": {"params": None, "return_type": ""},
@@ -289,7 +288,7 @@ def test_auto_queries_drop_subtokens_of_the_name(kb):
     queries = {q["expect"]: q["query"] for q in build_auto_queries(kb)}
 
     if "lib_read" in queries:
-        # 'lib' / 'read' 부분 토큰도 지워져야 이름 노출이 아닌 검색력을 잰다
+        # 'lib' / 'read' 부분 토큰도 제거해야 이름 노출이 아닌 검색력 측정 가능
         assert " read " not in f" {queries['lib_read'].lower()} "
 
 
@@ -347,7 +346,7 @@ def test_evaluate_produces_all_three_sections(tree):
 
 
 def test_report_is_console_safe(tree):
-    """cp949 콘솔에서도 깨지지 않아야 한다 (팀 환경이 Windows)."""
+    """cp949 콘솔에서도 깨지지 않음 (팀 환경이 Windows)"""
     result = evaluate([str(tree)], labels=_labels(tree, ["lib_open", "lib_read"]))
 
     render_report(result).encode("cp949")

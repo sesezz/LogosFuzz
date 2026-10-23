@@ -521,7 +521,7 @@ def test_list_groups_summarises_groups_without_llm(monkeypatch):
     from logosfuzz.schedule import logic_groups
 
     groups = [_group("lg_a", [1, 2], ["//x:a"]), _group("lg_b", [3], ["//x:b"])]
-    monkeypatch.setattr(logic_groups, "build_groups", lambda kb: groups)
+    monkeypatch.setattr(logic_groups, "build_groups", lambda kb, **kw: groups)
     kb = _FakeKb([
         {"api_id": 1, "function": "f1"}, {"api_id": 2, "function": "f2"}, {"api_id": 3, "function": "g1"},
     ])

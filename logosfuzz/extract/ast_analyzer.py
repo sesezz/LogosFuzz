@@ -5,8 +5,8 @@ Usage:
   python -m logosfuzz.extract.ast_analyzer --profile targets/libsndfile.json --output out.json
 
 ``--profile`` 이 비-Bazel(cmake/prebuilt) 대상이면 compile_commands.json 의
--I/-isystem/-D/-std 를 clang 인자로 쓰고(:mod:`logosfuzz.extract.compile_db`),
-Bazel 대상이면 기존처럼 ``bazel query`` 그래프를 쓴다. 프로필이 없으면 기존 동작 그대로.
+-I/-isystem/-D/-std 를 clang 인자로 사용(:mod:`logosfuzz.extract.compile_db`),
+Bazel 대상이면 ``bazel query`` 그래프 사용 (프로필 없으면 기존 동작)
 
 This script will use clang Python bindings if available; otherwise falls back to a
 lightweight regex-based extractor (includes, simple function names).
@@ -35,12 +35,9 @@ _libclang_resolved = False
 
 
 def _resolve_libclang():
-    """기본 탐색이 실패할 때만 pip ``libclang`` 패키지에 동봉된 라이브러리를 등록한다.
+    """기본 탐색 실패 시에만 pip ``libclang`` 동봉 라이브러리 등록
 
-    Windows에서는 동봉된 ``clang/native/libclang.dll``을 cindex가 자동으로
-    찾지 못해, 원인 없이 정규식 폴백에 빠진다(=다운스트림 API 0개).
-    기본 탐색이 되는 환경(주로 Linux)의 동작까지 바꾸지 않기 위해
-    먼저 그대로 시도해보고, 실패한 경우에만 동봉 라이브러리를 지정한다.
+    Windows에서 동봉 ``clang/native/libclang.dll`` 미탐지로 정규식 폴백되는 문제 대응
     """
     global _libclang_resolved
     if _libclang_resolved or cindex.Config.loaded:
@@ -49,7 +46,7 @@ def _resolve_libclang():
 
     try:
         cindex.Index.create()
-        return  # 기본 탐색 성공 - 건드리지 않는다
+        return  # 기본 탐색 성공 시 유지
     except Exception:
         pass
 
@@ -72,8 +69,8 @@ def clang_args_for_path(path, clang_args=None, language=None):
     suffix.  An explicit ``-x`` or ``-std`` supplied by the caller always wins;
     otherwise we add a safe project default.
 
-    ``language`` 는 프로필의 ``language``(``"c"``/``"cpp"``)다. ``"c"`` 이면 ``.h`` 를
-    C 헤더로 파싱한다(libsndfile 같은 C 라이브러리). ``None`` 이면 기존 동작.
+    ``language``: 프로필의 ``language``(``"c"``/``"cpp"``). ``"c"`` 이면 ``.h`` 를
+    C 헤더로 파싱(libsndfile 등 C 라이브러리), ``None`` 이면 기존 동작
     """
     args = list(clang_args or [])
     suffix = os.path.splitext(str(path))[1].lower()
@@ -127,13 +124,8 @@ def analyze_with_clang(path, clang_args=None, language=None):
 
     clang_args = clang_args_for_path(path, clang_args, language=language)
 
-    # clang 내장 resource dir(stddef.h 등)은 호출자가 clang_args를 넘겼든
-    # 아니든 항상 붙여야 한다. 이게 빠지면 libclang이 size_t 같은 표준
-    # typedef를 resolve하지 못하고 `int`로 잘못 보고한다.
-    #   실제: dlt_message_header(..., size_t textlength, ...)
-    #   오인: dlt_message_header(..., int    textlength, ...)
-    # 그 시그니처로 하네스가 extern 선언을 만들면 헤더와 conflicting types로
-    # 컴파일이 깨진다(dlt-daemon에서 10건 중 8건이 이 원인이었다).
+    # clang 내장 resource dir(stddef.h 등) 항상 추가
+    # (누락 시 size_t 등 표준 typedef가 `int` 로 추출되어 conflicting types 발생)
     if not any(str(a).startswith("-resource-dir") for a in clang_args):
         import subprocess, shutil
         clang_bin = shutil.which("clang") or "clang"
@@ -224,10 +216,8 @@ def analyze_with_clang(path, clang_args=None, language=None):
                 ]
             except Exception:
                 entry['params'] = []
-            # 가변인자(`...`)는 get_arguments()에 나오지 않는다. 표시하지 않으면
-            # 하네스가 `f(char *a, char *b)`로 extern 선언을 만들어 헤더의
-            # `f(char *a, char *b, ...)`와 conflicting types가 된다
-            # (dlt-daemon의 dlt_execute_command에서 실제 발생).
+            # get_arguments()에 없는 가변인자(`...`) 별도 표시
+            # (누락 시 헤더 선언과 conflicting types)
             try:
                 entry['is_variadic'] = bool(node.type.is_function_variadic())
             except Exception:
@@ -311,13 +301,11 @@ def _analysis_files(paths):
 
 
 class ProfileCompileContext:
-    """비-Bazel 프로필의 파일별 clang 인자 공급자.
+    """비-Bazel 프로필의 파일별 clang 인자 공급자
 
-    compile_commands.json 에 항목이 있는 소스는 그 파일의 플래그를 쓰고,
-    항목이 없는 파일(주로 헤더)은 전체 합집합을 쓰되 ``-std`` 는 빼서 파일
-    언어 기본값을 따르게 한다(C 프로젝트의 -std=gnu99 가 .hpp 에 붙지 않도록).
-    프로필의 ``build.include_dirs`` 는 항상 뒤에 붙인다. compile_commands.json 이
-    아직 없으면(configure 전) 경고만 남기고 include_dirs 만으로 진행한다.
+    compile_commands.json 항목이 있는 소스는 해당 파일 플래그, 항목 없는 파일(주로 헤더)은
+    ``-std`` 를 뺀 전체 합집합 사용 (C 프로젝트의 -std=gnu99 가 .hpp 에 붙지 않도록)
+    프로필 ``build.include_dirs`` 는 항상 뒤에 추가, compile_commands.json 부재 시 경고 후 include_dirs 만 사용
     """
 
     def __init__(self, profile):
@@ -339,7 +327,7 @@ class ProfileCompileContext:
         self.include_args = [f"-I{profile.abs(d)}" for d in profile.build.include_dirs]
 
     def files(self):
-        """프로필만 주어졌을 때의 분석 후보: compile_db 소스 + include_dirs."""
+        """프로필만 주어졌을 때의 분석 후보: compile_db 소스 + include_dirs"""
         candidates = [path for path in self.by_file if os.path.exists(path)]
         candidates.extend(
             str(self.profile.abs(d)) for d in self.profile.build.include_dirs
@@ -357,8 +345,8 @@ class ProfileCompileContext:
 def analyze_paths(paths, clang_args=None, bazel_graph=None, profile=None):
     """Analyze paths, applying Bazel compile context when it is available.
 
-    ``profile`` 이 비-Bazel 대상이면 compile_db 플래그를 파일별로 덧붙인다.
-    Bazel 프로필은 ``bazel_graph`` 경로를 그대로 쓰므로 언어 정보만 반영된다.
+    ``profile`` 이 비-Bazel 대상이면 compile_db 플래그를 파일별로 추가,
+    Bazel 프로필은 ``bazel_graph`` 경로 그대로 사용 (언어 정보만 반영)
     """
     language = profile.language if profile is not None else None
     profile_ctx = None
@@ -420,7 +408,7 @@ def main(argv=None):
 
     bazel_graph = None
     if profile is not None and profile.is_bazel and not (args.bazel_workspace or args.bazel_target):
-        # 자동차(Bazel) 프로필은 기존 bazel query 경로로 보낸다.
+        # 자동차(Bazel) 프로필은 기존 bazel query 경로 사용
         args.bazel_workspace = str(profile.abs(profile.build.bazel.workspace))
         args.bazel_target = [profile.build.bazel.target]
     if args.bazel_workspace or args.bazel_target:

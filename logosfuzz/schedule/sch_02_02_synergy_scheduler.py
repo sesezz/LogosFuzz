@@ -21,7 +21,7 @@ SCH-02-01(Logic Group 패키징)에서 이미 "연관 가능성이 있는 API �
 
 3) 제약조건 공유도 (CONSTRAINT.rule_text / source_type)
    RAG로 뽑은 규격서 제약이 두 API에 동시에 걸려 있으면(source_type이 같은 규격,
-   예: UDS 세션 관리) 같은 상태 머신에 속한다고 판단.
+   예: 핸들 열기·읽기 순서) 같은 상태 머신에 속한다고 판단.
 
 SCH-02-03(미탐색 경로 가중치)은 여기서 만든 synergy_score에
 coverage 기반 novelty factor를 곱하는 별도 모듈로 연결한다.
@@ -40,8 +40,8 @@ import re
 @dataclass
 class ApiMetadata:
     api_id: int
-    func_signature: str          # 예: "int uds_session_start(uds_ctx_t *ctx, uint8_t level)"
-    call_seq: list[str]          # 예: ["can_open", "uds_session_start", "uds_read_did"]
+    func_signature: str          # 예: "int sf_seek(sf_ctx_t *ctx, uint8_t whence)"
+    call_seq: list[str]          # 예: ["sf_open", "sf_seek", "sf_read_short"]
     dep_graph_ref: str = ""
 
 
@@ -50,7 +50,7 @@ class Constraint:
     constraint_id: int
     api_id: int
     rule_text: str
-    source_type: str             # 예: "UDS_SPEC", "CAN_SPEC"
+    source_type: str             # 예: "SPEC_DOC", "INTERNAL"
 
 
 # ---------------------------------------------------------------------
@@ -179,11 +179,11 @@ def rank_logic_groups(logic_groups: dict[str, list[int]],
 
 if __name__ == "__main__":
     apis = [
-        ApiMetadata(101, "int can_open(can_ctx_t *ctx)",
+        ApiMetadata(101, "int sf_open(sf_ctx_t *ctx)",
                     ["101", "102", "103", "101", "102"]),
-        ApiMetadata(102, "int uds_session_start(uds_ctx_t *ctx, uint8_t level)",
+        ApiMetadata(102, "int sf_seek(sf_ctx_t *ctx, uint8_t whence)",
                     ["101", "102", "103"]),
-        ApiMetadata(103, "int uds_read_did(uds_ctx_t *ctx, uint16_t did)",
+        ApiMetadata(103, "int sf_read_short(sf_ctx_t *ctx, uint16_t items)",
                     ["102", "103"]),
         ApiMetadata(201, "int json_parse(const char *buf, size_t len)",
                     ["201", "202"]),
@@ -192,13 +192,13 @@ if __name__ == "__main__":
     ]
 
     constraints = [
-        Constraint(1, 102, "session start must precede read_did", "UDS_SPEC"),
-        Constraint(2, 103, "read_did requires active session", "UDS_SPEC"),
-        Constraint(3, 101, "can_open must be called before any UDS API", "CAN_SPEC"),
+        Constraint(1, 102, "sf_seek must follow a successful sf_open", "SPEC_DOC"),
+        Constraint(2, 103, "sf_read_short requires an opened handle", "SPEC_DOC"),
+        Constraint(3, 101, "check the sf_open handle for NULL before any sf_read_* call", "SPEC_DOC"),
     ]
 
     logic_groups = {
-        "lg_1_uds": [101, 102, 103],
+        "lg_1_sndfile": [101, 102, 103],
         "lg_2_json": [201, 202],
     }
 

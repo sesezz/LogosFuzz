@@ -58,12 +58,8 @@ class SelfHealLoop:
     hitl: Optional[object] = None       # logosfuzz.control.hitl.HITLManager (선택)
     on_round: Optional[RoundCallback] = None
     knowledge: Optional[Dict[str, str]] = None  # RAG 힌트(선택)
-    # 초안과 **모든 수정 라운드**에 적용할 후처리. `hygiene.sanitize_harness` 를
-    # 넣으면 LLM 이 덧붙인 대상 함수 재선언을 결정적으로 걷어낸다.
-    #
-    # 초안에만 걸면 소용이 없다 - 수정 라운드에서 LLM 이 같은 선언을 다시 써 넣어
-    # `conflicting types` 가 부활하고, 루프는 같은 에러를 반복하다 정체로 끝난다.
-    # 그래서 훅을 루프 안에 둔다.
+    # 초안과 모든 수정 라운드에 적용할 후처리 (예: `hygiene.sanitize_harness`)
+    # 수정 라운드의 재선언 부활 방지를 위해 루프 안에 배치
     sanitize: Optional[Callable[[str, HarnessDraft], str]] = None
 
     # GEN-03-02 에러 분류기. 빌드 로그 전문을 받아 "무엇이 잘못됐고 무엇을 고쳐야
@@ -111,7 +107,7 @@ class SelfHealLoop:
 
     # --------------------------------------------------------------------- #
     def _clean(self, source: str, draft: HarnessDraft) -> str:
-        """후처리 훅. 실패해도 루프를 멈추지 않는다."""
+        """후처리 훅 (실패해도 루프 계속)"""
         if self.sanitize is None:
             return source
         try:
