@@ -1,8 +1,8 @@
 /*
- * proto_parser 수동 하네스 (GENERIC-C 임베디드 샘플 E2E 용).
+ * proto_parser 수동 하네스 (GENERIC-C 임베디드 샘플 E2E 용)
  *
- * 사람이 작성한 하네스다. 자동 생성 성공으로 세지 않는다.
- * proto_create 의 NULL 반환을 확인하고, 반환 코드 계약대로 proto_parse 를 부른다.
+ * 사람이 작성한 하네스. 자동 생성 성공 집계에서 제외
+ * proto_create 의 NULL 반환 확인 후 반환 코드 계약대로 proto_parse 호출
  */
 #include <stddef.h>
 #include <stdint.h>

@@ -2,11 +2,11 @@
 GEN-03 하네스 생성 - 컴파일러 추상화
 ====================================
 
-자가 치유 루프가 사용하는 컴파일 백엔드.
+자가 치유 루프가 사용하는 컴파일 백엔드
 
 - Compiler          : 인터페이스
 - SubprocessCompiler: clang/gcc를 subprocess로 호출하는 실제 구현(컴파일 검증용 -c 기본)
-- FakeCompiler      : 테스트/데모용. 소스에 특정 마커가 있으면 성공/실패를 흉내냄
+- FakeCompiler      : 테스트/데모용. 소스에 특정 마커가 있으면 성공/실패를 모사
 """
 from __future__ import annotations
 
@@ -49,20 +49,20 @@ _CPP_LANGUAGES = ("cpp", "c++", "cxx")
 
 
 class Compiler(ABC):
-    """하네스 소스를 컴파일하고 결과를 반환하는 인터페이스."""
+    """하네스 소스를 컴파일하고 결과를 반환하는 인터페이스"""
 
     @abstractmethod
     def compile(self, draft: HarnessDraft, source: Optional[str] = None) -> CompileResult:
-        """source가 주어지면 그 소스를, 아니면 draft.source를 컴파일한다."""
+        """source가 주어지면 그 소스를, 아니면 draft.source를 컴파일"""
         raise NotImplementedError
 
 
 class SubprocessCompiler(Compiler):
     """
-    실제 컴파일러(clang/gcc)를 호출한다.
+    실제 컴파일러(clang/gcc)를 호출
 
-    기본은 `-c`(오브젝트만 생성)로 '컴파일 가능 여부'만 검증한다.
-    libFuzzer 링크까지 하려면 link=True 및 fuzzer_flags를 지정.
+    기본은 `-c`(오브젝트만 생성)로 '컴파일 가능 여부'만 검증
+    libFuzzer 링크까지 하려면 link=True 및 fuzzer_flags 지정
     """
 
     def __init__(
@@ -161,12 +161,12 @@ class SubprocessCompiler(Compiler):
 
 class FakeCompiler(Compiler):
     """
-    테스트/데모용 가짜 컴파일러.
+    테스트/데모용 가짜 컴파일러
 
     규칙:
-      - 소스에 `success_marker`(기본 "// COMPILE_OK")가 포함되면 성공.
-      - 아니면 `error_template`을 렌더링한 실패 로그를 반환.
-    이렇게 하면 LLM 스텁이 마커를 추가하는 것으로 '수정'을 흉내낼 수 있다.
+      - 소스에 `success_marker`(기본 "// COMPILE_OK")가 포함되면 성공
+      - 아니면 `error_template`을 렌더링한 실패 로그 반환
+    LLM 스텁이 마커를 추가하는 것으로 '수정'을 모사 가능
     """
 
     def __init__(

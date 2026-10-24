@@ -1,4 +1,4 @@
-"""ANA-05-03 STEP 2(KB 변경 제안/diff + 오버라이드 저장소) 단위 테스트."""
+"""ANA-05-03 STEP 2(KB 변경 제안/diff + 오버라이드 저장소) 단위 테스트"""
 from __future__ import annotations
 
 import unittest
@@ -93,7 +93,7 @@ class TestRebuildWithOverrides(unittest.TestCase):
         self.assertIn("오탐 원인 요약", document["text"])
         self.assertIn("updated_at", document)
         self.assertEqual(document["self_correction_notes"], "- [crash-1] 오탐 원인 요약")
-        # 원본 kb는 그대로 유지되어야 REJECT 시 그냥 버리기만 하면 된다
+        # 원본 kb가 그대로 유지되어야 REJECT 시 폐기만으로 충분
         self.assertNotIn("updated_at", kb.api(101))
 
 

@@ -1,21 +1,21 @@
-"""에러계약 플러그인 레지스트리 (GENERIC-C).
+"""에러계약 플러그인 레지스트리 (GENERIC-C)
 
-대상 라이브러리가 실패를 알리는 규약(에러계약)은 대상마다 다르다.
+대상 라이브러리가 실패를 알리는 규약(에러계약)은 대상마다 상이
 
-    none           계약을 보지 않는다(기본값).
-    c_return_code  C 반환 코드/NULL 반환 — libsndfile, 임베디드 C 모듈 등.
-    score_result   S-CORE ``score::Result<T>`` — 자동차(baselibs) 대상.
+    none           계약 미확인(기본값)
+    c_return_code  C 반환 코드/NULL 반환 — libsndfile, 임베디드 C 모듈 등
+    score_result   S-CORE ``score::Result<T>`` — 자동차(baselibs) 대상
 
-프로필의 ``error_contract`` 값으로 :func:`get_contract` 를 불러 플러그인을 고른다.
-플러그인은 모두 같은 네 함수를 가진다::
+프로필의 ``error_contract`` 값으로 :func:`get_contract` 를 호출해 플러그인 선택
+모든 플러그인이 같은 네 함수 제공::
 
     analyze(record, kb=None, profile=None) -> 근거
     derive_signals(근거, bug_type)         -> (점수 보정치, 신호 목록)
     render_rationale(근거)                 -> HITL 근거문에 덧붙일 문장
     render_for_prompt(근거)                -> LLM 판별기 프롬프트 증거 섹션
 
-판별기(``triage.py``)는 근거 객체만 받는 경우가 있으므로 :func:`contract_for_evidence`
-로 근거 타입에서 플러그인을 되찾는다.
+판별기(``triage.py``)는 근거 객체만 받는 경우가 있어 :func:`contract_for_evidence`
+로 근거 타입에서 플러그인 역조회
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ DEFAULT_CONTRACT = "none"
 
 @dataclass(frozen=True)
 class ErrorContract:
-    """에러계약 플러그인 1종."""
+    """에러계약 플러그인 1종"""
 
     name: str
     evidence_type: type
@@ -43,7 +43,7 @@ class ErrorContract:
 
 
 def _score_analyze(record, kb=None, profile=None):
-    # score::Result 판별은 프로필을 쓰지 않는다(기존 동작 그대로).
+    # score::Result 판별은 프로필 미사용(기존 동작 유지)
     return _score_result.analyze_error_contract(record, kb)
 
 
@@ -80,10 +80,10 @@ def available_contracts() -> list[str]:
 
 
 def get_contract(name: Optional[str]) -> ErrorContract:
-    """이름으로 플러그인을 찾는다. ``None``/빈 문자열이면 ``none``.
+    """이름으로 플러그인 조회. ``None``/빈 문자열이면 ``none``
 
     Raises:
-        ValueError: 등록되지 않은 이름.
+        ValueError: 등록되지 않은 이름
     """
     key = name or DEFAULT_CONTRACT
     try:
@@ -95,12 +95,12 @@ def get_contract(name: Optional[str]) -> ErrorContract:
 
 
 def contract_for_profile(profile) -> ErrorContract:
-    """프로필의 ``error_contract`` 로 플러그인을 고른다. 프로필에 값이 없으면 ``none``."""
+    """프로필의 ``error_contract`` 로 플러그인 선택. 프로필에 값이 없으면 ``none``"""
     return get_contract(getattr(profile, "error_contract", None))
 
 
 def contract_for_evidence(evidence) -> Optional[ErrorContract]:
-    """근거 객체의 타입으로 플러그인을 찾는다. 모르는 타입이면 None."""
+    """근거 객체 타입으로 플러그인 조회. 모르는 타입이면 None"""
     for contract in _REGISTRY.values():
         if isinstance(evidence, contract.evidence_type):
             return contract
@@ -108,12 +108,12 @@ def contract_for_evidence(evidence) -> Optional[ErrorContract]:
 
 
 class ContractProvider:
-    """클러스터 → 에러계약 근거. 판별기의 ``contract_provider`` 로 주입한다.
+    """클러스터 → 에러계약 근거. 판별기의 ``contract_provider`` 로 주입
 
     Args:
-        contract: 플러그인 또는 이름(``"c_return_code"`` 등).
-        kb: KnowledgeBase (선택).
-        profile: TargetProfile (선택). ``c_return_code`` 는 ``profile.apis`` 를 쓴다.
+        contract: 플러그인 또는 이름(``"c_return_code"`` 등)
+        kb: KnowledgeBase (선택)
+        profile: TargetProfile (선택). ``c_return_code`` 는 ``profile.apis`` 사용
     """
 
     def __init__(self, contract, kb=None, profile=None) -> None:

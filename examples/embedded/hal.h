@@ -1,10 +1,10 @@
 /*
- * 최소 HAL 선언 (GENERIC-C 임베디드 샘플).
+ * 최소 HAL 선언 (GENERIC-C 임베디드 샘플)
  *
- * 실제 펌웨어에서는 벤더 HAL(STM32Cube 등)이 정의를 제공한다. 호스트 퍼징
- * 빌드에는 정의가 없으므로 링크 단계에서 미정의 심볼이 나고, LogosFuzz 가
- * stub_allowlist(HAL_*) 에 맞는 심볼만 weak 스텁으로 채운다.
- * 의도적으로 선언만 두고 정의는 두지 않는다.
+ * 실제 펌웨어에서는 벤더 HAL(STM32Cube 등)이 정의 제공
+ * 호스트 퍼징 빌드에는 정의가 없어 링크 단계에서 미정의 심볼 발생
+ * LogosFuzz 가 stub_allowlist(HAL_*) 에 맞는 심볼만 weak 스텁으로 보충
+ * 의도적으로 선언만 두고 정의는 생략
  */
 #ifndef LOGOSFUZZ_EXAMPLE_HAL_H
 #define LOGOSFUZZ_EXAMPLE_HAL_H

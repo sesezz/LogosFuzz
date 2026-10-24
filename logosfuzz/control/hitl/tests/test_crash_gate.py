@@ -1,4 +1,4 @@
-"""CTR-06-02 CRASH_TRIAGE 크래시 승인 게이트(4주차 활성화) 단위 테스트."""
+"""CTR-06-02 CRASH_TRIAGE 크래시 승인 게이트(4주차 활성화) 단위 테스트"""
 from __future__ import annotations
 
 from logosfuzz.control.hitl import hooks
@@ -28,7 +28,7 @@ def test_confident_true_positive_is_auto_verified():
 
 
 def test_needs_review_goes_to_human_even_with_high_confidence():
-    """규칙 판별기는 needs_review 에 최대 0.9 신뢰도를 준다 - 자동 승인되면 안 된다."""
+    """규칙 판별기는 needs_review 에 최대 0.9 신뢰도 부여 - 자동 승인 불가 확인"""
     gate, hitl = _gate()
     approval = gate.review("CL-1", "needs_review", 0.9)
 
@@ -75,7 +75,7 @@ def test_human_edit_flips_false_positive_to_verified():
 
 
 def test_human_decision_survives_changed_auto_verdict():
-    """사람의 판단이 자동 판정보다 우선한다 - 판별기가 바뀌어도 덮어쓰지 않는다."""
+    """사람의 판단이 자동 판정보다 우선 - 판별기가 바뀌어도 덮어쓰지 않음"""
     gate, hitl = _gate()
     pending = gate.review("CL-1", "true_positive", 0.7)
     hitl.decide(pending.item_id, DecisionType.REJECT, reviewer="minju")
@@ -100,7 +100,7 @@ def test_gate_state_persists_in_json_store(tmp_path):
     pending = gate.review("CL-1", "true_positive", 0.7)
     hitl.decide(pending.item_id, DecisionType.APPROVE, reviewer="minju")
 
-    # 다른 프로세스(다음 analyze 실행)가 같은 저장소를 연다
+    # 다른 프로세스(다음 analyze 실행)가 같은 저장소를 여는 상황
     fresh, _ = _gate(JsonReviewStore(path))
     assert fresh.review("CL-1", "true_positive", 0.7).verified
 

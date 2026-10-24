@@ -2,11 +2,11 @@
 ANA-05-03 STEP 5: 감사 로그 (crash_id <-> api_id <-> harness_id 추적성)
 =========================================================================
 
-"어떤 오탐이 어떤 KB 변경과 어떤 재생성을 유발했는가"를 역추적할 수 있도록
+"어떤 오탐이 어떤 KB 변경과 재생성을 유발했는가"의 역추적용
 제안(`KBUpdateProposal`)과 재생성 시도(`RegenerationRecord`)를 하나의
-append-only JSON 파일에 기록한다.
-`logosfuzz.control.hitl.store.JsonReviewStore`와 동일한 패턴(스레드 락 +
-원자적 쓰기)을 따른다.
+append-only JSON 파일에 기록
+`logosfuzz.control.hitl.store.JsonReviewStore`와 동일 패턴(스레드 락 +
+원자적 쓰기)
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ class AuditTrailStore:
 
     # -- 기록 ------------------------------------------------------------- #
     def record_proposal(self, proposal: KBUpdateProposal) -> None:
-        """제안 생성/승인/거부 시점마다 호출 - 최신 상태를 새 항목으로 남긴다."""
+        """제안 생성/승인/거부 시점마다 호출 - 최신 상태를 새 항목으로 기록"""
         with self._lock:
             self._ensure_loaded()
             self._entries.append({"type": "proposal", **proposal.to_dict()})
@@ -67,7 +67,7 @@ class AuditTrailStore:
             return [e for e in self._entries if e.get("api_id") == api_id]
 
     def for_build_target(self, build_target: str) -> List[dict]:
-        """한 Bazel 타깃에 반영된(또는 제안된) 역피드백과 그 재생성 전부."""
+        """한 Bazel 타깃에 반영된(또는 제안된) 역피드백과 그 재생성 전체"""
         with self._lock:
             self._ensure_loaded()
             return [e for e in self._entries if e.get("build_target") == build_target]
@@ -84,7 +84,7 @@ class AuditTrailStore:
 
 
 class InMemoryAuditTrailStore(AuditTrailStore):
-    """테스트/데모용 - 디스크에 쓰지 않는다."""
+    """테스트/데모용 - 디스크 기록 없음"""
 
     def __init__(self) -> None:
         super().__init__(path=None)

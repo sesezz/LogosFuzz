@@ -1,25 +1,25 @@
-"""GENERIC-C 자가치유 컴파일 백엔드: ``adapter_for(profile)`` 의 빌드 어댑터를 쓴다.
+"""GENERIC-C 자가치유 컴파일 백엔드: ``adapter_for(profile)`` 의 빌드 어댑터 사용
 
 자가치유 루프(``selfheal.py``)와 검증 피드백 루프(``feedback_loop.py``)는
-:class:`~logosfuzz.generate.compiler.Compiler` 인터페이스만 안다. 지금까지 구현은
+:class:`~logosfuzz.generate.compiler.Compiler` 인터페이스만 의존. 기존 구현은
 
     SubprocessCompiler  clang -c 로 빠르게 컴파일만 확인
     BazelCompiler       bazel build (자동차/S-CORE)
 
-두 가지였다. CMake/prebuilt 대상(libsndfile, 임베디드 샘플)은 **라이브러리와 링크까지
-해야** 실패 원인(미정의 HAL 심볼 등)이 드러나므로, 서원 파트의 빌드 어댑터
-(``generate/build`` 의 ``CMakeAdapter``/``PrebuiltAdapter``)를 감싸는 백엔드를 둔다.
-기존 두 백엔드는 그대로 남는다.
+두 가지. CMake/prebuilt 대상(libsndfile, 임베디드 샘플)은 **라이브러리와 링크까지
+해야** 실패 원인(미정의 HAL 심볼 등)이 드러나므로, GENERIC-B 빌드 어댑터
+(``generate/build`` 의 ``CMakeAdapter``/``PrebuiltAdapter``)를 감싸는 백엔드 추가
+기존 두 백엔드는 그대로 유지
 
     profile ──adapter_for──▶ BuildAdapter ──AdapterCompiler──▶ SelfHealLoop
                                      ▲
-                       스텁 C 파일을 link_flags 에 더해 다시 만든다(stubs.py)
+                       스텁 C 파일을 link_flags 에 더해 재빌드(stubs.py)
 
 빌드 성공 시 ``CompileResult.artifact_path`` 는 어댑터가 돌려준 실행 파일의 실제
-경로(``BuildResult.binary``)다. EXE 는 이 경로를 ``LogicGroup.harness_path`` 로 쓴다.
+경로(``BuildResult.binary``). EXE 는 이 경로를 ``LogicGroup.harness_path`` 로 사용
 
-``adapter_for`` 는 지연 import 한다. 서원 파트가 머지되기 전에도 이 모듈은 import 되고,
-테스트는 ``adapter_factory`` 로 가짜 어댑터를 주입한다.
+``adapter_for`` 는 지연 import. 빌드 어댑터 머지 전에도 이 모듈은 import 되고,
+테스트는 ``adapter_factory`` 로 가짜 어댑터를 주입
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ _CPP_LANGUAGES = ("cpp", "c++", "cxx")
 
 @dataclass(frozen=True)
 class HarnessBuildSpec:
-    """어댑터에 넘기는 하네스 명세(``HarnessSpecLike`` 와 같은 속성)."""
+    """어댑터에 넘기는 하네스 명세(``HarnessSpecLike`` 와 같은 속성)"""
 
     name: str
     srcs: Tuple[str, ...]
@@ -57,12 +57,12 @@ class HarnessBuildSpec:
 
 
 def default_adapter_factory(work_dir: Optional[Path] = None, **kwargs) -> AdapterFactory:
-    """``adapter_for(profile, work_dir=..., **kwargs)`` 를 부르는 팩토리."""
+    """``adapter_for(profile, work_dir=..., **kwargs)`` 를 호출하는 팩토리"""
 
     def factory(profile):
         try:
             from logosfuzz.generate.build import adapter_for
-        except ImportError as exc:  # 서원 파트(GENERIC-B) 머지 전
+        except ImportError as exc:  # GENERIC-B 빌드 어댑터 머지 전
             raise RuntimeError(
                 "logosfuzz.generate.build.adapter_for 가 없다 — GENERIC-B 빌드 어댑터가 "
                 "머지된 뒤에 쓰거나 adapter_factory 를 주입하라"
@@ -73,7 +73,7 @@ def default_adapter_factory(work_dir: Optional[Path] = None, **kwargs) -> Adapte
 
 
 def _with_extra_link_inputs(profile, extra: List[str]):
-    """프로필의 ``build.link_flags`` 뒤에 파일을 더한 사본(프로필은 frozen 이다)."""
+    """프로필의 ``build.link_flags`` 뒤에 파일을 더한 사본(프로필은 frozen)"""
     if not extra:
         return profile
     build = dataclasses.replace(profile.build,
@@ -82,13 +82,13 @@ def _with_extra_link_inputs(profile, extra: List[str]):
 
 
 class AdapterCompiler(Compiler):
-    """빌드 어댑터로 하네스를 **링크까지** 해 보는 컴파일 백엔드.
+    """빌드 어댑터로 하네스를 **링크까지** 시도하는 컴파일 백엔드
 
     Args:
-        profile: ``TargetProfile`` (cmake / prebuilt).
+        profile: ``TargetProfile`` (cmake / prebuilt)
         adapter_factory: ``profile -> BuildAdapter``. 기본은 ``adapter_for``.
-        work_dir: 스텁 파일을 둘 위치. 기본은 ``<cwd>/out/generic/<profile.name>``.
-        kb: 스텁 시그니처를 찾을 KnowledgeBase (선택).
+        work_dir: 스텁 파일 위치. 기본은 ``<cwd>/out/generic/<profile.name>``
+        kb: 스텁 시그니처를 찾을 KnowledgeBase (선택)
     """
 
     def __init__(
@@ -111,7 +111,7 @@ class AdapterCompiler(Compiler):
     # ------------------------------------------------------------------ #
     @property
     def adapter(self):
-        """현재 스텁 구성을 반영한 어댑터(필요할 때 만든다)."""
+        """현재 스텁 구성을 반영한 어댑터(필요 시 생성)"""
         if self._adapter is None:
             self._adapter = self._factory(self.effective_profile)
         return self._adapter
@@ -122,7 +122,7 @@ class AdapterCompiler(Compiler):
 
     @property
     def effective_profile(self):
-        """스텁 파일을 링크 입력에 더한 프로필."""
+        """스텁 파일을 링크 입력에 추가한 프로필"""
         extra = [str(self.stub_path)] if self.stubs.symbols else []
         return _with_extra_link_inputs(self.profile, extra)
 
@@ -131,11 +131,11 @@ class AdapterCompiler(Compiler):
         return list(self.stubs.symbols)
 
     def apply_stubs(self, symbols) -> List[str]:
-        """스텁을 더하고 파일을 다시 쓴다. 다음 compile 부터 링크에 들어간다."""
+        """스텁 추가 후 파일 재작성. 다음 compile 부터 링크에 포함"""
         added = self.stubs.add(symbols)
         if added:
             self.stubs.write(self.stub_path)
-            self._adapter = None  # link_flags 가 바뀌었으니 어댑터를 새로 만든다
+            self._adapter = None  # link_flags 가 바뀌었으므로 어댑터 재생성
         return added
 
     # ------------------------------------------------------------------ #
@@ -160,7 +160,7 @@ class AdapterCompiler(Compiler):
 
 
 def classifier_for(profile):
-    """빌드 로그 분류기. Bazel 은 기존 분류기, 그 외는 컴파일러·링커 원문 분류기."""
+    """빌드 로그 분류기. Bazel 은 기존 분류기, 그 외는 컴파일러·링커 원문 분류기"""
     if profile is not None and profile.build.system == "bazel":
         from .bazel_errors import classify
 
@@ -172,10 +172,10 @@ def classifier_for(profile):
 
 def compiler_for(profile, *, adapter_factory: Optional[AdapterFactory] = None,
                  work_dir: Path | str | None = None, kb=None) -> AdapterCompiler:
-    """프로필에 맞는 자가치유 컴파일 백엔드.
+    """프로필에 맞는 자가치유 컴파일 백엔드
 
-    Bazel 대상은 하네스마다 BUILD 타깃·소스 경로가 따로 있어서 프로필만으로는 만들 수
-    없다 — 지금처럼 ``BazelCompiler(workspace, target, source_path)`` 를 직접 쓴다.
+    Bazel 대상은 하네스마다 BUILD 타깃·소스 경로가 따로 있어서 프로필만으로 생성
+    불가 — ``BazelCompiler(workspace, target, source_path)`` 직접 사용
 
     Raises:
         ValueError: ``build.system == "bazel"``.
@@ -188,7 +188,7 @@ def compiler_for(profile, *, adapter_factory: Optional[AdapterFactory] = None,
 def heal_loop_for(profile, llm, *, max_round: int = 3, kb=None,
                   adapter_factory: Optional[AdapterFactory] = None,
                   work_dir: Path | str | None = None, **loop_kwargs):
-    """프로필 하나로 자가치유 루프를 조립한다(컴파일 백엔드·분류기·스텁 정책)."""
+    """프로필 하나로 자가치유 루프 조립(컴파일 백엔드·분류기·스텁 정책)"""
     from .selfheal import SelfHealLoop
 
     compiler = compiler_for(profile, adapter_factory=adapter_factory, work_dir=work_dir, kb=kb)

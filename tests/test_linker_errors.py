@@ -1,8 +1,8 @@
-"""GENERIC-C 링커 오류 분류 테스트.
+"""GENERIC-C 링커 오류 분류 테스트
 
-정답지는 clang 18 / GNU ld 2.42 / lld 18 로 실제 링크를 깨뜨려 받은 로그다
+정답지는 clang 18 / GNU ld 2.42 / lld 18 로 실제 링크를 깨뜨려 받은 로그
 (``tests/fixtures/linker_errors``). ``undefined_*`` 두 개는 ``examples/embedded`` 를
-HAL 정의 없이 링크한 것이다.
+HAL 정의 없이 링크한 결과
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def test_gnu_ld_undefined_reference():
     assert primary.action is FixAction.RESOLVE_SYMBOL
     assert primary.line == 49 and primary.file.endswith("proto_parser.c")
     assert "proto_parse" in primary.detail["referenced_by"]
-    # "clang: error: linker command failed" 는 결과일 뿐이라 진단으로 세지 않는다.
+    # "clang: error: linker command failed" 는 결과일 뿐이라 진단으로 미집계
     assert len(report.diagnostics) == 2
     assert not report.needs_human
 
@@ -81,7 +81,7 @@ def test_compile_errors_are_retry_raw():
     assert kinds == [(BazelErrorKind.MISSING_DEP, FixAction.RETRY_RAW),
                      (BazelErrorKind.UNKNOWN, FixAction.RETRY_RAW)]
     assert report.diagnostics[0].detail == {"header": "hal_extra.h"}
-    # CMake 경로에는 BUILD 가 없으므로 BUILD 수정 처방으로 막지 않는다.
+    # CMake 경로에는 BUILD 가 없으므로 BUILD 수정 처방으로 차단하지 않음
     assert not bazel_errors.needs_build_file_edit(report)
 
 

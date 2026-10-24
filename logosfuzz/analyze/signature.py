@@ -33,8 +33,8 @@ _RUNTIME_MARKERS = (
     "/llvm/",
     # glibc / C++ 표준 라이브러리. abort 로 끝나는 크래시(score::Result 오류
     # 접근 → std::terminate 등)는 상단 5~10 프레임이 전부 여기라, 거르지 않으면
-    # 서로 다른 결함이 ``pthread_kill.c:44|...`` 한 시그니처로 합쳐진다
-    # (tests/fixtures/error_contract_logs 의 두 크래시가 실제로 그랬다).
+    # 서로 다른 결함이 ``pthread_kill.c:44|...`` 한 시그니처로 합쳐지는 문제
+    # (tests/fixtures/error_contract_logs 의 두 크래시에서 실제 발생)
     "nptl/",
     "sysdeps/",
     "stdlib/abort.c",

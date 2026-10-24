@@ -1,8 +1,8 @@
-"""ANA-05-01 에러계약 위반 근거 회귀 테스트.
+"""ANA-05-01 에러계약 위반 근거 회귀 테스트
 
-정답지는 실제 baselibs ``score/result`` 로 빌드해 수집한 크래시 원문이다
+정답지는 실제 baselibs ``score/result`` 로 빌드해 수집한 크래시 원문
 (``tests/fixtures/error_contract_logs``). EXE 의 sanitizer 파서부터 dedup,
-판별까지 실제 경로를 그대로 태운다.
+판별까지 실제 경로를 그대로 실행
 """
 
 from __future__ import annotations
@@ -63,18 +63,18 @@ def test_library_ignoring_result_error_is_true_positive():
 
     assert evidence.violation == "target"
     assert evidence.crash_function == "PayloadEnd"
-    # operator* → value() 로 겹친 접근자 중 호출자 쪽(operator*)을 잡는다
+    # operator* → value() 로 겹친 접근자 중 호출자 쪽(operator*) 선택
     assert "operator*" in evidence.accessor.function
 
     result = rule_triage(_cluster(record))
     assert result.verdict is Verdict.TRUE_POSITIVE
     assert "error-contract-violated-by-target" in result.signals
-    # 근거문 위치가 abort/raise 런타임 프레임이 아니라 실제 코드여야 한다
+    # 근거문 위치는 abort/raise 런타임 프레임이 아닌 실제 코드
     assert "pthread_kill" not in result.rationale
 
 
 def test_two_contract_violations_are_not_merged_by_dedup():
-    """glibc abort 프레임이 시그니처를 차지하면 두 결함이 한 클러스터로 합쳐진다."""
+    """glibc abort 프레임이 시그니처를 차지하면 두 결함이 한 클러스터로 합쳐지는 문제"""
     clusters, stats = deduplicate(
         [_record("harness_unchecked.txt"), _record("library_unchecked.txt")]
     )
@@ -101,7 +101,7 @@ def test_kb_attaches_build_target_and_declared_contracts():
 
 
 # --------------------------------------------------------------------------- #
-# 증명되지 않으면 신호를 내지 않는다
+# 증명되지 않으면 신호 없음
 # --------------------------------------------------------------------------- #
 def _synthetic(lines, category="heap-buffer-overflow", reason="heap-buffer-overflow"):
     rep = CrashRecord(
@@ -113,7 +113,7 @@ def _synthetic(lines, category="heap-buffer-overflow", reason="heap-buffer-overf
 
 
 def test_accessor_below_user_frame_is_not_a_violation():
-    """value() 가 스택 아래쪽에 있을 뿐, 크래시는 그 위 사용자 코드에서 났다."""
+    """value() 가 스택 아래쪽에 있을 뿐, 크래시는 그 위 사용자 코드에서 발생"""
     cluster = _synthetic([
         "==1==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x1",
         "    #0 0x1 in score::json::Walk(char const*) /src/score/json/json.cc:40",
@@ -151,7 +151,7 @@ def test_triager_survives_failing_contract_provider():
 
     cluster = _cluster(_record("library_unchecked.txt"))
     result = RuleBasedTriager(contract_provider=boom).triage(cluster)
-    # 공급자가 죽으면 원문 로그만으로 계산한 근거로 돌아간다
+    # 공급자가 실패하면 원문 로그만으로 계산한 근거로 폴백
     assert "error-contract-violated-by-target" in result.signals
 
 
@@ -188,7 +188,7 @@ def test_parse_frames_handles_unnamed_and_shared_object_frames():
         "    #5 <ADDR>  (/lib/x86_64-linux-gnu/libstdc++.so.6+<ADDR>) (BuildId: <BUILDID>)",
         "    #6 <ADDR> in std::terminate() (/lib/x86_64-linux-gnu/libstdc++.so.6+<ADDR>) (BuildId: x)",
         "    #7 0x55 in score::demo::PayloadEnd(unsigned char const*, unsigned long) score/demo/length.cc:35:12",
-        "    #0 0x1 in malloc asan_malloc_linux.cpp:69",  # 두 번째 스택은 읽지 않는다
+        "    #0 0x1 in malloc asan_malloc_linux.cpp:69",  # 두 번째 스택은 미파싱
     ])
     assert [f.index for f in frames] == [5, 6, 7]
     assert frames[0].function == ""

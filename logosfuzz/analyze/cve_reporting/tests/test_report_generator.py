@@ -50,12 +50,12 @@ def test_parse_use_after_free():
 
 
 def test_stack_trace_does_not_mix_with_allocation_block():
-    """크래시 스택과 malloc 스택이 섞이지 않아야 한다 (frame 번호 중복 없음)."""
+    """크래시 스택과 malloc 스택 미혼합 확인 (frame 번호 중복 없음)"""
     sample = _load_sample("sample_crash_1.json")
     parsed = parse_asan_log(sample["crash_report"]["asan_log"])
 
     frame_numbers = [f["frame"] for f in parsed.stack_trace]
-    # 크래시 발생 블록만 담겨야 하므로 #0 이 두 번 나오면 안 된다
+    # 크래시 발생 블록만 담겨야 하므로 #0 중복 불가
     assert frame_numbers.count(0) == 1
     assert parsed.allocated_at_location is not None
     assert "dlt_common.c:820" in parsed.allocated_at_location

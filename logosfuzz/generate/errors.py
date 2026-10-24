@@ -1,20 +1,20 @@
-"""GEN 파트 예외 정의 + Bazel 빌드 에러 분류 결과 타입.
+"""GEN 파트 예외 정의 + Bazel 빌드 에러 분류 결과 타입
 
-분류를 **수행**하는 쪽은 `logosfuzz.generate.bazel_errors` 다. 여기에는 그 결과를
-담는 타입만 둔다 — 분류기를 쓰지 않는 모듈(3주차 `selfheal.py`, 리포팅 등)이
-분류기 전체를 import 하지 않고 결과 타입만 가져다 쓸 수 있게 하기 위해서다.
+분류 **수행**은 `logosfuzz.generate.bazel_errors` 담당. 여기에는 그 결과를
+담는 타입만 정의 — 분류기를 쓰지 않는 모듈(3주차 `selfheal.py`, 리포팅 등)이
+분류기 전체를 import 하지 않고 결과 타입만 사용할 수 있도록 분리
 
-타입 설계 근거는 1주차에 실제로 빌드를 깨뜨려 모은 코퍼스다
+타입 설계 근거는 1주차에 실제로 빌드를 깨뜨려 모은 코퍼스
 (`docs/GEN-03-02-ERROR-CORPUS.md`, `tests/fixtures/bazel_errors/`). 특히:
 
-- 하나의 빌드 로그에 진단이 여러 개 나오고, 그중 **하나만 근본 원인**이다.
-  `load()` 누락은 "load 에러"와 "타깃이 없다" 두 진단을 동시에 만든다.
-  그래서 `BazelDiagnostic.root_cause` 로 증상과 원인을 구분한다.
-- 처방(`FixAction`)이 분류(`BazelErrorKind`)와 1:1 이 아니다. `no_such_target`
-  하나가 레이블 교정일 수도, 전혀 다른 BUILD 작성 오류의 증상일 수도 있다.
-  그래서 둘을 분리해 둔다.
-- 어떤 결함은 LLM 재시도로 못 고친다(순환 의존). `FixAction.ESCALATE` 로
-  표시해 자가치유 루프가 라운드를 낭비하지 않고 HITL 로 올리게 한다.
+- 하나의 빌드 로그에 진단이 여러 개 나오고, 그중 **하나만 근본 원인**
+  `load()` 누락은 "load 에러"와 "타깃이 없다" 두 진단을 동시에 생성
+  그래서 `BazelDiagnostic.root_cause` 로 증상과 원인을 구분
+- 처방(`FixAction`)이 분류(`BazelErrorKind`)와 1:1 이 아님. `no_such_target`
+  하나가 레이블 교정일 수도, 전혀 다른 BUILD 작성 오류의 증상일 수도 있음
+  따라서 둘을 분리
+- 어떤 결함은 LLM 재시도로 해결 불가(순환 의존). `FixAction.ESCALATE` 로
+  표시해 자가치유 루프가 라운드를 낭비하지 않고 HITL 로 전달
 """
 from __future__ import annotations
 
@@ -25,24 +25,24 @@ from typing import Any, Dict, List, Optional
 
 
 class GenerateError(Exception):
-    """GEN 파트 공통 예외."""
+    """GEN 파트 공통 예외"""
 
 
 class HarnessBinaryNotFoundError(GenerateError):
-    """검증 대상 하네스 실행 파일(GEN-03-02 산출물)이 존재하지 않을 때."""
+    """검증 대상 하네스 실행 파일(GEN-03-02 산출물)이 없을 때"""
 
 
 class ManifestError(GenerateError):
-    """검증 매니페스트 JSON이 잘못되었을 때."""
+    """검증 매니페스트 JSON이 잘못되었을 때"""
 
 
 # --------------------------------------------------------------------------- #
 # Bazel 에러 분류
 # --------------------------------------------------------------------------- #
 class BazelErrorKind(str, Enum):
-    """빌드 로그에서 식별한 결함의 종류.
+    """빌드 로그에서 식별한 결함의 종류
 
-    값은 코퍼스의 파손 케이스 이름(`tests/fixtures/bazel_errors/*.txt`)과 맞춰 뒀다.
+    값은 코퍼스의 파손 케이스 이름(`tests/fixtures/bazel_errors/*.txt`)과 일치
     """
 
     MISSING_LOAD = "missing_load"
@@ -102,7 +102,7 @@ class BazelErrorKind(str, Enum):
 
 
 class FixAction(str, Enum):
-    """분류 결과에 대응하는 처방."""
+    """분류 결과에 대응하는 처방"""
 
     ADD_LOAD = "add_load"
     FIX_BUILD_SYNTAX = "fix_build_syntax"
@@ -124,7 +124,7 @@ class FixAction(str, Enum):
 
 @dataclass(frozen=True)
 class BazelDiagnostic:
-    """빌드 로그에서 식별한 진단 하나."""
+    """빌드 로그에서 식별한 진단 하나"""
 
     kind: BazelErrorKind
     action: FixAction
@@ -175,10 +175,10 @@ class BazelDiagnostic:
         }
 
 
-# 근본 원인을 고를 때의 우선순위. 앞쪽이 먼저다.
+# 근본 원인 선택 시 우선순위. 앞쪽이 먼저
 #
-# BUILD 파일이 파싱 자체에 실패하는 종류(MISSING_LOAD, BUILD_SYNTAX_ERROR)가 최상위다.
-# 그게 있으면 뒤따르는 "타깃이 없다"는 전부 증상이기 때문이다(코퍼스 발견 A).
+# BUILD 파일이 파싱 자체에 실패하는 종류(MISSING_LOAD, BUILD_SYNTAX_ERROR)가 최상위
+# 그게 있으면 뒤따르는 "타깃이 없다"는 전부 증상이기 때문(코퍼스 발견 A)
 _PRIORITY: List[BazelErrorKind] = [
     BazelErrorKind.MISSING_LOAD,
     BazelErrorKind.BUILD_SYNTAX_ERROR,
@@ -198,14 +198,14 @@ _PRIORITY: List[BazelErrorKind] = [
 
 @dataclass
 class BazelErrorReport:
-    """빌드 로그 하나에 대한 분류 결과."""
+    """빌드 로그 하나에 대한 분류 결과"""
 
     diagnostics: List[BazelDiagnostic] = field(default_factory=list)
     log: str = ""
 
     @property
     def ok(self) -> bool:
-        """진단이 하나도 없다(=빌드 성공으로 간주)."""
+        """진단이 하나도 없음(=빌드 성공으로 간주)"""
         return not self.diagnostics
 
     @property
@@ -214,7 +214,7 @@ class BazelErrorReport:
 
     @property
     def primary(self) -> Optional[BazelDiagnostic]:
-        """가장 먼저 고쳐야 할 진단. 없으면 None."""
+        """가장 먼저 고쳐야 할 진단. 없으면 None"""
         pool = self.root_causes or self.diagnostics
         if not pool:
             return None
@@ -222,7 +222,7 @@ class BazelErrorReport:
 
     @property
     def actions(self) -> List[FixAction]:
-        """근본 원인들의 처방(중복 제거, 우선순위 순)."""
+        """근본 원인들의 처방(중복 제거, 우선순위 순)"""
         seen: List[FixAction] = []
         for d in sorted(self.root_causes, key=lambda x: _PRIORITY.index(x.kind)):
             if d.action not in seen:
@@ -231,7 +231,7 @@ class BazelErrorReport:
 
     @property
     def needs_human(self) -> bool:
-        """LLM 재시도로 못 고친다고 본 진단이 있나."""
+        """LLM 재시도로 수정 불가로 판단한 진단 존재 여부"""
         return any(d.action is FixAction.ESCALATE for d in self.root_causes)
 
     def of_kind(self, kind: BazelErrorKind) -> List[BazelDiagnostic]:
@@ -252,10 +252,10 @@ class BazelErrorReport:
 # 컴파일러·링커 원문 분류 (CMake / prebuilt 경로, GENERIC-C)
 # --------------------------------------------------------------------------- #
 # Bazel 은 진단을 ``ERROR:`` 블록으로 감싸지만, CMake/prebuilt 어댑터는 clang 을 직접
-# 부르므로 로그가 컴파일러·링커 원문 그대로다. ``bazel_errors.classify`` 는 ``ERROR:``
-# 블록이 없으면 아무것도 못 찾으므로(=성공으로 오판) 원문용 분류기를 따로 둔다.
+# 호출하므로 로그가 컴파일러·링커 원문 그대로. ``bazel_errors.classify`` 는 ``ERROR:``
+# 블록이 없으면 아무것도 못 찾으므로(=성공으로 오판) 원문용 분류기를 별도 구성
 # 정규식은 ``tests/fixtures/linker_errors/`` 의 실측 로그(clang 18, GNU ld 2.42, lld 18)에서
-# 따왔다.
+# 추출
 #
 #   GNU ld : <obj>:<file>:<line>:(<section>): undefined reference to `X'
 #            ... multiple definition of `X'; <obj>: first defined here
@@ -278,7 +278,7 @@ _CLANG_ERROR_RE = re.compile(
     r"^(?P<file>[^\s:][^:\n]*):(?P<line>\d+):(?P<col>\d+): (?:fatal )?error: (?P<msg>.+)$"
 )
 _FILE_NOT_FOUND_RE = re.compile(r"'(?P<header>[^']+)' file not found")
-# 앞선 진단의 결과일 뿐인 줄. 분류하지 않는다.
+# 앞선 진단의 결과일 뿐인 줄. 분류 제외
 _LINK_CONSEQUENCE_RE = re.compile(r"(?:clang|gcc|cc)(?:\+\+)?: error: linker command failed")
 
 
@@ -294,17 +294,17 @@ def _undefined_summary(symbol: str) -> str:
 
 
 def classify_toolchain_log(log: str) -> BazelErrorReport:
-    """clang/ld 원문 로그를 분류한다(CMake/prebuilt 경로).
+    """clang/ld 원문 로그 분류(CMake/prebuilt 경로)
 
     결과 타입은 Bazel 분류기와 같은 :class:`BazelErrorReport` 라서 ``selfheal`` 과
-    ``bazel_errors.prompt_hint`` 를 그대로 쓸 수 있다.
+    ``bazel_errors.prompt_hint`` 를 그대로 사용 가능
 
     분류 규칙:
       * ``undefined reference`` / ``undefined symbol`` → ``UNDEFINED_SYMBOL`` (``RESOLVE_SYMBOL``)
       * ``multiple definition`` / ``duplicate symbol`` → ``MULTIPLE_DEFINITION``
         (``REMOVE_DUPLICATE_DEFINITION``)
       * ``cannot find -l`` / ``unable to find library`` → ``MISSING_LIBRARY`` (``ESCALATE``)
-      * 헤더 없음 → ``MISSING_DEP`` (``RETRY_RAW`` — CMake 에는 deps 가 없어서 BUILD 처방을 쓰지 않는다)
+      * 헤더 없음 → ``MISSING_DEP`` (``RETRY_RAW`` — CMake 에는 deps 가 없어서 BUILD 처방 미사용)
       * 그 밖의 clang ``error:`` → ``UNKNOWN`` (``RETRY_RAW``)
     """
     diagnostics: List[BazelDiagnostic] = []
@@ -350,7 +350,7 @@ def classify_toolchain_log(log: str) -> BazelErrorReport:
             symbol = m.group("symbol").strip()
             detail = {"symbol": symbol}
             loc = _GNU_LOCATION_RE.search(line)
-            # GNU ld 는 앞 줄에 "<archive>(<obj>): in function `f':" 를 찍는다.
+            # GNU ld 는 앞 줄에 "<archive>(<obj>): in function `f':" 출력
             if i > 0 and "in function" in lines[i - 1]:
                 detail["referenced_by"] = lines[i - 1].strip()
             add(_diag(BazelErrorKind.UNDEFINED_SYMBOL, FixAction.RESOLVE_SYMBOL,
@@ -398,6 +398,6 @@ def classify_toolchain_log(log: str) -> BazelErrorReport:
 
 
 def undefined_symbols(report: BazelErrorReport) -> List[str]:
-    """분류 결과에서 미정의 심볼 이름만 순서대로 뽑는다."""
+    """분류 결과에서 미정의 심볼 이름만 순서대로 추출"""
     return [d.detail["symbol"] for d in report.of_kind(BazelErrorKind.UNDEFINED_SYMBOL)
             if d.detail.get("symbol")]
