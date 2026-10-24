@@ -31,6 +31,7 @@ import os
 import re
 from pathlib import Path
 from dotenv import load_dotenv
+from logosfuzz.common.logging import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Sequence
 
@@ -45,6 +46,8 @@ from logosfuzz.schedule.sch_02_03_resource_allocator import (
 )
 
 # 지원 언어. "cpp" 가 기본(S-CORE/Bazel), "c" 는 기존 pipeline.py 경로.
+_LOG = get_logger("GEN-03-01")
+
 LANG_CPP = "cpp"
 LANG_C = "c"
 SUPPORTED_LANGUAGES = (LANG_CPP, LANG_C)
@@ -524,8 +527,8 @@ def generate_harness(schedule: list[ScheduleResult],
         group_name = result.group_name
         api_ids = logic_groups.get(group_name, [])
 
-        print(f"\n[GEN] {group_name} generating {language} harness... "
-              f"(budget={result.allocated_sec}s)")
+        _LOG.info("%s generating %s harness... (budget=%ss)",
+                  group_name, language, result.allocated_sec)
 
         contexts = collect_context(api_ids, context_db)
         if not contexts:

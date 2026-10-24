@@ -42,6 +42,10 @@ _DIAGNOSTIC_RE = re.compile(
 # 빌드 도구가 직접 찍는 오류 줄의 접두사(Bazel 의 ``ERROR``, CMake 의 ``CMake Error``).
 _ERROR_LINE_PREFIXES = ("ERROR", "CMake Error")
 
+# 빌드 명령 1회의 기본 제한 시간. 제한이 없으면 멈춘 빌드 도구 하나가 파이프라인 전체를
+# 붙잡는다. 더 오래 걸리는 대상은 timeout_s 로 늘린다.
+DEFAULT_BUILD_TIMEOUT_S = 3600.0
+
 
 @dataclass
 class BuildResult:

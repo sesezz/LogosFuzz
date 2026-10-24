@@ -53,6 +53,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from logosfuzz.common.safe_path import resolve_within
 from logosfuzz.generate.bazel.build_file import (
     FuzzTargetSpec,
     fuzz_package_for,
@@ -251,9 +252,10 @@ def write_pairs(
         seen[pair.spec.package] = pair.group_name
 
     for pair in pairs:
-        pkg_dir = root / pair.spec.package
+        # package·파일명은 라벨과 그룹 이름에서 오므로 root 밖으로 나가지 못하게 한다.
+        pkg_dir = resolve_within(root, pair.spec.package)
         pkg_dir.mkdir(parents=True, exist_ok=True)
-        (pkg_dir / pair.source_filename).write_text(pair.source, encoding="utf-8")
+        resolve_within(pkg_dir, pair.source_filename).write_text(pair.source, encoding="utf-8")
         (pkg_dir / BUILD_FILE_NAME).write_text(pair.build_file, encoding="utf-8")
 
     manifest = {
@@ -261,7 +263,7 @@ def write_pairs(
         "root": str(root),
         "pairs": [pair.to_dict() for pair in pairs],
     }
-    manifest_path = root / manifest_name
+    manifest_path = resolve_within(root, manifest_name)
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )

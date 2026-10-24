@@ -409,3 +409,24 @@ def test_cli_rejects_bad_profiles_and_bazel_profiles(tmp_path, capsys):
                                                  bazel={"workspace": ".", "target": "//pkg:lib"})),
                  "--base-dir", str(tmp_path), "--prepare-only"])
     assert code == 2 and "bazel" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# 보안: spec 의 package·name 이 작업 디렉터리 밖을 가리키면 쓰거나 지우지 않는다
+# --------------------------------------------------------------------------- #
+def test_cmake_adapter_refuses_paths_outside_work_dir(tmp_path):
+    from logosfuzz.common.safe_path import UnsafePathError
+
+    adapter, _ = make_adapter(tmp_path)
+    victim = tmp_path / "victim.bin"
+    victim.write_text("keep", encoding="utf-8")
+
+    escaping_pkg = FuzzTargetSpec(name="x", package="../../escape", srcs=("h.cc",), deps=())
+    with pytest.raises(UnsafePathError):
+        adapter.emit_build_definition(escaping_pkg, "int x;\n")
+    assert not (tmp_path / "escape").exists()
+
+    escaping_name = FuzzTargetSpec(name="../../victim.bin", package="p", srcs=("h.cc",), deps=())
+    with pytest.raises(UnsafePathError):
+        adapter.remove(escaping_name)
+    assert victim.exists()

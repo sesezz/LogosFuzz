@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
+from ...common.logging import get_logger
 from .build_file import FuzzTargetSpec, parse_label
 
 # no such target '//score/json:jsonn': target 'jsonn' not declared in
@@ -264,6 +265,9 @@ def fix_from_report(report, spec: FuzzTargetSpec) -> Optional[BuildFix]:
     return None
 
 
+_LOG = get_logger("GEN-03-BAZEL")
+
+
 def classify_with_bazel_errors(log: str, spec: FuzzTargetSpec) -> Optional[BuildFix]:
     """D 의 ``bazel_errors.classify`` 로 분류한다. D 모듈이 없거나 실패하면 None."""
     try:
@@ -272,7 +276,8 @@ def classify_with_bazel_errors(log: str, spec: FuzzTargetSpec) -> Optional[Build
         return None
     try:
         report = d_classify(log or "", requested_target=spec.bin_label)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 — D 분류기 실패는 분류 없음으로 다루되 원인은 남긴다.
+        _LOG.warning("D 오류 분류기 실패: %s: %s", type(exc).__name__, exc)
         return None
     return fix_from_report(report, spec)
 

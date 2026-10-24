@@ -31,6 +31,16 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from logosfuzz.common.logging import get_logger
+from logosfuzz.common.safe_path import resolve_within, safe_component
+
+_LOG = get_logger("EXE-04-05")
+
+
+def _group_dir(base_dir: Path, group_name: str, sub: str) -> Path:
+    """``<base_dir>/<그룹>/<sub>``. 그룹 이름은 디렉터리 한 칸으로 정화해서 쓴다."""
+    return resolve_within(base_dir, safe_component(group_name), sub)
+
 
 # ---------------------------------------------------------------------
 # 0. C++ 문자열 리터럴 스캐너 (*_test.cc 시드 추출용)
@@ -213,7 +223,7 @@ class SeedEntry:
 
     @property
     def checksum(self) -> str:
-        return hashlib.md5(self.data).hexdigest()
+        return hashlib.sha256(self.data).hexdigest()
 
 
 @dataclass
@@ -237,7 +247,7 @@ class SeedManager:
         self.base_dir = Path(base_dir)
 
     def _seed_dir(self, group_name: str) -> Path:
-        d = self.base_dir / group_name / "seeds"
+        d = _group_dir(self.base_dir, group_name, "seeds")
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -330,10 +340,10 @@ class SeedManager:
         """Save seed entries to disk."""
         for entry in entries:
             seed_dir = self._seed_dir(entry.group_name)
-            path = seed_dir / f"{entry.seed_id}.bin"
+            path = seed_dir / f"{safe_component(entry.seed_id)}.bin"
             path.write_bytes(entry.data)
 
-        print(f"  [SEED] Saved {len(entries)} seeds for {entries[0].group_name if entries else ''}")
+        _LOG.info("Saved %d seeds for %s", len(entries), entries[0].group_name if entries else "")
 
     def load_seeds(self, group_name: str) -> list[SeedEntry]:
         """Load seed entries from disk."""
@@ -366,12 +376,12 @@ class CorpusManager:
         self._seen: dict[str, set[str]] = {}   # group_name -> set of checksums
 
     def _corpus_dir(self, group_name: str) -> Path:
-        d = self.base_dir / group_name / "corpus"
+        d = _group_dir(self.base_dir, group_name, "corpus")
         d.mkdir(parents=True, exist_ok=True)
         return d
 
     def _crash_dir(self, group_name: str) -> Path:
-        d = self.base_dir / group_name / "crashes"
+        d = _group_dir(self.base_dir, group_name, "crashes")
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -395,7 +405,7 @@ class CorpusManager:
         else:
             save_dir = self._corpus_dir(group)
 
-        path = save_dir / f"{checksum[:8]}_{entry.seed_id}.bin"
+        path = save_dir / f"{checksum[:8]}_{safe_component(entry.seed_id)}.bin"
         path.write_bytes(entry.data)
         return True
 
@@ -415,9 +425,9 @@ class CorpusManager:
 
     def get_stats(self, group_name: str) -> CorpusStats:
         """Return corpus statistics for a Logic Group."""
-        seed_dir = self.base_dir / group_name / "seeds"
-        corpus_dir = self.base_dir / group_name / "corpus"
-        crash_dir = self.base_dir / group_name / "crashes"
+        seed_dir = _group_dir(self.base_dir, group_name, "seeds")
+        corpus_dir = _group_dir(self.base_dir, group_name, "corpus")
+        crash_dir = _group_dir(self.base_dir, group_name, "crashes")
 
         return CorpusStats(
             group_name=group_name,
@@ -454,7 +464,7 @@ class SeedScheduler:
         corpus.sort(key=lambda e: e.coverage_gain, reverse=True)
 
         queue = seeds + corpus
-        print(f"  [QUEUE] {group_name}: {len(seeds)} seeds + {len(corpus)} corpus = {len(queue)} total")
+        _LOG.info("%s: %d seeds + %d corpus = %d total", group_name, len(seeds), len(corpus), len(queue))
         return queue
 
     def export_to_dir(self, group_name: str, target_dir: str) -> int:
@@ -470,7 +480,7 @@ class SeedScheduler:
             path = out / f"input_{i:04d}.bin"
             path.write_bytes(entry.data)
 
-        print(f"  [EXPORT] {len(queue)} inputs exported to {target_dir}")
+        _LOG.info("%d inputs exported to %s", len(queue), target_dir)
         return len(queue)
 
 

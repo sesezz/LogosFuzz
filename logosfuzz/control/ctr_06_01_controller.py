@@ -55,6 +55,12 @@ from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
+from logosfuzz.common.logging import get_logger
+from logosfuzz.common.redact import redact_error
+from logosfuzz.common.safe_path import resolve_within, safe_component
+
+_LOG = get_logger("CTR-06-01")
+
 load_dotenv()  # cwd부터 상위로 .env 자동 탐색 (팀원 환경마다 경로가 다르므로 하드코딩 금지)
 
 
@@ -231,7 +237,7 @@ class AutoPipeline:
                 print(f"  [DONE] Pipeline completed. {result.harness_count} harness(es) generated.")
             else:
                 result.success = False
-                result.error = proc.stderr
+                result.error = redact_error(proc.stderr)
                 print(f"  [FAIL] Pipeline failed:\n{proc.stderr}")
 
         except subprocess.TimeoutExpired:
@@ -241,7 +247,7 @@ class AutoPipeline:
 
         except Exception as e:
             result.success = False
-            result.error = str(e)
+            result.error = redact_error(e)
             print(f"  [ERROR] {e}")
 
         return result
@@ -320,8 +326,10 @@ class BuildStageResult:
             # (build_summary·artifact 는 `_bin` 경로를 유지한다. 리포트 조인은 그룹 이름 기준이다.)
             entry = {"name": unit["group"],
                      "harness": str(Path(unit["binary"]).expanduser().resolve())}
-            if root is not None and (root / unit["group"]).is_dir():
-                entry["corpus"] = str(root / unit["group"])
+            if root is not None:
+                group_dir = resolve_within(root, safe_component(unit["group"]))
+                if group_dir.is_dir():
+                    entry["corpus"] = str(group_dir)
             out.append(entry)
         return out
 
@@ -369,7 +377,8 @@ def _d_classify(log: str, bin_label: str):
         return None
     try:
         return classify(log, requested_target=bin_label)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 — D 분류기 실패는 분류 없음으로 다루되 원인은 남긴다.
+        _LOG.warning("D 오류 분류기 실패: %s: %s", type(exc).__name__, exc)
         return None
 
 
@@ -409,8 +418,8 @@ def _heal_details(heal) -> dict:
     if callable(digest):
         try:
             details["error_digest"] = digest()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 — 요약 실패가 결과 기록 전체를 막지 않게 한다.
+            _LOG.warning("error_digest 생성 실패: %s: %s", type(exc).__name__, exc)
     rounds = []
     for item in getattr(heal, "rounds", None) or []:
         rounds.append({
@@ -544,7 +553,7 @@ class BuildStage:
         except HealUnavailable as exc:
             self._log(f"      [HEAL] skipped: {exc}")
             return {"attempted": False, "ok": False, "outcome": "unavailable",
-                    "rounds_used": 0, "reason": str(exc)}
+                    "rounds_used": 0, "reason": redact_error(exc)}
 
         from logosfuzz.generate.models import HarnessDraft
 
@@ -696,7 +705,11 @@ class BuildStage:
             if not unit.get("binary"):
                 continue
             group = unit["group"]
-            corpus = root / group if root is not None and (root / group).is_dir() else None
+            # 코퍼스 매니저가 같은 규칙으로 정화한 이름으로 디렉터리를 만든다.
+            corpus = None
+            if root is not None:
+                candidate = resolve_within(root, safe_component(group))
+                corpus = candidate if candidate.is_dir() else None
             artifacts.append(HarnessArtifact(
                 group_id=group,
                 harness_path=Path(unit["binary"]),
@@ -768,7 +781,7 @@ def save_generation_artifacts(pairs, directory: str | Path) -> list[Path]:
             continue
         target.mkdir(parents=True, exist_ok=True)
         for suffix, text in ((".prompt.txt", pair.prompt_used), (".draft.cc", pair.source)):
-            path = target / f"{pair.group_name}{suffix}"
+            path = resolve_within(target, f"{safe_component(pair.group_name)}{suffix}")
             path.write_text(text, encoding="utf-8")
             written.append(path)
     return written
@@ -873,15 +886,15 @@ class RegressionTester:
 
     def compare(self, current: PipelineResult, baseline_path: str) -> RegressionResult:
         """Compare current result against baseline."""
-        if not Path(baseline_path).exists():
+        try:
+            baseline = json.loads(Path(baseline_path).read_text(encoding="utf-8"))
+        except FileNotFoundError:
             return RegressionResult(
                 passed=False,
                 baseline_count=0,
                 current_count=current.harness_count,
                 message=f"Baseline not found: {baseline_path}"
             )
-
-        baseline = json.loads(Path(baseline_path).read_text(encoding="utf-8"))
         baseline_count = baseline.get("harness_count", 0)
         current_count = current.harness_count
 
@@ -920,10 +933,11 @@ class RegressionTester:
         print(f"\n[BASELINE] Saved to {baseline_path}")
 
     def compare_build(self, current: BuildStageResult, baseline_path: str) -> RegressionResult:
-        if not Path(baseline_path).exists():
+        try:
+            baseline = json.loads(Path(baseline_path).read_text(encoding="utf-8"))
+        except FileNotFoundError:
             return RegressionResult(False, 0, current.built,
                                     f"Baseline not found: {baseline_path}")
-        baseline = json.loads(Path(baseline_path).read_text(encoding="utf-8"))
         baseline_count = int(baseline.get("built_units", 0))
         current_targets = {
             u["build_target"] for u in current.units

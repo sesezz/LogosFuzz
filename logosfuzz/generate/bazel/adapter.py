@@ -21,7 +21,8 @@ import time
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from ..build.base import BuildAdapter, BuildResult, _DIAGNOSTIC_RE  # noqa: F401 (재수출)
+from ...common.safe_path import UnsafePathError, resolve_within
+from ..build.base import DEFAULT_BUILD_TIMEOUT_S, BuildAdapter, BuildResult, _DIAGNOSTIC_RE  # noqa: F401 (재수출)
 from .build_file import FuzzTargetSpec, render_build_file
 
 # 1주차에 오버레이로 추가한 config. bl-x86_64-linux(GCC) 와 절대 병용 금지 —
@@ -55,13 +56,15 @@ class BazelAdapter:
         self.config = config
         self.bazel = bazel
         self.extra_args = tuple(extra_args)
-        self.timeout_s = timeout_s
+        self.timeout_s = DEFAULT_BUILD_TIMEOUT_S if timeout_s is None else timeout_s
 
     # ------------------------------------------------------------------ #
     # 생성
     # ------------------------------------------------------------------ #
     def package_dir(self, spec: FuzzTargetSpec) -> Path:
-        return self.workspace_root / spec.package
+        # package 는 라벨에서 오므로 ``..``·절대경로로 작업 영역을 벗어나지 못하게 한다.
+        # 빈 package 도 작업 영역 자신이라 거부한다(remove 가 전체를 지우게 된다).
+        return resolve_within(self.workspace_root, spec.package)
 
     def emit_build_definition(self, spec: FuzzTargetSpec, harness_source: str) -> Path:
         pkg = self.package_dir(spec)
@@ -71,7 +74,7 @@ class BazelAdapter:
             raise ValueError(
                 f"하네스 소스는 1개여야 한다(현재 {len(spec.srcs)}개): {spec.srcs}"
             )
-        (pkg / spec.srcs[0]).write_text(harness_source, encoding="utf-8")
+        resolve_within(pkg, spec.srcs[0]).write_text(harness_source, encoding="utf-8")
 
         build_path = pkg / "BUILD.bazel"
         build_path.write_text(render_build_file(spec), encoding="utf-8")
@@ -79,8 +82,10 @@ class BazelAdapter:
 
     def remove(self, spec: FuzzTargetSpec) -> None:
         pkg = self.package_dir(spec)
-        if pkg.exists():
+        try:
             shutil.rmtree(pkg)
+        except FileNotFoundError:
+            pass
 
     # ------------------------------------------------------------------ #
     # 빌드
@@ -186,7 +191,10 @@ class BazelAdapter:
             if candidates:
                 return candidates[0]
 
-        fallback = self.workspace_root / "bazel-bin" / spec.package / expected_name
+        try:
+            fallback = resolve_within(self.workspace_root / "bazel-bin", spec.package, expected_name)
+        except UnsafePathError:
+            return None
         return fallback if fallback.exists() else None
 
     # ------------------------------------------------------------------ #

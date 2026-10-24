@@ -147,8 +147,8 @@ def analyze_with_clang(path, clang_args=None, language=None):
                 inc = f"-I{resource_dir}/include"
                 if inc not in clang_args:
                     clang_args = list(clang_args) + [inc]
-        except Exception:
-            pass
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.debug("clang resource dir 조회 실패, 기본 include 경로로 진행: %s", exc)
 
     try:
         index = cindex.Index.create()

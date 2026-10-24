@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 load_dotenv()  # cwd부터 상위로 .env 자동 탐색 (팀원 환경마다 경로가 다르므로 하드코딩 금지)
 
 # EXT 단계
+from logosfuzz.common.safe_path import safe_component
 from logosfuzz.extract.ast_analyzer import analyze_file
 
 # SCH 단계
@@ -202,8 +203,8 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
             try:
                 parts.append(f"// --- {h.name} ---\n" + h.read_text(encoding="utf-8", errors="replace"))
                 header_filenames.append(h.name)
-            except Exception:
-                pass
+            except OSError as exc:
+                print(f"  [WARN] 헤더 읽기 실패, 건너뜀: {h.name} ({type(exc).__name__})")
         header_content = "\n".join(parts)
         print(f"  헤더 {len(header_files)}개 주입: {[h.name for h in header_files]}")
     else:
@@ -267,7 +268,8 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
     print(f"\n[OUT] {output_dir}/ 에 그룹별 하네스 저장 중...")
     written = []
     for d in drivers:
-        harness_path = output_dir / f"{stem}_{d.group_name}.c"
+        # 그룹 이름은 LLM·스케줄 결과라 파일 이름으로 쓰기 전에 정화한다.
+        harness_path = output_dir / f"{stem}_{safe_component(d.group_name)}.c"
         code = d.code.replace("```c", "").replace("```", "").strip()
         header = (
             f"// === {d.group_name} ===\n"

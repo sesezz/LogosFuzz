@@ -15,6 +15,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from logosfuzz.common.redact import redact_error
+from logosfuzz.common.safe_path import resolve_within, safe_component
 from logosfuzz.execute.sanitizer import SanitizerMonitor
 
 
@@ -74,7 +76,7 @@ def _execute(argv: list[str], cwd: Path, timeout: float,
                              time.monotonic() - started, "command timed out")
     except OSError as exc:
         return CommandResult(None, False, duration_sec=time.monotonic() - started,
-                             error=str(exc))
+                             error=redact_error(exc))
 
 
 def _signal_number(exit_code: int | None) -> int | None:
@@ -245,9 +247,10 @@ class RegressionRunner:
 
     def _previous_failed(self) -> set[str]:
         path = self.output_dir / "regression-summary.json"
-        if not path.exists():
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
             return set()
-        previous = json.loads(path.read_text(encoding="utf-8"))
         return {item["name"] for item in previous.get("groups", [])
                 if not item.get("matched_expected", False)}
 
@@ -255,7 +258,8 @@ class RegressionRunner:
         cwd = (base_dir / case.get("cwd", ".")).resolve()
         timeout = float(case.get("timeout_sec", 5))
         env = {str(k): str(v) for k, v in case.get("env", {}).items()}
-        log_dir = self.output_dir / "logs" / case["name"]
+        # 케이스 이름은 manifest 입력이라 로그 디렉터리 이름으로 쓰기 전에 정화한다.
+        log_dir = resolve_within(self.output_dir, "logs", safe_component(case["name"]))
         log_dir.mkdir(parents=True, exist_ok=True)
 
         compile_result = None

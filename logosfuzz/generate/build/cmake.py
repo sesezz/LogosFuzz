@@ -42,7 +42,8 @@ from typing import (
     TYPE_CHECKING, Callable, Dict, List, Mapping, Optional, Sequence,
 )
 
-from .base import BuildResult, HarnessSpecLike
+from ...common.safe_path import resolve_within
+from .base import DEFAULT_BUILD_TIMEOUT_S, BuildResult, HarnessSpecLike
 
 if TYPE_CHECKING:  # pragma: no cover
     from logosfuzz.common.target_profile import TargetProfile
@@ -127,7 +128,7 @@ class CMakeAdapter:
         self.coverage = coverage
         self.runner: Runner = runner or default_runner
         self.jobs = jobs or os.cpu_count() or 4
-        self.timeout_s = timeout_s
+        self.timeout_s = DEFAULT_BUILD_TIMEOUT_S if timeout_s is None else timeout_s
         self.cc = cc
         self.cxx = cxx
         self._which = which
@@ -204,11 +205,14 @@ class CMakeAdapter:
         srcs = list(spec.srcs)
         if len(srcs) != 1:
             raise ValueError(f"하네스 소스는 1개여야 한다(현재 {len(srcs)}개): {srcs}")
-        return self.work_dir / "harness" / spec.package / srcs[0]
+        return resolve_within(self.work_dir / "harness", spec.package, srcs[0])
+
+    def _binary_path(self, spec: HarnessSpecLike) -> Path:
+        return resolve_within(self._bin_dir(), spec.name)
 
     def binary_path(self, spec: HarnessSpecLike) -> Optional[Path]:
         """빌드된 실행 파일의 실제 경로. 없으면 None."""
-        path = self._bin_dir() / spec.name
+        path = self._binary_path(spec)
         return path if path.is_file() else None
 
     # ------------------------------------------------------------------ #
@@ -296,7 +300,7 @@ class CMakeAdapter:
                                    duration_s=time.monotonic() - started,
                                    command=prepared.command)
 
-        binary = self._bin_dir() / spec.name
+        binary = self._binary_path(spec)
         binary.parent.mkdir(parents=True, exist_ok=True)
         command = [
             self.compiler, *self.link_flags(),
@@ -319,7 +323,7 @@ class CMakeAdapter:
 
     def remove(self, spec: HarnessSpecLike) -> None:
         """생성한 하네스 소스와 바이너리를 지운다(없어도 오류 없음)."""
-        for path in (self._harness_path(spec), self._bin_dir() / spec.name):
+        for path in (self._harness_path(spec), self._binary_path(spec)):
             try:
                 path.unlink()
             except FileNotFoundError:
