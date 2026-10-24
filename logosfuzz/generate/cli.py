@@ -5,10 +5,10 @@ GEN-03 하네스 생성 - CLI (`logosfuzz generate`)
     logosfuzz generate --model <name> --max-round <n> [--project P]
                        [--cc clang] [--demo]
 
-- 기본: SubprocessCompiler + OpenAILLMClient(골격) 조합. LLM 미연결 시 안내.
-- --demo: FakeCompiler + ScriptedLLMClient로 루프 흐름을 즉시 시연.
+- 기본: SubprocessCompiler + OpenAILLMClient(골격) 조합. LLM 미연결 시 안내
+- --demo: FakeCompiler + ScriptedLLMClient로 루프 흐름을 즉시 시연
 
-상위 logosfuzz CLI에는 register(subparsers)로 붙인다.
+상위 logosfuzz CLI에는 register(subparsers)로 연결
 """
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     else:
         compiler = SubprocessCompiler(cc=args.cc)
         llm = OpenAILLMClient(model=args.model)
-        # 실사용에서는 GEN-03-01 초안 생성기가 drafts를 제공한다.
+        # 실사용에서는 GEN-03-01 초안 생성기가 drafts를 제공
         print("※ 실사용 모드: GEN-03-01 초안 생성기를 연결해 drafts를 공급하세요.",
               file=sys.stderr)
         print("  지금은 데모 초안으로 대체합니다(--demo 권장).", file=sys.stderr)

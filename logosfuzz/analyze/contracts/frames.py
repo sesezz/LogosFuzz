@@ -1,8 +1,8 @@
-"""에러계약 플러그인 공통: 원문 sanitizer 로그에서 함수 이름까지 담은 프레임을 읽는다.
+"""에러계약 플러그인 공통: 원문 sanitizer 로그에서 함수 이름을 포함한 프레임 파싱
 
-``CrashRecord.traceback`` 은 파일:줄만 담는다. 계약 판별에는 "어떤 함수가 무엇을
-불렀는가"가 필요하므로 원문 로그에서 프레임을 다시 읽는다. ``score_result`` 와
-``c_return_code`` 플러그인이 같이 쓴다(원래 ``analyze/error_contract.py`` 에 있던 코드).
+``CrashRecord.traceback`` 은 파일:줄만 보유. 계약 판별에는 "어떤 함수가 무엇을
+호출했는가"가 필요해 원문 로그에서 프레임 재파싱. ``score_result`` 와
+``c_return_code`` 플러그인 공용(기존 ``analyze/error_contract.py`` 에서 이동)
 """
 
 from __future__ import annotations
@@ -15,10 +15,10 @@ from logosfuzz.analyze.models import Frame
 from logosfuzz.analyze.signature import is_harness_frame, is_runtime_frame
 
 # --------------------------------------------------------------------------- #
-# 프레임 파싱 — 함수 이름까지 필요하다
+# 프레임 파싱 — 함수 이름 포함
 # --------------------------------------------------------------------------- #
-# CrashRecord.traceback 은 파일:줄만 담는다. 계약 위반 판별에는 "어떤 함수가
-# value() 를 불렀는가"가 필요하므로 원문 로그에서 프레임을 다시 읽는다.
+# CrashRecord.traceback 은 파일:줄만 보유. 계약 위반 판별에는 "어떤 함수가
+# value() 를 호출했는가"가 필요해 원문 로그에서 프레임 재파싱
 #   #12 0x55d0 in score::details::expected<int, E>::value() const & /p/expected.h:503
 #   #7 <ADDR> in std::terminate() (/lib/x86_64-linux-gnu/libstdc++.so.6+0xa5a54) (BuildId: ..)
 #   #5 <ADDR>  (/lib/x86_64-linux-gnu/libstdc++.so.6+0xa5ff4) (BuildId: ..)   ← 이름 없음
@@ -26,7 +26,7 @@ _FRAME_RE = re.compile(r"^\s*#(?P<idx>\d+)\s+(?:0x[0-9a-fA-F]+|<ADDR>)\s+(?P<res
 _BUILD_ID_RE = re.compile(r"\s*\(BuildId:[^)]*\)\s*$")
 _LOCATION_RE = re.compile(r"^(?P<file>\S+?):(?P<line>\d+)(?::\d+)?$")
 
-# C/C++ 런타임·표준 라이브러리 프레임. 크래시 지점을 찾을 때 건너뛴다.
+# C/C++ 런타임·표준 라이브러리 프레임. 크래시 지점 탐색 시 제외
 _RUNTIME_FUNC_PREFIXES = (
     "std::", "__cxa", "__gxx", "_Unwind", "__GI_", "__pthread", "__libc", "_start",
     "abort", "raise", "__sanitizer", "__asan", "__ubsan", "fuzzer::",
@@ -39,7 +39,7 @@ _RUNTIME_FILE_MARKERS = (
 
 @dataclass(frozen=True)
 class NamedFrame:
-    """함수 이름까지 담은 프레임(원문 로그 1줄)."""
+    """함수 이름을 포함한 프레임(원문 로그 1줄)"""
 
     index: int
     function: str
@@ -55,7 +55,7 @@ class NamedFrame:
 
 
 def parse_frames(raw_log: Sequence[str]) -> list[NamedFrame]:
-    """원문 로그에서 스택 프레임을 함수 이름과 함께 읽는다(첫 스택만)."""
+    """원문 로그에서 스택 프레임을 함수 이름과 함께 파싱(첫 스택만)"""
     frames: list[NamedFrame] = []
     for line in raw_log:
         match = _FRAME_RE.match(line)
@@ -63,7 +63,7 @@ def parse_frames(raw_log: Sequence[str]) -> list[NamedFrame]:
             continue
         idx = int(match.group("idx"))
         if frames and idx == 0:
-            break  # 두 번째 스택(할당 지점 등)은 크래시 지점이 아니다
+            break  # 두 번째 스택(할당 지점 등)은 크래시 지점이 아님
         rest = _BUILD_ID_RE.sub("", match.group("rest").strip())
         if not rest.startswith("in "):
             frames.append(NamedFrame(idx, ""))
@@ -98,10 +98,10 @@ def is_harness(frame: NamedFrame) -> bool:
 
 
 def short_name(function: str) -> str:
-    """``score::json::Parse(char const*)`` → ``Parse`` (KB 문서의 function 형식)."""
+    """``score::json::Parse(char const*)`` → ``Parse`` (KB 문서의 function 형식)"""
     name = function.split("(", 1)[0].strip()
     depth, cut = 0, len(name)
-    # 템플릿 인자 안의 :: 에 속지 않도록 바깥 깊이에서만 자른다.
+    # 템플릿 인자 안의 :: 오인 방지를 위해 바깥 깊이에서만 분리
     for i in range(len(name) - 1, -1, -1):
         ch = name[i]
         if ch == ">":

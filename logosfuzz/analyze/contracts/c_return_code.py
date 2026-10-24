@@ -1,30 +1,30 @@
-"""에러계약 플러그인 ``c_return_code`` — C 반환 코드/NULL 반환 규약.
+"""에러계약 플러그인 ``c_return_code`` — C 반환 코드/NULL 반환 규약
 
-왜 필요한가
------------
-C 라이브러리(libsndfile, 임베디드 펌웨어 모듈 등)는 실패를 예외가 아니라
-**반환 값**으로 알린다. ``sf_open`` 은 실패하면 ``NULL`` 을, ``proto_create`` 는
-잘못된 용량이면 ``NULL`` 을 돌려준다. 호출자가 그 값을 확인하지 않고 다음 API 에
-그대로 넘기면, 다음 API 안에서 NULL 근처 주소를 건드려 죽는다.
+배경
+----
+C 라이브러리(libsndfile, 임베디드 펌웨어 모듈 등)는 실패를 예외가 아닌
+**반환 값**으로 통지. ``sf_open`` 은 실패 시 ``NULL``, ``proto_create`` 는
+잘못된 용량이면 ``NULL`` 반환. 호출자가 이를 확인하지 않고 다음 API 에
+넘기면 다음 API 안에서 NULL 근처 주소 접근으로 크래시
 
-이 크래시는 대상 라이브러리 안에서 나지만 대상 결함이 아니다. API 는 계약대로
-오류를 알렸고, 무시한 것은 하네스다. sanitizer 만 보면 "대상 코드에서 SEGV" 라
-정탐 쪽으로 기울기 때문에, 스택에서 이 모양을 따로 증명해 판별기에 넘긴다.
+크래시 위치는 대상 라이브러리 안이지만 대상 결함이 아님(API 는 계약대로 오류 통지,
+무시한 쪽은 하네스). sanitizer 만 보면 "대상 코드에서 SEGV" 로 정탐 쪽에
+기울기 때문에 스택에서 이 패턴을 별도 증명해 판별기에 전달
 
-판정 규칙(셋 다 만족해야 신호를 낸다)
-------------------------------------
+판정 규칙(세 조건 모두 만족 시 신호 생성)
+----------------------------------------
 1. 크래시 최상위 **대상 프레임**(런타임·sanitizer 프레임을 건너뛴 첫 프레임)이
-   ``profile.apis`` 중 하나다.
-2. 그 바로 위 호출자가 **하네스**(``LLVMFuzzerTestOneInput`` 계열 또는 하네스 파일)다.
-3. 잘못된 접근이 **NULL 근처**다 — ASan ``SEGV on unknown address`` 의 주소가
-   0 페이지(< 0x1000) 안이거나, UBSan 이 ``null pointer`` 로 보고했다.
+   ``profile.apis`` 중 하나
+2. 바로 위 호출자가 **하네스**(``LLVMFuzzerTestOneInput`` 계열 또는 하네스 파일)
+3. 잘못된 접근이 **NULL 근처** — ASan ``SEGV on unknown address`` 주소가
+   0 페이지(< 0x1000) 안이거나 UBSan 이 ``null pointer`` 로 보고
 
-셋 중 하나라도 증명하지 못하면 신호를 내지 않는다(``reachability.py`` 와 같은 원칙).
-특히 대상 내부 함수에서 난 크래시, 하네스가 아닌 대상 코드가 부른 API 의 크래시,
-NULL 이 아닌 주소의 메모리 오류는 이 플러그인이 판단하지 않는다.
+하나라도 증명하지 못하면 신호 없음(``reachability.py`` 와 같은 원칙)
+대상 내부 함수 크래시, 대상 코드가 호출한 API 의 크래시, NULL 이 아닌 주소의
+메모리 오류는 판단 대상 외
 
-정답지는 ``tests/fixtures/c_return_code_logs/`` 에 있는 실측 로그다
-(``examples/embedded`` 를 clang 18 + ASan/UBSan/libFuzzer 로 빌드해 수집).
+정답지는 ``tests/fixtures/c_return_code_logs/`` 의 실측 로그
+(``examples/embedded`` 를 clang 18 + ASan/UBSan/libFuzzer 로 빌드해 수집)
 """
 
 from __future__ import annotations
@@ -46,9 +46,9 @@ NAME = "c_return_code"
 
 VIOLATED_BY_HARNESS = "harness"
 
-# 0 페이지. 리눅스는 기본으로 첫 페이지(4 KiB)를 매핑하지 않으므로 NULL 포인터의
-# 멤버 접근(NULL + 오프셋)은 이 안에서 SEGV 가 난다. ASan 도 같은 기준으로
-# "Hint: address points to the zero page." 를 찍는다.
+# 0 페이지. 리눅스는 기본으로 첫 페이지(4 KiB) 미매핑 → NULL 포인터 멤버 접근
+# (NULL + 오프셋)은 이 범위에서 SEGV. ASan 도 같은 기준으로
+# "Hint: address points to the zero page." 출력
 NULL_PAGE_LIMIT = 0x1000
 
 _SEGV_ADDR_RE = re.compile(r"SEGV on unknown address (?:0x)?(?P<addr>[0-9a-fA-F]+)")
@@ -59,17 +59,17 @@ _UBSAN_NULL_RE = re.compile(r"runtime error: .*\bnull pointer\b")
 
 @dataclass
 class CReturnCodeEvidence:
-    """C 반환 코드 계약 관점의 판별 근거. 판정은 하지 않는다.
+    """C 반환 코드 계약 관점의 판별 근거(판정은 미수행)
 
     Attributes:
-        violation: ``"harness"`` 또는 ``""``(증명하지 못함).
-        api: 크래시가 난 공개 API(짧은 이름). 최상위 대상 프레임이 API 가 아니면 빈 값.
-        frame: 그 API 프레임.
-        caller: API 를 부른 프레임.
-        fault_address: ASan SEGV 주소(있으면).
-        null_reason: NULL 근처라고 본 근거 문장(없으면 빈 값).
-        crash_function: 최상위 대상 프레임 함수(짧은 이름).
-        declared_contracts: KB 에서 찾은 ``api`` 의 error_contract 설명.
+        violation: ``"harness"`` 또는 ``""``(증명 실패)
+        api: 크래시가 난 공개 API(짧은 이름). 최상위 대상 프레임이 API 가 아니면 빈 값
+        frame: 해당 API 프레임
+        caller: API 호출 프레임
+        fault_address: ASan SEGV 주소(있는 경우)
+        null_reason: NULL 근처로 판단한 근거 문장(없으면 빈 값)
+        crash_function: 최상위 대상 프레임 함수(짧은 이름)
+        declared_contracts: KB 에서 찾은 ``api`` 의 error_contract 설명
     """
 
     violation: str = ""
@@ -100,7 +100,7 @@ class CReturnCodeEvidence:
 
 
 def _null_fault(record: CrashRecord) -> tuple[Optional[int], str]:
-    """(SEGV 주소, NULL 근처라고 본 근거). 근거가 없으면 빈 문자열."""
+    """(SEGV 주소, NULL 근처로 판단한 근거). 근거가 없으면 빈 문자열"""
     text_lines = [record.error_reason, *record.raw_log]
     address: Optional[int] = None
     for line in text_lines:
@@ -139,13 +139,13 @@ def _kb_contracts(kb, function: str) -> list[str]:
 
 
 def analyze(record: CrashRecord, kb=None, profile=None) -> CReturnCodeEvidence:
-    """크래시 레코드 1건에서 C 반환 코드 계약 위반 근거를 모은다.
+    """크래시 레코드 1건의 C 반환 코드 계약 위반 근거 수집
 
     Args:
-        record: 클러스터 대표 레코드.
-        kb: KnowledgeBase (선택). 있으면 API 의 선언된 error_contract 를 붙인다.
-        profile: TargetProfile (선택). ``profile.apis`` 가 비어 있으면 1번 조건을
-            증명할 수 없으므로 위반 신호를 내지 않는다.
+        record: 클러스터 대표 레코드
+        kb: KnowledgeBase (선택). 있으면 API 의 선언된 error_contract 첨부
+        profile: TargetProfile (선택). ``profile.apis`` 가 비어 있으면 1번 조건
+            증명 불가로 위반 신호 없음
     """
     apis = set(getattr(profile, "apis", ()) or ())
     user = _user_frames(parse_frames(record.raw_log))
@@ -158,7 +158,7 @@ def analyze(record: CrashRecord, kb=None, profile=None) -> CReturnCodeEvidence:
         return evidence
     top = user[0]
     if is_harness(top):
-        return evidence  # 하네스 자체에서 난 크래시는 이 계약의 범위가 아니다
+        return evidence  # 하네스 자체 크래시는 이 계약의 범위 외
     evidence.crash_function = short_name(top.function)
     if evidence.crash_function not in apis:
         return evidence
@@ -173,19 +173,19 @@ def analyze(record: CrashRecord, kb=None, profile=None) -> CReturnCodeEvidence:
 
 
 # 점수 근거: score_result 의 하네스 위반과 같은 무게(-0.45). 둘 다 "API 는 계약대로
-# 오류를 알렸고 하네스가 무시했다"는 증명이다.
+# 오류를 알렸고 하네스가 무시했다"는 증명
 _HARNESS_VIOLATION_DELTA = -0.45
 
 
 def derive_signals(evidence: CReturnCodeEvidence, bug_type: str = "") -> tuple[float, list[str]]:
-    """(점수 보정치, 신호 목록)."""
+    """(점수 보정치, 신호 목록)"""
     if evidence.violation == VIOLATED_BY_HARNESS:
         return _HARNESS_VIOLATION_DELTA, ["c-return-unchecked-by-harness"]
     return 0.0, []
 
 
 def render_rationale(evidence: CReturnCodeEvidence) -> str:
-    """HITL 검토자가 읽을 한 문장. 근거가 없으면 빈 문자열."""
+    """HITL 검토자용 한 문장. 근거가 없으면 빈 문자열"""
     if evidence.violation != VIOLATED_BY_HARNESS:
         return ""
     return (
@@ -196,7 +196,7 @@ def render_rationale(evidence: CReturnCodeEvidence) -> str:
 
 
 def render_for_prompt(evidence: CReturnCodeEvidence) -> str:
-    """LLM 판별기 프롬프트에 실을 증거 섹션."""
+    """LLM 판별기 프롬프트용 증거 섹션"""
     lines = ["[에러계약 증거: C 반환 코드]"]
     if evidence.api:
         lines.append(f"- 크래시가 난 공개 API: {evidence.frame.render()}")

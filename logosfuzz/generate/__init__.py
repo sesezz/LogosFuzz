@@ -1,5 +1,5 @@
 """
-GEN (Generate) 계층 - LLM 기반 퍼징 하네스 자동 생성.
+GEN (Generate) 계층 - LLM 기반 퍼징 하네스 자동 생성
 
 - GEN-03-01 실시간 컨텍스트 주입 기반 하네스 초안 생성 (TODO: draft.py)
 - GEN-03-02 컴파일 에러 자가 치유 루프 ★ (selfheal.py)

@@ -10,15 +10,15 @@ ANA 파트에서 소비. 이 모듈은 그 원시 이벤트를 감싸는 정규�
 (:class:`CrashRecord`), 중복 제거 결과(:class:`CrashCluster`), 정/오탐 판별
 결과(:class:`TriageResult`), 그리고 ANA-05-03이 오탐 확정 건에 대해 만드는
 역피드백 산출물(:class:`RootCauseAnalysis`, :class:`KBUpdateProposal`,
-:class:`RegenerationRecord`)을 함께 정의한다.
+:class:`RegenerationRecord`)을 함께 정의
 
 의존성 원칙: 표준 라이브러리만 사용
 ANA-05-02(``logosfuzz.analyze.cve_reporting``)와는 코드 import가 아니라 **문자열 계약**
 (verdict 값 = ``"true_positive"``/``"false_positive"``/``"needs_review"``)으로만
-연결한다 - 두 패키지가 서로를 import하지 않아 순환 의존을 원천 차단한다. 이
+연결 - 두 패키지가 서로를 import하지 않아 순환 의존 원천 차단. 이
 모듈의 :class:`Verdict`가 그 계약을 대표하는 로컬 정의이며, ANA-05-03의
 :class:`FalsePositiveCrash`도 (과거 ``logosfuzz.analyze.cve_reporting.schema.Verdict``를
-직접 import하던 것에서) 이 로컬 enum을 쓰도록 통일했다.
+직접 import하던 것에서) 이 로컬 enum 사용으로 통일
 """
 
 from __future__ import annotations
@@ -172,11 +172,11 @@ class CrashCluster:
         )
 
     def to_dict(self) -> dict:
-        # signature 가 이 모듈을 import 하므로 지연 import 한다.
+        # signature 가 이 모듈을 import 하므로 지연 import
         from logosfuzz.analyze.signature import application_frames
 
         rep = self.representative
-        # abort/raise 같은 런타임 프레임이 아니라 첫 코드 프레임을 위치로 보인다.
+        # abort/raise 같은 런타임 프레임이 아닌 첫 코드 프레임을 위치로 표시
         top = (application_frames(rep) or rep.traceback)[:1]
         return {
             "cluster_id": self.cluster_id,
@@ -234,13 +234,13 @@ class TriageResult:
 #
 # ANA-05-01이 위 TriageResult로 판별하지만, 그 출력은 (verdict/confidence/
 # rationale/cluster_id) 중심이고 ANA-05-03이 필요로 하는 api_id/harness_id/
-# run_id/asan_log 원문까지는 아직 매핑해 주지 않는다(그 매핑을 어느 단계가
+# run_id/asan_log 원문까지는 아직 미매핑(그 매핑을 어느 단계가
 # 책임질지는 ANA-05-01/02 통합 시점에 결정될 사안). 그래서 ANA-05-03은
 # 독립적으로 검증 가능하도록 `FalsePositiveCrash`라는 최소 입력 계약을 스텁으로
-# 둔다. 위 `CrashRecord`(ANA-05-04)와 이름이 겹치지 않도록 의도적으로 다른
-# 이름을 썼다 - "역피드백 대상이 되는, 이미 오탐으로 확정된 크래시 1건"이라는
-# 좁은 의미만 담는다. `TriageResult`/`CrashCluster`가 매핑 정보까지 갖추게
-# 되면 그것으로부터 이 타입을 채우는 어댑터로 교체하는 것을 권장한다.
+# 둠. 위 `CrashRecord`(ANA-05-04)와 이름이 겹치지 않도록 의도적으로 다른
+# 이름 사용 - "역피드백 대상이 되는, 이미 오탐으로 확정된 크래시 1건"이라는
+# 좁은 의미만 표현. `TriageResult`/`CrashCluster`가 매핑 정보까지 갖추게
+# 되면 그것으로부터 이 타입을 채우는 어댑터로 교체하는 것을 권장
 
 
 def now_iso() -> str:
@@ -259,14 +259,14 @@ class ProposalStatus(str, Enum):
 
 @dataclass
 class FalsePositiveCrash:
-    """ANA-05-01 산출물을 대신하는 최소 입력 계약(스텁).
+    """ANA-05-01 산출물을 대신하는 최소 입력 계약(스텁)
 
     ANA-05-01의 실제 출력(`TriageResult`)이 api_id/harness_id/run_id/asan_log
-    매핑까지 제공하게 되면 이 필드들만 채워 넘기면 된다.
+    매핑까지 제공하면 이 필드들만 채워 넘기면 됨
 
-    ``build_target``은 크래시를 낸 API를 소유한 Bazel 타깃이다. 비워 두면
+    ``build_target``은 크래시를 낸 API를 소유한 Bazel 타깃. 비워 두면
     ANA-05-03이 KB(`build_unit_for_api`)에서 찾고, 그래도 없으면(빌드 정보가 없는
-    구 KB) 예전처럼 API 단위로 역피드백한다.
+    구 KB) 예전처럼 API 단위로 역피드백
     """
 
     crash_id: str
@@ -289,7 +289,7 @@ class FalsePositiveCrash:
 
 @dataclass
 class RootCauseAnalysis:
-    """오탐 원인 분석 함수(rootcause.py)의 출력."""
+    """오탐 원인 분석 함수(rootcause.py)의 출력"""
 
     crash_id: str
     api_id: int
@@ -311,12 +311,12 @@ class RootCauseAnalysis:
 
 @dataclass
 class KBUpdateProposal:
-    """KB 변경 제안(diff). 승인 전까지는 KB에 반영되지 않는다(HITL 게이트 대상).
+    """KB 변경 제안(diff). 승인 전까지는 KB에 미반영(HITL 게이트 대상)
 
-    ``build_target``이 있으면 제안의 반영 범위는 그 Bazel 타깃 전체다 -
+    ``build_target``이 있으면 제안의 반영 범위는 그 Bazel 타깃 전체 -
     ``before_text``/``after_text``도 타깃 단위 노트이고, ``affected_api_ids``는
-    재생성 프롬프트에 이 노트가 실릴 API 목록이다. 비어 있으면 ``api_id`` 하나만
-    대상으로 하는 예전(API 단위) 제안이다.
+    재생성 프롬프트에 이 노트가 실릴 API 목록. 비어 있으면 ``api_id`` 하나만
+    대상으로 하는 예전(API 단위) 제안
     """
 
     proposal_id: str
@@ -360,7 +360,7 @@ class KBUpdateProposal:
 
     @property
     def scope(self) -> str:
-        """반영 범위 표시: Bazel 타깃 또는 ``api:<id>``(빌드 정보 없는 구 KB)."""
+        """반영 범위 표시: Bazel 타깃 또는 ``api:<id>``(빌드 정보 없는 구 KB)"""
         return self.build_target or f"api:{self.api_id}"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -405,7 +405,7 @@ class KBUpdateProposal:
 
 @dataclass
 class RegenerationRecord:
-    """승인된 제안이 유발한 재생성 시도 1건(감사 로그 대상)."""
+    """승인된 제안이 유발한 재생성 시도 1건(감사 로그 대상)"""
 
     regen_id: str
     proposal_id: str

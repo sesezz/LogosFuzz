@@ -1,4 +1,4 @@
-"""ANA-05-03 STEP 5(감사 로그: crash_id <-> api_id <-> harness_id) 테스트."""
+"""ANA-05-03 STEP 5(감사 로그: crash_id <-> api_id <-> harness_id) 테스트"""
 from __future__ import annotations
 
 import unittest

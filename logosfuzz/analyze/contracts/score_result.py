@@ -1,43 +1,39 @@
-"""ANA-05-01 보강: 크래시가 ``score::Result`` **에러계약**을 어겼는가.
+"""ANA-05-01 보강: 크래시의 ``score::Result`` **에러계약** 위반 여부 판별
 
-에러계약 플러그인 ``score_result`` (GENERIC-C). 원래 ``analyze/error_contract.py`` 에
-있던 판별을 그대로 옮겼다. ``error_contract.py`` 는 이 모듈을 재수출한다.
+에러계약 플러그인 ``score_result`` (GENERIC-C). 기존 ``analyze/error_contract.py``
+판별 로직 이동. ``error_contract.py`` 는 이 모듈 재수출
 
-왜 필요한가
------------
-S-CORE API 는 실패를 예외나 크래시가 아니라 ``score::Result<T>`` 의 오류 대안으로
-돌려준다. A 파트 3주차가 ``constraint_extractor`` 에서 그 규약을 ``error_contract``
-로 뽑아 KB 에 넣었다 — "이 API 는 이런 입력에서 오류를 반환하고, 호출자는
-``has_value()`` 를 확인한 뒤에만 ``value()`` 를 꺼내야 한다".
-
-이 계약을 기준으로 보면 정/오탐이 지금까지와 다른 축에서 갈린다.
+배경
+----
+S-CORE API 는 실패를 예외나 크래시가 아닌 ``score::Result<T>`` 의 오류 대안으로
+반환. ``constraint_extractor`` 가 이 규약을 ``error_contract`` 로 추출해 KB 에 저장
+— "이 API 는 이런 입력에서 오류 반환, 호출자는 ``has_value()`` 확인 후에만
+``value()`` 사용"
 
 ``score::Result<T>`` 는 ``details::expected<T, Error>`` 이고 저장소가
-``std::variant`` 다(baselibs ``score/result/details/expected/expected.h``).
-오류 상태에서 ``value()`` 를 부르면 ``std::get<0>`` 이 ``bad_variant_access`` 를
-던지고, ``operator*`` 는 ``noexcept`` 라 그 자리에서 ``std::terminate`` 로 죽는다.
-sanitizer 에는 ``ABRT`` 하나로만 보이고 EXE 는 ``unknown`` 으로 분류한다 — 결함
-유형만으로는 판별기가 쓸 근거가 하나도 없다. 그런데 이 크래시의 정체는 스택에
-그대로 남아 있다. **확인을 빠뜨린 쪽이 누구인가**다.
+``std::variant`` (baselibs ``score/result/details/expected/expected.h``)
+오류 상태에서 ``value()`` 호출 시 ``std::get<0>`` 이 ``bad_variant_access`` 를
+던지고, ``operator*`` 는 ``noexcept`` 라 즉시 ``std::terminate``
+sanitizer 에는 ``ABRT`` 하나로만 보이고 EXE 는 ``unknown`` 으로 분류 — 결함
+유형만으로는 판별 근거 없음. 대신 스택에 **확인을 빠뜨린 쪽**이 남아 있음
 
-- 하네스가 ``value()`` 를 꺼냈다 → API 는 계약대로 오류를 돌려줬고, 그걸 무시한
-  건 하네스다. 대상 결함이 아니다(오탐).
-- 대상 라이브러리 코드가 하위 API 의 ``Result`` 를 확인 없이 꺼냈다 → 하네스가
-  공개 API 를 정상 호출했는데 라이브러리가 스스로 계약을 어겼다. 공격자 입력
-  하나로 프로세스를 끝낼 수 있는 실제 결함이다(정탐).
+- 하네스가 ``value()`` 호출 → API 는 계약대로 오류 반환, 무시한 쪽은 하네스.
+  대상 결함 아님(오탐)
+- 대상 라이브러리 코드가 하위 API 의 ``Result`` 를 확인 없이 사용 → 공개 API 를
+  정상 호출했는데 라이브러리가 계약 위반. 공격자 입력 하나로 프로세스 종료가
+  가능한 실제 결함(정탐)
 
-두 로그는 ``tests/fixtures/error_contract_logs/`` 에 실제 baselibs ``score/result``
-로 빌드해 수집해 두었고, 이 모듈은 그 원문을 정답지로 삼아 작성했다.
+두 로그는 실제 baselibs ``score/result`` 로 빌드해 ``tests/fixtures/error_contract_logs/``
+에 수집, 이 모듈의 정답지로 사용
 
-KB 가 있으면 하나를 더 본다. 메모리 오류가 난 함수가 ``error_contract`` 를
-선언한 API 라면, 그 API 에는 잘못된 입력을 **거부하는 정해진 통로**가 있었다는
-뜻이다. 거부하지 않고 메모리를 깨뜨렸다면 입력 검증이 그 경로를 놓친 것이므로
-정탐 쪽 근거가 된다.
+KB 가 있으면 추가 확인: 메모리 오류가 난 함수가 ``error_contract`` 를 선언한 API 면
+잘못된 입력을 **거부하는 정해진 통로**가 있었다는 의미. 거부 없이 메모리를
+깨뜨렸다면 입력 검증 누락이므로 정탐 쪽 근거
 
-설계 원칙 — reachability.py 와 같다
+설계 원칙 — reachability.py 와 동일
 -----------------------------------
-증명 가능한 것만 신호로 만든다. 스택에서 계약 위반 지점을 찾지 못하면 아무
-신호도 내지 않는다. 판별기를 대신해 결론을 내리지 않고, 근거만 남긴다.
+증명 가능한 것만 신호로 생성. 스택에서 계약 위반 지점을 찾지 못하면 신호 없음.
+판별기 대신 결론을 내리지 않고 근거만 기록
 """
 
 from __future__ import annotations
@@ -58,14 +54,14 @@ from logosfuzz.analyze.models import CrashRecord
 # --------------------------------------------------------------------------- #
 # score::Result 값 접근자
 # --------------------------------------------------------------------------- #
-# score::Result 의 값 접근자. Result<T> 는 details::expected 의 별칭이라 심볼에는
-# expected 로 찍힌다. futurecpp 의 score::cpp::expected 도 같은 계약이다.
+# score::Result 의 값 접근자. Result<T> 는 details::expected 의 별칭이라 심볼에서는
+# expected 로 표기. futurecpp 의 score::cpp::expected 도 같은 계약
 _RESULT_ACCESSOR_RE = re.compile(
     r"(?:score::(?:details::|cpp::)?(?:expected|Result)|std::(?:__\w+::)?expected)"
     r"<.*>::(?:value|operator\*|operator->)\s*\("
 )
 
-# 접근 실패를 알리는 표지(예외 경로). 접근자 프레임 위에 이것만 있어야 한다.
+# 접근 실패 표지(예외 경로). 접근자 프레임 위에는 이 프레임만 허용
 _ACCESS_FAILURE_MARKERS = ("bad_variant_access", "bad_expected_access", "bad_optional_access")
 
 
@@ -82,15 +78,15 @@ VIOLATED_BY_TARGET = "target"
 
 @dataclass
 class ErrorContractEvidence:
-    """에러계약 관점의 판별 근거. 판정은 하지 않는다.
+    """에러계약 관점의 판별 근거(판정은 미수행)
 
     Attributes:
-        violation: 계약을 어긴 쪽 — ``"harness"`` / ``"target"`` / ``""``(위반 없음).
-        accessor: 오류 상태에서 값을 꺼낸 접근자 프레임.
-        caller: 그 접근자를 부른(=확인을 빠뜨린) 프레임.
-        crash_function: 크래시가 난 첫 대상 코드 함수(짧은 이름).
-        declared_contracts: KB 에서 찾은 ``crash_function`` 의 error_contract 설명.
-        api_id / build_target: KB 매칭 결과(있으면). 역피드백과 리포트가 쓴다.
+        violation: 계약 위반 주체 — ``"harness"`` / ``"target"`` / ``""``(위반 없음)
+        accessor: 오류 상태에서 값을 꺼낸 접근자 프레임
+        caller: 접근자를 호출한(=확인을 빠뜨린) 프레임
+        crash_function: 크래시가 난 첫 대상 코드 함수(짧은 이름)
+        declared_contracts: KB 에서 찾은 ``crash_function`` 의 error_contract 설명
+        api_id / build_target: KB 매칭 결과(있는 경우). 역피드백과 리포트에서 사용
     """
 
     violation: str = ""
@@ -118,18 +114,18 @@ class ErrorContractEvidence:
 
 
 def _unchecked_access(frames: Sequence[NamedFrame]) -> tuple[Optional[NamedFrame], Optional[NamedFrame]]:
-    """(접근자, 호출자). 크래시 지점이 Result 값 접근 실패가 아니면 (None, None).
+    """(접근자, 호출자). 크래시 지점이 Result 값 접근 실패가 아니면 (None, None)
 
-    접근자 위(더 안쪽)에 런타임/표준 라이브러리 프레임만 있어야 "값을 꺼내다
-    죽었다"가 증명된다. 사용자 코드 프레임이 끼어 있으면 접근자는 그냥 스택
-    아래쪽에 있을 뿐 크래시 원인이 아니다.
+    접근자 위(더 안쪽)에 런타임/표준 라이브러리 프레임만 있어야 "값 접근 중
+    크래시"로 증명. 사용자 코드 프레임이 끼어 있으면 접근자는 스택 아래쪽에
+    있을 뿐 크래시 원인이 아님
     """
     for i, frame in enumerate(frames):
         if _is_accessor(frame):
             above = frames[:i]
             if not all(_is_runtime(f) for f in above):
                 return None, None
-            # operator* → value() 처럼 접근자가 겹치면 가장 바깥(호출자 쪽)을 쓴다.
+            # operator* → value() 처럼 접근자가 겹치면 가장 바깥(호출자 쪽) 사용
             j = i
             while j + 1 < len(frames) and _is_accessor(frames[j + 1]):
                 j += 1
@@ -162,12 +158,12 @@ def _kb_lookup(kb, function: str):
 
 
 def analyze_error_contract(record: CrashRecord, kb=None) -> ErrorContractEvidence:
-    """크래시 레코드 1건에서 에러계약 위반 근거를 모은다.
+    """크래시 레코드 1건의 에러계약 위반 근거 수집
 
     Args:
-        record: 클러스터 대표 레코드.
-        kb: :class:`~logosfuzz.knowledge.knowledge_base.KnowledgeBase` (선택).
-            있으면 크래시 함수의 선언된 error_contract 와 Bazel 타깃을 붙인다.
+        record: 클러스터 대표 레코드
+        kb: :class:`~logosfuzz.knowledge.knowledge_base.KnowledgeBase` (선택)
+            있으면 크래시 함수의 선언된 error_contract 와 Bazel 타깃 첨부
     """
     frames = parse_frames(record.raw_log)
     evidence = ErrorContractEvidence(crash_function=_crash_function(frames))
@@ -193,14 +189,14 @@ def analyze_error_contract(record: CrashRecord, kb=None) -> ErrorContractEvidenc
 
 
 # --------------------------------------------------------------------------- #
-# 규칙 기반 판별기에 줄 신호
+# 규칙 기반 판별기용 신호
 # --------------------------------------------------------------------------- #
-# 점수 근거: reachability.derive_signals 의 harness-only-caller(-0.45)와 같은 무게로
-# 하네스 위반을 깎는다 — 둘 다 "대상이 아니라 하네스가 만든 상황"의 증명이다.
+# 점수 근거: 하네스 위반은 reachability.derive_signals 의 harness-only-caller(-0.45)와
+# 같은 무게로 감점 — 둘 다 "대상이 아닌 하네스가 만든 상황"의 증명
 # 대상 위반은 정상 호출로 재현되는 결함의 증명이라 결함 유형 사전확률(unknown=0.30)
-# 을 정탐 임계치(0.65) 위로 올릴 만큼 준다. 0.30 이면 실측 로그가 정확히 0.80 이
-# 되어 크래시 승인 게이트의 자동 승인 경계(신뢰도 0.8)에 걸린다 - 증명된 근거가
-# 부동소수 반올림에 따라 사람 검토로 갈지 말지 갈리면 안 되므로 여유를 둔다.
+# 을 정탐 임계치(0.65) 위로 올리는 가중치 부여. 0.30 이면 실측 로그가 정확히 0.80 이
+# 되어 자동 승인 경계(신뢰도 0.8)에 걸림 - 부동소수 반올림에 따라 사람 검토 여부가
+# 갈리지 않도록 여유 확보
 _HARNESS_VIOLATION_DELTA = -0.45
 _TARGET_VIOLATION_DELTA = 0.35
 _CONTRACT_BYPASSED_DELTA = 0.10
@@ -213,7 +209,7 @@ _MEMORY_LIKE = {
 
 
 def derive_signals(evidence: ErrorContractEvidence, bug_type: str = "") -> tuple[float, list[str]]:
-    """(점수 보정치, 신호 목록)."""
+    """(점수 보정치, 신호 목록)"""
     if evidence.violation == VIOLATED_BY_HARNESS:
         return _HARNESS_VIOLATION_DELTA, ["error-contract-violated-by-harness"]
     if evidence.violation == VIOLATED_BY_TARGET:
@@ -224,7 +220,7 @@ def derive_signals(evidence: ErrorContractEvidence, bug_type: str = "") -> tuple
 
 
 def render_rationale(evidence: ErrorContractEvidence) -> str:
-    """HITL 검토자가 읽을 한 문장. 근거가 없으면 빈 문자열."""
+    """HITL 검토자용 한 문장. 근거가 없으면 빈 문자열"""
     if evidence.violation == VIOLATED_BY_HARNESS:
         return (
             " 하네스가 score::Result 의 오류 대안을 has_value() 로 확인하지 않고 값을 "
@@ -247,7 +243,7 @@ def render_rationale(evidence: ErrorContractEvidence) -> str:
 
 
 def render_for_prompt(evidence: ErrorContractEvidence) -> str:
-    """LLM 판별기 프롬프트에 실을 증거 섹션."""
+    """LLM 판별기 프롬프트용 증거 섹션"""
     lines = ["[에러계약 증거]"]
     if evidence.violation:
         who = "하네스" if evidence.violation == VIOLATED_BY_HARNESS else "대상 라이브러리"
@@ -266,7 +262,7 @@ def render_for_prompt(evidence: ErrorContractEvidence) -> str:
 
 
 class KnowledgeBaseContractProvider:
-    """클러스터 → 에러계약 근거. 판별기에 주입해서 쓴다(KB 선택)."""
+    """클러스터 → 에러계약 근거. 판별기에 주입해 사용(KB 선택)"""
 
     def __init__(self, kb=None) -> None:
         self.kb = kb

@@ -1,4 +1,4 @@
-"""GENERIC-C 미정의 심볼 스텁 생성 테스트."""
+"""GENERIC-C 미정의 심볼 스텁 생성 테스트"""
 from __future__ import annotations
 
 import shutil
@@ -115,7 +115,7 @@ def _clang_fuzzer_available(tmp_path: Path) -> bool:
 
 
 def test_real_link_failure_then_stub_links(tmp_path):
-    """examples/embedded 를 HAL 없이 링크 → 로그에서 스텁 생성 → 다시 링크 성공."""
+    """examples/embedded 를 HAL 없이 링크 → 로그에서 스텁 생성 → 다시 링크 성공"""
     if not _clang_fuzzer_available(tmp_path):
         pytest.skip("clang + libFuzzer 런타임이 없다")
     flags = ["-g", "-O1", "-fsanitize=address,undefined,fuzzer", f"-I{EMBEDDED}"]

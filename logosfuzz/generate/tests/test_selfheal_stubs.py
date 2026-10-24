@@ -1,8 +1,8 @@
-"""GENERIC-C 자가치유 ↔ 빌드 어댑터 ↔ 스텁 연결 테스트.
+"""GENERIC-C 자가치유 ↔ 빌드 어댑터 ↔ 스텁 연결 테스트
 
-서원 파트(``generate/build`` 의 ``adapter_for``)가 없어도 돌도록 가짜 어댑터를
-``adapter_factory`` 로 주입한다. 가짜 어댑터는 링크 입력(``build.link_flags``)에 들어온
-스텁 파일을 실제로 읽어서, 정의되지 않은 심볼을 GNU ld 원문 형식으로 보고한다.
+GENERIC-B 빌드 어댑터(``generate/build`` 의 ``adapter_for``)가 없어도 돌도록 가짜 어댑터를
+``adapter_factory`` 로 주입. 가짜 어댑터는 링크 입력(``build.link_flags``)에 들어온
+스텁 파일을 실제로 읽어서, 정의되지 않은 심볼을 GNU ld 원문 형식으로 보고
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ class FakeBuildResult:
 
 
 class FakeAdapter:
-    """``BuildAdapter`` 계약만 흉내 낸다. 외부 심볼 정의는 스텁 파일에서만 온다."""
+    """``BuildAdapter`` 계약만 모사. 외부 심볼 정의는 스텁 파일에서만 제공"""
 
     def __init__(self, profile, work_dir: Path, required, extra_log: str = "") -> None:
         self.profile = profile
@@ -134,7 +134,7 @@ def test_link_failure_is_fixed_by_stubs_without_llm(embedded_profile, tmp_path):
     assert report.stubbed_symbols == ["HAL_GetTick", "HAL_UART_Transmit"]
     assert [r.ok for r in report.rounds] == [False, True]
     assert report.rounds[0].diagnosis == "undefined_symbol/resolve_symbol"
-    # 실행 파일 경로는 어댑터의 BuildResult.binary 그대로다.
+    # 실행 파일 경로는 어댑터의 BuildResult.binary 그대로
     assert report.last_compile.artifact_path == str(tmp_path / "bin" / "fuzz_proto")
     stub = (tmp_path / "stubs" / "embedded-sample_stubs.c").read_text()
     assert "__attribute__((weak)) int HAL_GetTick()" in stub
@@ -184,7 +184,7 @@ def test_escalation_reaches_hitl_with_reason(embedded_profile, tmp_path):
 
 
 def test_other_errors_with_rejected_symbols_go_to_llm(embedded_profile, tmp_path):
-    """허용목록 밖 심볼과 다른 에러가 섞여 있으면 에스컬레이션하지 않고 LLM 에 맡긴다."""
+    """허용목록 밖 심볼과 다른 에러가 섞여 있으면 에스컬레이션하지 않고 LLM 에 위임"""
     fixed = "```c\nint LLVMFuzzerTestOneInput(){return 1;}\n```"
     loop, _, llm = _loop(embedded_profile, tmp_path, ["vendor_crc32"],
                          llm=ScriptedLLMClient([fixed]),
@@ -195,7 +195,7 @@ def test_other_errors_with_rejected_symbols_go_to_llm(embedded_profile, tmp_path
 
 
 def test_stub_policy_disabled_keeps_old_behaviour(embedded_profile, tmp_path):
-    """stub_undefined=false 면 지금처럼 LLM 수정 루프로 간다."""
+    """stub_undefined=false 면 기존처럼 LLM 수정 루프로 진행"""
     factory = Factory(tmp_path, ["HAL_GetTick"])
     compiler = AdapterCompiler(embedded_profile, adapter_factory=factory, work_dir=tmp_path)
     llm = ScriptedLLMClient([])
@@ -209,7 +209,7 @@ def test_stub_policy_disabled_keeps_old_behaviour(embedded_profile, tmp_path):
 
 
 def test_subprocess_compiler_ignores_stub_policy(tmp_path):
-    """apply_stubs 가 없는 기존 컴파일러는 스텁 정책이 있어도 동작이 같다."""
+    """apply_stubs 가 없는 기존 컴파일러는 스텁 정책이 있어도 동작 동일"""
     from logosfuzz.generate.compiler import FakeCompiler
 
     loop = SelfHealLoop(FakeCompiler(), ScriptedLLMClient(["```c\n// COMPILE_OK\n```"]),
@@ -238,12 +238,12 @@ def test_adapter_compiler_rebuilds_adapter_with_stub_link_input(embedded_profile
     result = compiler.compile(_draft())
     assert result.ok
     assert len(factory.adapters) == 2
-    # 원래 프로필은 frozen 그대로다.
+    # 원래 프로필은 frozen 그대로 유지
     assert embedded_profile.build.link_flags == ()
 
 
 def test_default_factory_uses_generic_build_adapter(embedded_profile, tmp_path):
-    """서원 파트가 머지된 뒤에는 adapter_for 가 CMakeAdapter 를 돌려준다."""
+    """빌드 어댑터 머지 후에는 adapter_for 가 CMakeAdapter 반환"""
     build = pytest.importorskip("logosfuzz.generate.build")
     compiler = AdapterCompiler(embedded_profile, work_dir=tmp_path)
     adapter = compiler.adapter

@@ -14,7 +14,7 @@
   * 호출 그래프 : 정방향/역방향 호출 관계와 호출 순서(call_sequence)
   * 심볼 -> 헤더 : API 사용에 필요한 include 헤더 (GEN-03-02 자가치유용)
 
-B/D가 실제로 소비하는 형태로 바꾸는 어댑터는 `logosfuzz.knowledge.kb_adapters`에 있다.
+B/D 파트가 실제로 소비하는 형태로 바꾸는 어댑터는 `logosfuzz.knowledge.kb_adapters`에 위치
 
 사용법:
   python -m logosfuzz.knowledge.knowledge_base build --paths examples --output build/kb_full.json

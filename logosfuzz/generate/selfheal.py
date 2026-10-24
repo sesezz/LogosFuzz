@@ -4,17 +4,17 @@ GEN-03-02 컴파일 에러 자가 치유 루프 ★
 
 동작
 ----
-1. 초안(HarnessDraft)을 컴파일한다.
-2. 성공하면 종료(SUCCESS).
+1. 초안(HarnessDraft)을 컴파일
+2. 성공하면 종료(SUCCESS)
 2-1. (GENERIC-C, ``stub_policy`` 가 켜져 있을 때) 링크 실패의 미정의 심볼 중
-     ``stub_allowlist`` 에 맞는 것을 weak 스텁으로 만들고 다시 빌드한다. LLM 호출 없이
-     결정적으로 처리한다. 허용목록 밖 심볼만 남으면 ESCALATED 로 끝낸다.
-3. 실패하면 컴파일 에러를 LLM에 되먹여 수정 소스를 받고 재컴파일한다.
-4. --max-round 만큼 3을 반복한다.
+     ``stub_allowlist`` 에 맞는 것을 weak 스텁으로 만들고 재빌드. LLM 호출 없이
+     결정적으로 처리. 허용목록 밖 심볼만 남으면 ESCALATED 로 종료
+3. 실패하면 컴파일 에러를 LLM에 되먹여 수정 소스를 받고 재컴파일
+4. --max-round 만큼 3을 반복
 5. 그래도 실패하면:
      - 같은 에러가 반복되면 STAGNATED(조기 중단),
      - 아니면 라운드 소진으로 EXHAUSTED.
-   두 경우 모두 HITL(HARNESS_REVIEW)로 자동 에스컬레이션할 수 있다(선택).
+   두 경우 모두 HITL(HARNESS_REVIEW)로 자동 에스컬레이션 가능(선택)
 
 설계서(GEN-03-00) 대응:
     logosfuzz generate --model <name> --max-round <n>
@@ -42,13 +42,13 @@ from .models import (
 # 라운드 종료 시 호출되는 콜백(진행 상황 표시/모니터링용)
 RoundCallback = Callable[[HealRound], None]
 
-# 빌드 로그 -> 분류 결과. 기본은 bazel_errors.classify.
+# 빌드 로그 -> 분류 결과. 기본은 bazel_errors.classify
 Classifier = Callable[..., BazelErrorReport]
 
 
 @dataclass
 class SelfHealLoop:
-    """GEN-03-02 자가 치유 루프."""
+    """GEN-03-02 자가 치유 루프"""
 
     compiler: Compiler
     llm: LLMClient
@@ -63,38 +63,38 @@ class SelfHealLoop:
     sanitize: Optional[Callable[[str, HarnessDraft], str]] = None
 
     # GEN-03-02 에러 분류기. 빌드 로그 전문을 받아 "무엇이 잘못됐고 무엇을 고쳐야
-    # 하는지"를 돌려준다. None 이면 bazel_errors.classify 를 쓴다. 분류 결과는
-    # 프롬프트 맨 앞에 실려 나가고, 라운드 기록에도 남는다.
+    # 하는지" 반환. None 이면 bazel_errors.classify 사용. 분류 결과는
+    # 프롬프트 맨 앞에 배치되고 라운드 기록에도 저장
     classifier: Optional[Classifier] = None
 
-    # 분류기가 "LLM 재시도로는 못 고친다"고 본 결함에서 조기 중단할지.
+    # 분류기가 "LLM 재시도로는 못 고친다"고 본 결함에서의 조기 중단 여부
     #
-    # 왜 필요한가 - 순환 의존은 타깃을 쪼개야 풀린다. 그걸 모르면 루프가 라운드를
+    # 필요 이유 - 순환 의존은 타깃을 쪼개야 해결. 그걸 모르면 루프가 라운드를
     # 전부 태우고 EXHAUSTED 로 끝나는데, 그동안 LLM 호출 비용만 나가고 결과는
-    # 같다. 조기에 ESCALATED 로 끊고 사람에게 올리는 편이 낫다.
+    # 같음. 조기에 ESCALATED 로 끊고 사람에게 넘기는 편이 유리
     stop_on_escalate: bool = True
 
-    # 이 루프가 BUILD 파일도 고칠 수 있는가.
+    # 이 루프의 BUILD 파일 수정 가능 여부
     #
-    # 기본은 False 다 - 지금 루프는 하네스 **소스**만 LLM 에게 다시 쓰게 한다.
+    # 기본 False - 현재 루프는 하네스 **소스**만 LLM 에게 다시 쓰게 함
     # 그런데 분류 결과의 상당수(load() 누락, deps 추가, visibility)는 BUILD 를
-    # 고쳐야 풀리고, 소스를 아무리 다시 써도 같은 에러가 반복된다. 분류가 정확할수록
+    # 고쳐야 해결되고, 소스를 아무리 다시 써도 같은 에러 반복. 분류가 정확할수록
     # 더 확신에 차서 헛도는 상황이라, 고칠 수 없는 산출물을 지목한 경우엔 라운드를
-    # 쓰지 않고 바로 에스컬레이션한다.
+    # 쓰지 않고 바로 에스컬레이션
     #
-    # B 파트의 build_file_generator 가 컨트롤러에 편입돼 BUILD 재생성까지 한 몸으로
-    # 돌게 되면 True 로 올린다.
+    # BUILD 생성기(build_file_generator)가 컨트롤러에 편입돼 BUILD 재생성까지 함께
+    # 돌게 되면 True 로 전환
     can_edit_build: bool = False
 
-    # GENERIC-C 미정의 심볼 스텁 정책(프로필 embedded.stub_undefined / stub_allowlist).
+    # GENERIC-C 미정의 심볼 스텁 정책(프로필 embedded.stub_undefined / stub_allowlist)
     #
     # 켜져 있고 컴파일러가 ``apply_stubs(symbols)`` 를 제공하면(AdapterCompiler), 링크
-    # 실패의 미정의 심볼 중 허용목록에 맞는 것을 weak 스텁으로 만들어 다시 빌드한다.
-    # None 이거나 꺼져 있으면 지금까지와 같다.
+    # 실패의 미정의 심볼 중 허용목록에 맞는 것을 weak 스텁으로 만들어 다시 빌드
+    # None 이거나 꺼져 있으면 기존 동작과 동일
     stub_policy: Optional[StubPolicy] = None
 
-    # 스텁 → 재빌드를 한 번에 몇 차례까지 할지. 스텁을 넣으면 그 뒤에 가려져 있던 다른
-    # 미정의 심볼이 새로 드러날 수 있어서 한 번으로 끝나지 않는다.
+    # 스텁 → 재빌드의 최대 반복 횟수. 스텁을 넣으면 그 뒤에 가려져 있던 다른
+    # 미정의 심볼이 새로 드러날 수 있어 1회로 끝나지 않음
     max_stub_passes: int = 3
 
     def __post_init__(self) -> None:
@@ -116,11 +116,11 @@ class SelfHealLoop:
             return source
 
     def _requested_target(self, draft: HarnessDraft) -> Optional[str]:
-        """빌드를 요청한 Bazel 타깃 레이블. 알 수 없으면 None.
+        """빌드를 요청한 Bazel 타깃 레이블. 알 수 없으면 None
 
         분류기가 `no such target` 을 만났을 때 지목된 레이블이 **하네스 자신의
-        타깃**인지 **의존 대상**인지 가르는 데 쓴다(코퍼스 발견 A). 처방이 정반대라
-        이 값이 있으면 판별이 훨씬 정확해진다.
+        타깃**인지 **의존 대상**인지 구분하는 데 사용(코퍼스 발견 A). 처방이 정반대라
+        이 값이 있으면 판별 정확도 향상
         """
         target = getattr(self.compiler, "requested_target", None)
         if target:
@@ -129,10 +129,10 @@ class SelfHealLoop:
         return str(value) if value else None
 
     def _classify(self, log: str, draft: HarnessDraft) -> Optional[BazelErrorReport]:
-        """빌드 로그를 분류한다. 분류기가 죽어도 루프는 계속 간다.
+        """빌드 로그 분류. 분류기가 실패해도 루프는 계속 진행
 
-        분류는 '거들 뿐'이다. 실패하면 힌트 없이 로그 원문만 들고 예전처럼 돌면
-        되므로, 여기서 예외가 나도 자가치유 자체를 멈추지 않는다.
+        분류는 보조 수단. 실패하면 힌트 없이 로그 원문만으로 기존처럼 진행하면
+        되므로, 여기서 예외가 나도 자가치유 자체는 중단하지 않음
         """
         if self.classifier is None:
             return None
@@ -141,7 +141,7 @@ class SelfHealLoop:
             try:
                 return self.classifier(log, requested_target=target)
             except TypeError:
-                # 타깃 인자를 받지 않는 분류기를 끼운 경우. 인자 없이 다시 시도한다.
+                # 타깃 인자를 받지 않는 분류기를 끼운 경우. 인자 없이 다시 시도
                 pass
             except Exception:
                 return None
@@ -151,7 +151,7 @@ class SelfHealLoop:
             return None
 
     def _blocked_reason(self, report: Optional[BazelErrorReport]) -> str:
-        """이 루프로는 못 고치는 결함이면 그 이유를, 아니면 빈 문자열."""
+        """이 루프로 못 고치는 결함이면 그 이유, 아니면 빈 문자열"""
         if report is None or report.primary is None:
             return ""
         if self.stop_on_escalate and report.needs_human:
@@ -169,11 +169,11 @@ class SelfHealLoop:
 
     def _stub_and_rebuild(self, draft: HarnessDraft, source: str, result,
                           rounds: List[HealRound], index: int):
-        """링크 실패를 스텁으로 풀 수 있으면 풀고 다시 빌드한다.
+        """링크 실패를 스텁으로 풀 수 있으면 풀고 다시 빌드
 
         Returns:
             (마지막 컴파일 결과, 에스컬레이션 사유). 사유가 비어 있지 않으면 허용목록 밖
-            미정의 심볼만 남아 이 루프로는 못 고친다는 뜻이다.
+            미정의 심볼만 남아 이 루프로는 해결 불가라는 의미
         """
         if not self._stubbing_enabled():
             return result, ""
@@ -208,7 +208,7 @@ class SelfHealLoop:
 
     @staticmethod
     def _only_undefined_symbols(log: str) -> bool:
-        """원문 로그의 진단이 전부 미정의 심볼인가(다른 에러가 섞여 있으면 LLM 에 맡긴다)."""
+        """원문 로그의 진단이 전부 미정의 심볼인지 여부(다른 에러가 섞여 있으면 LLM 에 위임)"""
         report = classify_toolchain_log(log)
         return bool(report.diagnostics) and all(
             d.kind is BazelErrorKind.UNDEFINED_SYMBOL for d in report.diagnostics
@@ -241,7 +241,7 @@ class SelfHealLoop:
             outcome = HealOutcome.SUCCESS
             return self._finish(draft, rounds, source, outcome, start)
 
-        # 분류 결과가 "여기서는 못 고친다"면 라운드를 쓰지 않고 바로 끊는다.
+        # 분류 결과가 "여기서는 못 고친다"면 라운드를 쓰지 않고 바로 중단
         blocked = self._blocked_reason(report)
         if blocked:
             return self._finish(draft, rounds, source, HealOutcome.ESCALATED,
@@ -311,7 +311,7 @@ class SelfHealLoop:
         return self._finish(draft, rounds, source, outcome, start)
 
     def run_many(self, drafts: List[HarnessDraft]) -> List[GenerateReport]:
-        """여러 로직 그룹을 순차 처리(설계서: 그룹별 순차 생성)."""
+        """여러 로직 그룹을 순차 처리(설계서: 그룹별 순차 생성)"""
         return [self.run(d) for d in drafts]
 
     # --------------------------------------------------------------------- #
@@ -355,8 +355,8 @@ class SelfHealLoop:
     def _escalate(self, draft: HarnessDraft, report: GenerateReport,
                   note: str = "") -> None:
         """
-        실패한 하네스를 HITL HARNESS_REVIEW로 올린다(연결돼 있을 때만).
-        정책이 CONDITIONAL(compile_ok=False → 사람 검토)이므로 큐에 쌓인다.
+        실패한 하네스를 HITL HARNESS_REVIEW로 전달(연결돼 있을 때만)
+        정책이 CONDITIONAL(compile_ok=False → 사람 검토)이므로 큐에 적재
         """
         if self.hitl is None:
             return
@@ -365,8 +365,8 @@ class SelfHealLoop:
         except Exception:
             return
         last = report.last_compile
-        # 마지막 라운드의 분류 결과를 같이 올린다. 검토자가 로그를 처음부터 읽지
-        # 않고 "무엇이 왜 실패했는지"를 바로 보게 하려는 것이다.
+        # 마지막 라운드의 분류 결과도 함께 전달. 검토자가 로그를 처음부터 읽지
+        # 않고 "무엇이 왜 실패했는지"를 바로 보게 하려는 목적
         last_round = report.rounds[-1] if report.rounds else None
         classification = getattr(last_round, "classification", None)
         primary = getattr(classification, "primary", None)
@@ -407,7 +407,7 @@ class SelfHealLoop:
 
 def summarize(reports: List[GenerateReport]) -> Dict[str, object]:
     """
-    설계서 GEN-03-00 '결과 요약': 성공/실패 그룹 수와 실패 로그 경로 출력.
+    설계서 GEN-03-00 '결과 요약': 성공/실패 그룹 수와 실패 로그 경로 출력
     """
     ok = [r for r in reports if r.success]
     fail = [r for r in reports if not r.success]

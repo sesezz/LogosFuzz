@@ -1,15 +1,15 @@
-"""GEN-03-02 자가치유 루프의 에러 분류기 주입 테스트 (D 파트 3주차).
+"""GEN-03-02 자가치유 루프의 에러 분류기 주입 테스트 (D 파트 3주차)
 
-3주차 항목은 "로그 전문 투입 → 분류기 결과 프롬프트 주입(루프 구조 유지)"이다.
-여기서 검증하는 것은 셋이다.
+3주차 항목은 "로그 전문 투입 → 분류기 결과 프롬프트 주입(루프 구조 유지)"
+검증 항목은 세 가지
 
 1. 분류 결과가 실제로 프롬프트에 실려 나가는가
 2. 로그를 요약하지 않고 전문으로 넣는가
 3. 루프 구조가 그대로인가 — 즉 분류기를 붙였다고 기존 라운드/정체/소진 동작이
    달라지지 않는가 (기존 동작은 `logosfuzz/generate/tests/test_selfheal.py` 가
-   계속 지킨다)
+   계속 검증)
 
-빌드 로그는 합성하지 않고 1주차 코퍼스(`tests/fixtures/bazel_errors/`)를 쓴다.
+빌드 로그는 합성하지 않고 1주차 코퍼스(`tests/fixtures/bazel_errors/`) 사용
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _log(case: str) -> str:
 
 
 class StuckCompiler(Compiler):
-    """언제나 같은 빌드 로그로 실패하는 컴파일러."""
+    """항상 같은 빌드 로그로 실패하는 컴파일러"""
 
     def __init__(self, log: str) -> None:
         self.log = log
@@ -65,10 +65,10 @@ def test_prompt_carries_the_classification() -> None:
 
 
 def test_prompt_carries_the_full_log_not_a_digest() -> None:
-    """'로그 전문 투입' — 파싱된 진단 몇 줄이 아니라 원문이 들어가야 한다.
+    """'로그 전문 투입' — 파싱된 진단 몇 줄이 아닌 원문 투입
 
-    요약해서 넣던 시절엔 Bazel 로그의 핵심이 통째로 잘려 나갔다. Bazel 은 진단을
-    로그 전반에 흩어 놓고 clang/링커 출력은 블록 안쪽에 두기 때문이다.
+    요약해서 넣던 시절엔 Bazel 로그의 핵심이 통째로 잘려 나가는 문제. Bazel 은 진단을
+    로그 전반에 흩어 놓고 clang/링커 출력은 블록 안쪽에 두기 때문
     """
     loop, llm = _loop("link_undefined")
     loop.run(HarnessDraft("g", SOURCE))
@@ -81,7 +81,7 @@ def test_prompt_carries_the_full_log_not_a_digest() -> None:
 
 
 def test_classification_is_recorded_on_every_failed_round() -> None:
-    """라운드 기록에 진단이 남아야 리포팅과 HITL 검토가 로그를 다시 안 읽는다."""
+    """라운드 기록에 진단이 남아야 리포팅과 HITL 검토가 로그 재확인 불필요"""
     loop, _ = _loop("link_undefined")
     report = loop.run(HarnessDraft("g", SOURCE))
 
@@ -94,7 +94,7 @@ def test_classification_is_recorded_on_every_failed_round() -> None:
 # 2. 고칠 수 없는 결함에서 라운드를 낭비하지 않는가
 # --------------------------------------------------------------------------- #
 def test_structural_defect_escalates_without_calling_the_llm() -> None:
-    """순환 의존은 타깃을 쪼개야 풀린다. LLM 을 부를 이유가 없다."""
+    """순환 의존은 타깃을 쪼개야 해결. LLM 호출 불필요"""
     loop, llm = _loop("dep_cycle")
     report = loop.run(HarnessDraft("g", SOURCE))
 
@@ -107,10 +107,10 @@ def test_structural_defect_escalates_without_calling_the_llm() -> None:
     "case", ["not_visible", "no_such_target", "missing_dep", "no_load_statement"]
 )
 def test_build_file_defects_escalate_when_the_loop_cannot_edit_build(case: str) -> None:
-    """BUILD 를 고쳐야 풀리는 결함은 소스를 다시 써도 해결되지 않는다.
+    """BUILD 를 고쳐야 해결되는 결함은 소스를 다시 써도 해결 불가
 
     분류가 정확할수록 루프가 더 확신에 차서 헛도는 구간이라, 분류기를 붙이는
-    순간 같이 막아야 한다.
+    순간 같이 차단 필요
     """
     loop, llm = _loop(case)
     report = loop.run(HarnessDraft("g", SOURCE))
@@ -120,7 +120,7 @@ def test_build_file_defects_escalate_when_the_loop_cannot_edit_build(case: str) 
 
 
 def test_build_file_defects_are_retried_once_the_loop_can_edit_build() -> None:
-    """B 파트의 BUILD 생성기가 붙으면 같은 결함을 재시도 대상으로 돌린다."""
+    """BUILD 생성기가 붙으면 같은 결함을 재시도 대상으로 전환"""
     loop, llm = _loop("not_visible", can_edit_build=True)
     report = loop.run(HarnessDraft("g", SOURCE))
 
@@ -141,9 +141,9 @@ def test_escalation_can_be_switched_off() -> None:
 # 3. 루프 구조 유지 / 견고성
 # --------------------------------------------------------------------------- #
 def test_unclassifiable_log_still_runs_the_normal_loop() -> None:
-    """분류가 안 되는 로그(예: 순수 clang 출력)에서도 예전처럼 돌아야 한다.
+    """분류가 안 되는 로그(예: 순수 clang 출력)에서도 기존처럼 동작
 
-    분류는 거들 뿐이다. 못 알아보면 힌트 없이 로그만 들고 재시도한다.
+    분류는 보조 수단. 인식 실패 시 힌트 없이 로그만으로 재시도
     """
     llm = ScriptedLLMClient([f"```c\n// {i}\n```" for i in range(5)])
     loop = SelfHealLoop(FakeCompiler(), llm, max_round=2, stop_on_stagnation=False)
@@ -155,7 +155,7 @@ def test_unclassifiable_log_still_runs_the_normal_loop() -> None:
 
 
 def test_classifier_failure_does_not_break_the_loop() -> None:
-    """분류기가 예외를 던져도 자가치유 자체가 멈추면 안 된다."""
+    """분류기가 예외를 던져도 자가치유 자체는 계속 진행"""
 
     def boom(_log):
         raise RuntimeError("분류기 폭발")
@@ -170,7 +170,7 @@ def test_classifier_failure_does_not_break_the_loop() -> None:
 
 
 def test_successful_draft_is_not_classified() -> None:
-    """컴파일이 통과하면 분류할 것이 없다(쓸데없는 일을 하지 않는다)."""
+    """컴파일이 통과하면 분류 대상 없음(불필요한 작업 생략)"""
     good = f"{SOURCE} // COMPILE_OK"
     loop = SelfHealLoop(FakeCompiler(), ScriptedLLMClient([]), max_round=3)
     report = loop.run(HarnessDraft("g", good))
@@ -184,7 +184,7 @@ def test_successful_draft_is_not_classified() -> None:
 # HITL 에스컬레이션에 진단이 실리는가
 # --------------------------------------------------------------------------- #
 def test_hitl_payload_carries_the_diagnosis() -> None:
-    """검토자가 로그를 처음부터 읽지 않고 원인을 바로 보게 한다."""
+    """검토자가 로그를 처음부터 읽지 않고 원인을 바로 확인"""
     from logosfuzz.control.hitl import HITLManager, HITLPolicy
     from logosfuzz.control.hitl.store import InMemoryReviewStore
 
@@ -207,7 +207,7 @@ def test_hitl_payload_carries_the_diagnosis() -> None:
 # 로그 잘라내기
 # --------------------------------------------------------------------------- #
 def test_truncate_middle_keeps_head_and_tail() -> None:
-    """꼬리만 남기면 Bazel 의 핵심 ERROR 가 사라진다."""
+    """꼬리만 남기면 Bazel 의 핵심 ERROR 소실"""
     text = "ERROR: 원인이 여기 있다\n" + ("x" * 5000) + "\nINFO: 끝"
     cut = truncate_middle(text, 500)
 

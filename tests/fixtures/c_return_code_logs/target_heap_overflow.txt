@@ -10,7 +10,7 @@ INFO: A corpus is not provided, starting from an empty corpus
 #8870	NEW    cov: 20 ft: 21 corp: 3/9b lim: 86 exec/s: 0 rss: 34Mb L: 4/4 MS: 5 EraseBytes-CrossOver-ChangeBit-ChangeBinInt-InsertByte-
 #8988	NEW    cov: 34 ft: 35 corp: 4/16b lim: 86 exec/s: 0 rss: 34Mb L: 7/7 MS: 3 InsertByte-CrossOver-InsertByte-
 	NEW_FUNC[1/2]: 0x55c4dd419e68 in proto_payload /home/user/LogosFuzz/examples/embedded/proto_parser.c:78
-	NEW_FUNC[2/2]: 0x55c4dd41a298 in HAL_UART_Transmit /tmp/claude-0/emb/stub.c:2
+	NEW_FUNC[2/2]: 0x55c4dd41a298 in HAL_UART_Transmit /tmp/logosfuzz/emb/stub.c:2
 #9026	NEW    cov: 42 ft: 43 corp: 5/56b lim: 86 exec/s: 0 rss: 34Mb L: 40/40 MS: 3 EraseBytes-CrossOver-InsertRepeatedBytes-
 #9032	REDUCE cov: 42 ft: 43 corp: 5/53b lim: 86 exec/s: 0 rss: 34Mb L: 4/40 MS: 1 EraseBytes-
 #9038	NEW    cov: 51 ft: 52 corp: 6/93b lim: 86 exec/s: 0 rss: 35Mb L: 40/40 MS: 1 ChangeBit-
@@ -20,35 +20,35 @@ INFO: A corpus is not provided, starting from an empty corpus
 =================================================================
 ==1028==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x5030000e0790 at pc 0x55c4dd3d8d18 bp 0x7ffc1d1cec30 sp 0x7ffc1d1ce3f0
 WRITE of size 43 at 0x5030000e0790 thread T0
-    #0 0x55c4dd3d8d17 in __asan_memcpy (/tmp/claude-0/emb/fuzz_proto+0xffd17) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #0 0x55c4dd3d8d17 in __asan_memcpy (/tmp/logosfuzz/emb/fuzz_proto+0xffd17) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
     #1 0x55c4dd41999c in proto_parse /home/user/LogosFuzz/examples/embedded/proto_parser.c:64:5
     #2 0x55c4dd41941c in LLVMFuzzerTestOneInput /home/user/LogosFuzz/examples/embedded/harness/fuzz_proto.c:18:9
-    #3 0x55c4dd326ca4 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/claude-0/emb/fuzz_proto+0x4dca4) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
-    #4 0x55c4dd326399 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool, bool*) (/tmp/claude-0/emb/fuzz_proto+0x4d399) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
-    #5 0x55c4dd327b85 in fuzzer::Fuzzer::MutateAndTestOne() (/tmp/claude-0/emb/fuzz_proto+0x4eb85) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
-    #6 0x55c4dd3286e5 in fuzzer::Fuzzer::Loop(std::vector<fuzzer::SizedFile, std::allocator<fuzzer::SizedFile>>&) (/tmp/claude-0/emb/fuzz_proto+0x4f6e5) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
-    #7 0x55c4dd3159bf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/claude-0/emb/fuzz_proto+0x3c9bf) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
-    #8 0x55c4dd340046 in main (/tmp/claude-0/emb/fuzz_proto+0x67046) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #3 0x55c4dd326ca4 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/logosfuzz/emb/fuzz_proto+0x4dca4) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #4 0x55c4dd326399 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool, bool*) (/tmp/logosfuzz/emb/fuzz_proto+0x4d399) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #5 0x55c4dd327b85 in fuzzer::Fuzzer::MutateAndTestOne() (/tmp/logosfuzz/emb/fuzz_proto+0x4eb85) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #6 0x55c4dd3286e5 in fuzzer::Fuzzer::Loop(std::vector<fuzzer::SizedFile, std::allocator<fuzzer::SizedFile>>&) (/tmp/logosfuzz/emb/fuzz_proto+0x4f6e5) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #7 0x55c4dd3159bf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/logosfuzz/emb/fuzz_proto+0x3c9bf) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #8 0x55c4dd340046 in main (/tmp/logosfuzz/emb/fuzz_proto+0x67046) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
     #9 0x7fa8b362a1c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
     #10 0x7fa8b362a28a in __libc_start_main csu/../csu/libc-start.c:360:3
-    #11 0x55c4dd30a9a4 in _start (/tmp/claude-0/emb/fuzz_proto+0x319a4) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #11 0x55c4dd30a9a4 in _start (/tmp/logosfuzz/emb/fuzz_proto+0x319a4) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
 
 0x5030000e0790 is located 0 bytes after 32-byte region [0x5030000e0770,0x5030000e0790)
 allocated by thread T0 here:
-    #0 0x55c4dd3dadd3 in malloc (/tmp/claude-0/emb/fuzz_proto+0x101dd3) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #0 0x55c4dd3dadd3 in malloc (/tmp/logosfuzz/emb/fuzz_proto+0x101dd3) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
     #1 0x55c4dd4195ae in proto_create /home/user/LogosFuzz/examples/embedded/proto_parser.c:28:31
     #2 0x55c4dd419405 in LLVMFuzzerTestOneInput /home/user/LogosFuzz/examples/embedded/harness/fuzz_proto.c:14:24
-    #3 0x55c4dd326ca4 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/claude-0/emb/fuzz_proto+0x4dca4) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
-    #4 0x55c4dd326399 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool, bool*) (/tmp/claude-0/emb/fuzz_proto+0x4d399) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
-    #5 0x55c4dd327b85 in fuzzer::Fuzzer::MutateAndTestOne() (/tmp/claude-0/emb/fuzz_proto+0x4eb85) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
-    #6 0x55c4dd3286e5 in fuzzer::Fuzzer::Loop(std::vector<fuzzer::SizedFile, std::allocator<fuzzer::SizedFile>>&) (/tmp/claude-0/emb/fuzz_proto+0x4f6e5) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
-    #7 0x55c4dd3159bf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/claude-0/emb/fuzz_proto+0x3c9bf) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
-    #8 0x55c4dd340046 in main (/tmp/claude-0/emb/fuzz_proto+0x67046) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #3 0x55c4dd326ca4 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/logosfuzz/emb/fuzz_proto+0x4dca4) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #4 0x55c4dd326399 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool, bool*) (/tmp/logosfuzz/emb/fuzz_proto+0x4d399) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #5 0x55c4dd327b85 in fuzzer::Fuzzer::MutateAndTestOne() (/tmp/logosfuzz/emb/fuzz_proto+0x4eb85) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #6 0x55c4dd3286e5 in fuzzer::Fuzzer::Loop(std::vector<fuzzer::SizedFile, std::allocator<fuzzer::SizedFile>>&) (/tmp/logosfuzz/emb/fuzz_proto+0x4f6e5) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #7 0x55c4dd3159bf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/logosfuzz/emb/fuzz_proto+0x3c9bf) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #8 0x55c4dd340046 in main (/tmp/logosfuzz/emb/fuzz_proto+0x67046) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
     #9 0x7fa8b362a1c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
     #10 0x7fa8b362a28a in __libc_start_main csu/../csu/libc-start.c:360:3
-    #11 0x55c4dd30a9a4 in _start (/tmp/claude-0/emb/fuzz_proto+0x319a4) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
+    #11 0x55c4dd30a9a4 in _start (/tmp/logosfuzz/emb/fuzz_proto+0x319a4) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92)
 
-SUMMARY: AddressSanitizer: heap-buffer-overflow (/tmp/claude-0/emb/fuzz_proto+0xffd17) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92) in __asan_memcpy
+SUMMARY: AddressSanitizer: heap-buffer-overflow (/tmp/logosfuzz/emb/fuzz_proto+0xffd17) (BuildId: 0dfc4ac87595f485f4822b368f2305db6ea34a92) in __asan_memcpy
 Shadow bytes around the buggy address:
   0x5030000e0500: fd fd fd fd fa fa fd fd fd fd fa fa fd fd fd fd
   0x5030000e0580: fa fa fd fd fd fd fa fa fd fd fd fd fa fa fd fd

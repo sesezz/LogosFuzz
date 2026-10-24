@@ -6,13 +6,13 @@ INFO: Loaded 1 PC tables (98 PCs): 98 [0x55f26f4c7338,0x55f26f4c7958),
 Running: c2/crash-e1419a31b0fa77167d4ad8f9ba4a16ce4166099d
 /home/user/LogosFuzz/examples/embedded/proto_parser.c:49:10: runtime error: member access within null pointer of type 'proto_ctx_t' (aka 'struct proto_ctx')
     #0 0x55f26f47fc05 in proto_parse /home/user/LogosFuzz/examples/embedded/proto_parser.c:49:10
-    #1 0x55f26f47f3e4 in LLVMFuzzerTestOneInput /tmp/claude-0/emb/harness_unchecked.c:8:5
-    #2 0x55f26f38cca4 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/claude-0/emb/fuzz_unchecked+0x4dca4) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
-    #3 0x55f26f375dd6 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/claude-0/emb/fuzz_unchecked+0x36dd6) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
-    #4 0x55f26f37b88a in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/claude-0/emb/fuzz_unchecked+0x3c88a) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
-    #5 0x55f26f3a6046 in main (/tmp/claude-0/emb/fuzz_unchecked+0x67046) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #1 0x55f26f47f3e4 in LLVMFuzzerTestOneInput /tmp/logosfuzz/emb/harness_unchecked.c:8:5
+    #2 0x55f26f38cca4 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/logosfuzz/emb/fuzz_unchecked+0x4dca4) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #3 0x55f26f375dd6 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/tmp/logosfuzz/emb/fuzz_unchecked+0x36dd6) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #4 0x55f26f37b88a in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/logosfuzz/emb/fuzz_unchecked+0x3c88a) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #5 0x55f26f3a6046 in main (/tmp/logosfuzz/emb/fuzz_unchecked+0x67046) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
     #6 0x7f3e6882a1c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
     #7 0x7f3e6882a28a in __libc_start_main csu/../csu/libc-start.c:360:3
-    #8 0x55f26f3709a4 in _start (/tmp/claude-0/emb/fuzz_unchecked+0x319a4) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #8 0x55f26f3709a4 in _start (/tmp/logosfuzz/emb/fuzz_unchecked+0x319a4) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
 
 SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior /home/user/LogosFuzz/examples/embedded/proto_parser.c:49:10 

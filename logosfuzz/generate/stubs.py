@@ -1,30 +1,30 @@
-"""GENERIC-C 링크 실패 미정의 심볼 → weak 스텁 자동 생성.
+"""GENERIC-C 링크 실패 미정의 심볼 → weak 스텁 자동 생성
 
 왜 필요한가
 -----------
-임베디드 펌웨어 모듈은 벤더 HAL(``HAL_UART_Transmit``, ``HAL_GetTick`` 등)을 부른다.
-호스트에서 퍼징 바이너리를 만들면 그 정의가 없어서 **링크 단계**에서 실패한다.
-이건 하네스 소스 결함이 아니므로 LLM 에게 하네스를 다시 쓰게 해도 풀리지 않는다
-(LLM 은 대개 호출을 지우거나 같은 이름을 하네스에 재정의해서 다른 문제를 만든다).
+임베디드 펌웨어 모듈은 벤더 HAL(``HAL_UART_Transmit``, ``HAL_GetTick`` 등)을 호출
+호스트에서 퍼징 바이너리를 만들면 그 정의가 없어서 **링크 단계**에서 실패
+하네스 소스 결함이 아니므로 LLM 에게 하네스를 다시 쓰게 해도 해결 불가
+(LLM 은 대개 호출을 지우거나 같은 이름을 하네스에 재정의해서 다른 문제 유발)
 
 그래서 링커 로그에서 미정의 심볼을 읽고, 프로필이 허용한 심볼만 **결정적으로**
-스텁을 만들어 다시 링크한다. LLM 호출이 없다.
+스텁을 만들어 다시 링크. LLM 호출 없음
 
-    embedded.stub_undefined  true 일 때만 동작한다.
-    embedded.stub_allowlist  glob 목록(예: ``["HAL_*"]``). 여기에 맞는 심볼만 스텁을 만든다.
-                             비어 있으면 제한 없음(프로필 계약 그대로).
+    embedded.stub_undefined  true 일 때만 동작
+    embedded.stub_allowlist  glob 목록(예: ``["HAL_*"]``). 여기에 맞는 심볼만 스텁 생성
+                             비어 있으면 제한 없음(프로필 계약 그대로)
 
 스텁 모양
 ---------
-* 모든 스텁은 ``__attribute__((weak))`` 다. 나중에 실제 정의가 링크되면 그쪽이 이긴다.
+* 모든 스텁은 ``__attribute__((weak))``. 나중에 실제 정의가 링크되면 그쪽 우선
 * KB 에 그 함수 문서(반환형·파라미터)가 있으면 그 시그니처로 만들고, 문서의 파일이
-  헤더면 ``#include`` 해서 타입을 맞춘다. 반환 값은 0 으로 채운 값이다.
-* KB 에 없으면 ``int X() { return 0; }`` 다. C 에서 빈 괄호는 "인자 미지정"이라
-  어떤 호출과도 링크된다. 반환형이 다른 함수(``uint32_t`` 등)도 정수 레지스터로
-  0 을 돌려받는다.
+  헤더면 ``#include`` 해서 타입 일치. 반환 값은 0 으로 채운 값
+* KB 에 없으면 ``int X() { return 0; }``. C 에서 빈 괄호는 "인자 미지정"이라
+  어떤 호출과도 링크 가능. 반환형이 다른 함수(``uint32_t`` 등)도 정수 레지스터로
+  0 수신
 
-스텁은 하네스와 **다른 번역 단위**(별도 .c 파일)로 만든다. 하네스가 ``hal.h`` 를
-include 하고 있으면 같은 파일 안의 ``int HAL_GetTick()`` 이 선언과 충돌하기 때문이다.
+스텁은 하네스와 **다른 번역 단위**(별도 .c 파일)로 생성. 하네스가 ``hal.h`` 를
+include 하고 있으면 같은 파일 안의 ``int HAL_GetTick()`` 이 선언과 충돌하기 때문
 """
 from __future__ import annotations
 
@@ -36,23 +36,23 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 from .errors import classify_toolchain_log, undefined_symbols
 
-# C 식별자만 스텁을 만든다. C++ 심볼(``ns::f(int)``)은 맹글링과 오버로드 때문에
-# 이름만으로 정의를 쓸 수 없다.
+# C 식별자만 스텁 생성. C++ 심볼(``ns::f(int)``)은 맹글링과 오버로드 때문에
+# 이름만으로 정의 작성 불가
 _C_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _HEADER_SUFFIXES = (".h", ".hh", ".hpp", ".hxx")
 
 
 def parse_undefined_symbols(log: str) -> List[str]:
-    """링커 로그에서 미정의 심볼을 등장 순서대로(중복 없이) 뽑는다.
+    """링커 로그에서 미정의 심볼을 등장 순서대로(중복 없이) 추출
 
-    GNU ld ``undefined reference to `X'`` 와 lld ``undefined symbol: X`` 를 모두 읽는다.
+    GNU ld ``undefined reference to `X'`` 와 lld ``undefined symbol: X`` 모두 지원
     """
     return undefined_symbols(classify_toolchain_log(log))
 
 
 @dataclass(frozen=True)
 class StubPolicy:
-    """스텁을 만들지, 어떤 심볼까지 만들지."""
+    """스텁 생성 여부와 대상 심볼 범위"""
 
     enabled: bool = False
     allowlist: Tuple[str, ...] = ()
@@ -75,7 +75,7 @@ class StubPolicy:
 
 @dataclass
 class StubPlan:
-    """미정의 심볼을 스텁 대상과 나머지로 나눈 결과."""
+    """미정의 심볼을 스텁 대상과 나머지로 나눈 결과"""
 
     stub: List[str] = field(default_factory=list)
     """허용목록에 맞아서 스텁을 만들 심볼."""
@@ -85,13 +85,13 @@ class StubPlan:
 
     @property
     def only_rejected(self) -> bool:
-        """스텁으로 풀 수 있는 게 없고, 남은 미정의 심볼은 전부 허용목록 밖이다."""
+        """스텁으로 해결할 대상이 없고, 남은 미정의 심볼은 전부 허용목록 밖"""
         return not self.stub and bool(self.rejected)
 
 
 def plan_stubs(symbols: Iterable[str], policy: StubPolicy,
                already: Iterable[str] = ()) -> StubPlan:
-    """심볼을 스텁 대상/거부로 나눈다. ``already`` 에 있는 심볼은 다시 만들지 않는다."""
+    """심볼을 스텁 대상/거부로 분류. ``already`` 에 있는 심볼은 재생성하지 않음"""
     done = set(already)
     plan = StubPlan()
     for symbol in symbols:
@@ -106,7 +106,7 @@ def plan_stubs(symbols: Iterable[str], policy: StubPolicy,
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class StubSignature:
-    """스텁 하나의 시그니처. ``header`` 가 있으면 그 헤더를 include 한다."""
+    """스텁 하나의 시그니처. ``header`` 가 있으면 그 헤더 include"""
 
     name: str
     return_type: str = "int"
@@ -154,7 +154,7 @@ def _render_one(sig: StubSignature) -> str:
 
 
 def render_stub_source(symbols: Sequence[str], kb=None) -> str:
-    """스텁 C 소스 1개를 만든다."""
+    """스텁 C 소스 1개 생성"""
     signatures = [signature_for(name, kb) for name in symbols]
     headers = sorted({sig.header for sig in signatures if sig.header})
     lines = [
@@ -170,7 +170,7 @@ def render_stub_source(symbols: Sequence[str], kb=None) -> str:
 
 @dataclass
 class StubSet:
-    """지금까지 만든 스텁 묶음. 자가치유 라운드를 거치며 누적된다."""
+    """지금까지 만든 스텁 묶음. 자가치유 라운드를 거치며 누적"""
 
     symbols: List[str] = field(default_factory=list)
     kb: object = None
@@ -185,7 +185,7 @@ class StubSet:
         return render_stub_source(self.symbols, self.kb) if self.symbols else ""
 
     def write(self, path: Path) -> Optional[Path]:
-        """스텁 소스를 쓴다. 스텁이 없으면 아무것도 쓰지 않고 None."""
+        """스텁 소스 기록. 스텁이 없으면 기록 없이 None"""
         if not self.symbols:
             return None
         path = Path(path)

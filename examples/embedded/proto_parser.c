@@ -1,10 +1,10 @@
 /*
- * 간단한 시리얼 프레임 파서 구현 (GENERIC-C 임베디드 샘플).
+ * 간단한 시리얼 프레임 파서 구현 (GENERIC-C 임베디드 샘플)
  *
- * 의도적 결함 1건: proto_parse 가 프레임의 길이 필드(len)를 그대로 믿고
- * ctx->payload(capacity 바이트)에 복사한다. 입력 버퍼 길이는 확인하지만
- * capacity 와는 비교하지 않으므로 len > capacity 인 프레임이 힙 버퍼를 넘친다.
- * 체크섬 검사도 복사 뒤에 하므로 체크섬이 틀린 프레임으로도 재현된다.
+ * 의도적 결함 1건: proto_parse 가 프레임 길이 필드(len)를 그대로 믿고
+ * ctx->payload(capacity 바이트)에 복사. 입력 버퍼 길이는 확인하지만
+ * capacity 와는 미비교 → len > capacity 프레임에서 힙 버퍼 오버플로
+ * 체크섬 검사도 복사 이후라 체크섬이 틀린 프레임으로도 재현
  */
 #include "proto_parser.h"
 
@@ -13,7 +13,7 @@
 
 #include "hal.h"
 
-/* 응답 전송에 쓰는 UART 핸들. 호스트 빌드에서는 실제 장치가 없다. */
+/* 응답 전송용 UART 핸들. 호스트 빌드에서는 실제 장치 없음 */
 static UART_HandleTypeDef *g_uart = NULL;
 
 proto_ctx_t *proto_create(size_t capacity)
@@ -45,7 +45,7 @@ static uint8_t checksum(const uint8_t *data, size_t len)
 
 int proto_parse(proto_ctx_t *ctx, const uint8_t *frame, size_t size)
 {
-    /* 주의: ctx 가 NULL 인지는 확인하지 않는다(문서상 호출자 책임). */
+    /* 주의: ctx 의 NULL 여부는 미확인(문서상 호출자 책임) */
     ctx->last_tick = HAL_GetTick();
 
     if (frame == NULL || size < 4) {
@@ -60,7 +60,7 @@ int proto_parse(proto_ctx_t *ctx, const uint8_t *frame, size_t size)
         return PROTO_ERR_SHORT;
     }
 
-    /* 결함: len 을 ctx->capacity 와 비교하지 않는다. */
+    /* 결함: len 과 ctx->capacity 미비교 */
     memcpy(ctx->payload, &frame[3], len);
     ctx->payload_len = len;
     ctx->type = frame[1];

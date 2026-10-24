@@ -45,7 +45,7 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 
 # 프로필 없이 부르면(기존 자동차 모드 호출부) 지금까지와 같게 score::Result 계약과
-# 자동차 문구를 쓴다. 프로필이 있으면 profile.error_contract / profile.domain 을 따른다.
+# 자동차 문구 사용. 프로필이 있으면 profile.error_contract / profile.domain 기준
 _LEGACY_CONTRACT = "score_result"
 _LEGACY_DOMAIN = "automotive"
 
@@ -57,7 +57,7 @@ def _domain(profile) -> str:
 
 
 def _resolve_contract(rep, contract=None, profile=None, kb=None):
-    """(플러그인, 근거). 근거가 주어지면 그 타입의 플러그인을 쓴다."""
+    """(플러그인, 근거). 근거가 주어지면 그 타입의 플러그인 사용"""
     if contract is not None:
         plugin = _contracts.contract_for_evidence(contract)
         if plugin is not None:
@@ -70,7 +70,7 @@ def _resolve_contract(rep, contract=None, profile=None, kb=None):
 
 
 def _mocking_rationale(profile) -> str:
-    """mocking-fail-fp 근거문. 자동차 표현(CAN/UDS)은 automotive 에서만 쓴다."""
+    """mocking-fail-fp 근거문. 자동차 표현(CAN/UDS)은 automotive 에서만 사용"""
     if _domain(profile) == "automotive":
         return (
             "하네스의 가상 네트워크(CAN/UDS) 모킹 미구현으로 발생한 가짜 크래시다. "
@@ -95,11 +95,11 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None,
             (불변식 추론은 ``reachability.render_for_prompt()`` 로 LLM 판별기에 위임)
         contract: 에러계약 근거(선택). ``analyze.contracts`` 플러그인이 만든 객체
             (``ErrorContractEvidence``/``CReturnCodeEvidence``/...). 없으면 대표 레코드의
-            원문 로그만으로 계산한다 — 스택에서 읽히는 계약 위반은 KB 없이도 증명되기
-            때문이다. KB 의 선언된 계약까지 보려면 ``ContractProvider`` 로 만든 근거를 넘긴다.
-        profile: :class:`~logosfuzz.common.target_profile.TargetProfile` (선택).
+            원문 로그만으로 계산 — 스택에서 읽히는 계약 위반은 KB 없이도 증명되기
+            때문. KB 의 선언된 계약까지 보려면 ``ContractProvider`` 로 만든 근거 전달
+        profile: :class:`~logosfuzz.common.target_profile.TargetProfile` (선택)
             있으면 ``profile.error_contract`` 로 계약 플러그인을, ``profile.domain`` 으로
-            근거문 표현을 고른다. 없으면 기존 동작(``score_result``, 자동차 표현)이다.
+            근거문 표현 선택. 없으면 기존 동작(``score_result``, 자동차 표현)
     """
     rep = cluster.representative
     plugin, contract = _resolve_contract(rep, contract, profile)
@@ -170,7 +170,7 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None,
 
     score = _clamp(score)
 
-    # 근거문 위치는 런타임(abort/raise 등)을 건너뛴 첫 프레임으로 잡는다.
+    # 근거문 위치는 런타임(abort/raise 등)을 건너뛴 첫 프레임
     top = (application_frames(rep) or rep.traceback)[:1]
     loc = f"{top[0].file}:{top[0].line}" if top else "위치 미상"
     if score >= _TP_THRESHOLD:
@@ -213,7 +213,7 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None,
             "의도된 호출자가 라이브러리를 링크하는 외부 애플리케이션이라는 뜻이므로, "
             "도달 불가로 해석하면 안 된다."
         )
-    # 에러계약 근거는 위 도달 가능성 근거와 독립이라 함께 남긴다.
+    # 에러계약 근거는 위 도달 가능성 근거와 독립이라 함께 기록
     rationale += plugin.render_rationale(contract)
 
     return TriageResult(
@@ -233,11 +233,11 @@ class RuleBasedTriager:
         context_provider: ``cluster -> ReachabilityContext`` 콜러블 (선택)
             ``reachability.SourceReachabilityProvider(대상_소스_루트)`` 지정 시
             호출부 증거를 점수에 반영 (없으면 기존 동작)
-        contract_provider: ``cluster -> 에러계약 근거`` 콜러블(선택).
+        contract_provider: ``cluster -> 에러계약 근거`` 콜러블(선택)
             ``contracts.ContractProvider.for_profile(profile, kb)`` 나
             ``error_contract.KnowledgeBaseContractProvider(kb)`` 를 넣으면 KB 에
-            선언된 에러계약까지 근거로 쓴다. 없으면 원문 로그만 본다.
-        profile: TargetProfile (선택). 계약 플러그인·근거문 표현을 고른다.
+            선언된 에러계약까지 근거로 사용. 없으면 원문 로그만 확인
+        profile: TargetProfile (선택). 계약 플러그인·근거문 표현 선택
     """
 
     model_name = RULE_MODEL_NAME

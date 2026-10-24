@@ -1,6 +1,6 @@
 """
 ANA-05-02: ASAN/TSAN 원본 로그(CRASH_REPORT.asan_log)를 파싱해서
-구조화된 정보(에러 유형, 크래시 위치, 스택트레이스, 접근 정보 등)를 추출한다.
+구조화된 정보(에러 유형, 크래시 위치, 스택트레이스, 접근 정보 등)를 추출
 
 입력: EXE-04-02(동적 분석 새니타이저 실시간 모니터링) 단계가 저장한 원본 텍스트 로그
 출력: CVE 리포트 생성기(report_generator.py)가 바로 사용할 수 있는 dict
@@ -60,7 +60,7 @@ def _detect_sanitizer(log_text: str) -> str:
 
 
 def _detect_error_type(log_text: str) -> tuple[str, str]:
-    """원본 로그에서 에러 타입을 찾아 (정규화된 타입, 원문 요약 라인)을 반환."""
+    """원본 로그에서 에러 타입을 찾아 (정규화된 타입, 원문 요약 라인) 반환"""
     for line in log_text.splitlines():
         for token, normalized in _ERROR_TYPE_NORMALIZE.items():
             if token in line:
@@ -69,14 +69,14 @@ def _detect_error_type(log_text: str) -> tuple[str, str]:
 
 
 def _extract_stack_trace(log_text: str, max_frames: int = 15) -> list[dict]:
-    """크래시를 직접 유발한 첫 번째 스택트레이스 블록만 추출한다.
+    """크래시를 직접 유발한 첫 번째 스택트레이스 블록만 추출
 
     ASAN 로그는 보통 (1) 크래시 발생 지점 스택, (2) free 지점 스택,
     (3) 최초 할당(malloc) 지점 스택 순서로 빈 줄을 사이에 두고 여러 블록이
-    이어지며, 각 블록은 다시 #0 부터 프레임 번호가 시작된다. 여기서는
+    이어지며, 각 블록은 다시 #0 부터 프레임 번호 시작. 여기서는
     "크래시가 실제로 발생한" 첫 번째 블록만 취급하고, 이후 블록(할당/해제
-    이력)은 섞이지 않도록 한다. 프레임을 하나 이상 모은 뒤 blank line 을
-    만나면 즉시 중단한다.
+    이력)은 섞이지 않도록 처리. 프레임을 하나 이상 모은 뒤 blank line 을
+    만나면 즉시 중단
     """
     frames = []
     for line in log_text.splitlines():
@@ -104,7 +104,7 @@ _ALLOCATOR_RUNTIME_FUNCS = {"malloc", "free", "operator new", "operator delete",
 def _extract_block_first_location(log_text: str, header_token: str) -> str | None:
     """'freed by thread T0 here:' / 'previously allocated by thread T0 here:'
     같은 헤더 라인 다음 블록에서, ASAN 런타임 자체의 malloc/free 래퍼 프레임(#0)은
-    건너뛰고 실제로 그 함수를 호출한 애플리케이션 코드 프레임의 file:line 을 반환한다.
+    건너뛰고 실제로 그 함수를 호출한 애플리케이션 코드 프레임의 file:line 을 반환
     (그렇지 않으면 항상 asan_malloc_linux.cpp 내부 위치만 나와 리포트 가치가 없음)
     """
     lines = log_text.splitlines()
@@ -125,10 +125,10 @@ def _extract_block_first_location(log_text: str, header_token: str) -> str | Non
 
 
 def parse_asan_log(log_text: str) -> ParsedAsanLog:
-    """ASAN/TSAN raw 텍스트 로그를 구조화된 ParsedAsanLog 로 변환한다.
+    """ASAN/TSAN raw 텍스트 로그를 구조화된 ParsedAsanLog 로 변환
 
     포맷이 다르거나 알려지지 않은 sanitizer 출력이 들어와도 예외를 던지지 않고
-    최대한 파싱 가능한 부분만 채운 뒤 나머지는 None/unknown 으로 남긴다.
+    최대한 파싱 가능한 부분만 채우고 나머지는 None/unknown 으로 유지
     (크래시 리포트 생성 파이프라인이 파싱 실패로 죽지 않도록 하기 위함)
     """
     sanitizer = _detect_sanitizer(log_text)

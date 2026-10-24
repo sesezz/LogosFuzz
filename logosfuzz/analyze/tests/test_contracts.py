@@ -1,8 +1,8 @@
-"""GENERIC-C 에러계약 플러그인 테스트.
+"""GENERIC-C 에러계약 플러그인 테스트
 
 정답지는 ``examples/embedded`` 를 clang 18 + ASan/UBSan/libFuzzer 로 빌드해 받은 실측
-로그다(``tests/fixtures/c_return_code_logs``). EXE sanitizer 파서 → dedup → 판별의
-실제 경로를 그대로 태운다.
+로그(``tests/fixtures/c_return_code_logs``). EXE sanitizer 파서 → dedup → 판별의
+실제 경로를 그대로 실행
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ def test_contract_for_profile_and_evidence(embedded_profile, automotive_profile)
 
 
 def test_error_contract_module_keeps_public_api():
-    """score::Result 판별을 옮겨도 기존 import 경로는 같은 객체를 가리킨다."""
+    """score::Result 판별을 옮겨도 기존 import 경로는 같은 객체 참조"""
     from logosfuzz.analyze.contracts import score_result
 
     assert error_contract.analyze_error_contract is score_result.analyze_error_contract
@@ -115,7 +115,7 @@ def test_harness_unchecked_null_segv_is_harness_defect(embedded_profile):
 
 
 def test_harness_unchecked_null_ubsan_stack_is_harness_defect(embedded_profile):
-    """Docker 실행 조건(UBSAN print_stacktrace=1, halt_on_error=1)에서 같은 입력."""
+    """Docker 실행 조건(UBSAN print_stacktrace=1, halt_on_error=1)에서 같은 입력"""
     (record,) = _records(C_LOGS / "harness_unchecked_null_ubsan_stack.txt")
     evidence = get_contract("c_return_code").analyze(record, profile=embedded_profile)
     assert evidence.violation == "harness"
@@ -127,7 +127,7 @@ def test_harness_unchecked_null_ubsan_stack_is_harness_defect(embedded_profile):
 
 
 def test_ubsan_line_without_stack_is_not_judged(embedded_profile):
-    """스택이 없는 UBSan 한 줄은 호출자를 증명할 수 없으므로 신호를 내지 않는다."""
+    """스택이 없는 UBSan 한 줄은 호출자 증명 불가로 신호 없음"""
     record = _by_category(C_LOGS / "harness_unchecked_null.txt", "null-dereference")
     evidence = get_contract("c_return_code").analyze(record, profile=embedded_profile)
     assert evidence.violation == ""
@@ -136,7 +136,7 @@ def test_ubsan_line_without_stack_is_not_judged(embedded_profile):
 
 
 def test_target_heap_overflow_is_target_defect(embedded_profile):
-    """길이 필드를 믿는 memcpy 의 힙 OOB. NULL 근처가 아니므로 하네스 탓이 아니다."""
+    """길이 필드를 믿는 memcpy 의 힙 OOB. NULL 근처가 아니므로 하네스 탓 아님"""
     (record,) = _records(C_LOGS / "target_heap_overflow.txt")
     evidence = get_contract("c_return_code").analyze(record, profile=embedded_profile)
     assert evidence.violation == ""
@@ -149,7 +149,7 @@ def test_target_heap_overflow_is_target_defect(embedded_profile):
 
 
 def test_api_not_in_profile_gives_no_signal(generic_profile):
-    """profile.apis 에 없는 함수(libsndfile 프로필에는 proto_parse 가 없다)는 판단하지 않는다."""
+    """profile.apis 에 없는 함수(libsndfile 프로필에는 proto_parse 없음)는 판단 제외"""
     record = _by_category(C_LOGS / "harness_unchecked_null.txt", "segv")
     evidence = get_contract("c_return_code").analyze(record, profile=generic_profile)
     assert evidence.violation == ""

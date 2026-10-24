@@ -14,16 +14,16 @@ AddressSanitizer:DEADLYSIGNAL
 ==1034==The signal is caused by a WRITE memory access.
 ==1034==Hint: address points to the zero page.
     #0 0x562d767237e7 in proto_parse /home/user/LogosFuzz/examples/embedded/proto_parser.c:49:20
-    #1 0x562d767233e4 in LLVMFuzzerTestOneInput /tmp/claude-0/emb/harness_unchecked.c:8:5
-    #2 0x562d76630ca4 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/claude-0/emb/fuzz_unchecked+0x4dca4) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
-    #3 0x562d76630399 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool, bool*) (/tmp/claude-0/emb/fuzz_unchecked+0x4d399) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
-    #4 0x562d76631b85 in fuzzer::Fuzzer::MutateAndTestOne() (/tmp/claude-0/emb/fuzz_unchecked+0x4eb85) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
-    #5 0x562d766326e5 in fuzzer::Fuzzer::Loop(std::vector<fuzzer::SizedFile, std::allocator<fuzzer::SizedFile>>&) (/tmp/claude-0/emb/fuzz_unchecked+0x4f6e5) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
-    #6 0x562d7661f9bf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/claude-0/emb/fuzz_unchecked+0x3c9bf) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
-    #7 0x562d7664a046 in main (/tmp/claude-0/emb/fuzz_unchecked+0x67046) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #1 0x562d767233e4 in LLVMFuzzerTestOneInput /tmp/logosfuzz/emb/harness_unchecked.c:8:5
+    #2 0x562d76630ca4 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/logosfuzz/emb/fuzz_unchecked+0x4dca4) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #3 0x562d76630399 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool, bool*) (/tmp/logosfuzz/emb/fuzz_unchecked+0x4d399) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #4 0x562d76631b85 in fuzzer::Fuzzer::MutateAndTestOne() (/tmp/logosfuzz/emb/fuzz_unchecked+0x4eb85) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #5 0x562d766326e5 in fuzzer::Fuzzer::Loop(std::vector<fuzzer::SizedFile, std::allocator<fuzzer::SizedFile>>&) (/tmp/logosfuzz/emb/fuzz_unchecked+0x4f6e5) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #6 0x562d7661f9bf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/logosfuzz/emb/fuzz_unchecked+0x3c9bf) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #7 0x562d7664a046 in main (/tmp/logosfuzz/emb/fuzz_unchecked+0x67046) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
     #8 0x7ff5d4c2a1c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
     #9 0x7ff5d4c2a28a in __libc_start_main csu/../csu/libc-start.c:360:3
-    #10 0x562d766149a4 in _start (/tmp/claude-0/emb/fuzz_unchecked+0x319a4) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #10 0x562d766149a4 in _start (/tmp/logosfuzz/emb/fuzz_unchecked+0x319a4) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
 
 AddressSanitizer can not provide additional info.
 SUMMARY: AddressSanitizer: SEGV /home/user/LogosFuzz/examples/embedded/proto_parser.c:49:20 in proto_parse

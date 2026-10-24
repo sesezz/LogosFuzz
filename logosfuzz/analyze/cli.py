@@ -12,15 +12,15 @@
 
 크래시 승인 게이트 (CTR-06-02 CRASH_TRIAGE, 4주차 활성화)
 --------------------------------------------------------
-``triage``/``analyze`` 는 판정을 낸 고유 크래시마다 승인 게이트를 태운다.
-자동 판정이 확실하면(정책: 신뢰도 0.8 이상, needs_review 아님) 자동 승인되고,
-아니면 리뷰 저장소(기본 ``.logosfuzz/hitl/reviews.json``)에 쌓인다. 사람이
-``logosfuzz review approve|edit|reject <id>`` 로 결정한 뒤 다시 돌리면 반영된다.
+``triage``/``analyze`` 는 판정이 나온 고유 크래시마다 승인 게이트 적용
+자동 판정이 확실하면(정책: 신뢰도 0.8 이상, needs_review 아님) 자동 승인,
+아니면 리뷰 저장소(기본 ``.logosfuzz/hitl/reviews.json``)에 적재
+``logosfuzz review approve|edit|reject <id>`` 로 결정 후 재실행 시 반영
 
-출력의 ``verified_crashes`` 가 **검증된 고유 크래시 목록**이다 - 게이트에서 정탐으로
-확정된 것만 담는다. ``summary`` 는 지금처럼 자동 판정 집계이고(ANA-05-02 계약
-유지), 게이트 결과는 ``approval_summary`` 에 따로 둔다. ``--no-approval-gate`` 면
-게이트를 건너뛰고 예전 출력 그대로다.
+출력의 ``verified_crashes`` 가 **검증된 고유 크래시 목록** - 게이트에서 정탐으로
+확정된 항목만 포함. ``summary`` 는 자동 판정 집계(ANA-05-02 계약 유지),
+게이트 결과는 ``approval_summary`` 에 별도 기록. ``--no-approval-gate`` 시
+게이트 생략, 기존 출력과 동일
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ def _triager_for_args(
 
 
 def _profile_for_args(args: argparse.Namespace):
-    """``--profile`` 이 있으면 TargetProfile, 없으면 None(기존 자동차 동작)."""
+    """``--profile`` 이 있으면 TargetProfile, 없으면 None(기존 자동차 동작)"""
     if not getattr(args, "profile", None):
         return None
     cached = getattr(args, "_profile", None)
@@ -110,10 +110,10 @@ def _profile_for_args(args: argparse.Namespace):
 
 
 def _contract_provider_for_args(args: argparse.Namespace):
-    """에러계약 근거 공급자. ``--kb`` 가 있으면 선언된 계약·Bazel 타깃까지 본다.
+    """에러계약 근거 공급자. ``--kb`` 가 있으면 선언된 계약·Bazel 타깃까지 참조
 
-    ``--profile`` 이 있으면 ``profile.error_contract`` 플러그인을, 없으면 기존
-    ``score::Result`` 공급자를 쓴다.
+    ``--profile`` 이 있으면 ``profile.error_contract`` 플러그인, 없으면 기존
+    ``score::Result`` 공급자 사용
     """
     cached = getattr(args, "_contract_provider", None)
     if cached is not None:
@@ -137,7 +137,7 @@ def _contract_provider_for_args(args: argparse.Namespace):
 def _contract_dict(args: argparse.Namespace, cluster: CrashCluster) -> dict:
     try:
         return _contract_provider_for_args(args)(cluster).to_dict()
-    except Exception as exc:  # 근거 수집 실패가 출력 전체를 막지 않도록 한다.
+    except Exception as exc:  # 근거 수집 실패가 출력 전체를 막지 않도록 처리
         return {"error": f"error-contract analysis failed: {exc}"}
 
 
@@ -160,7 +160,7 @@ def _approval_gate_for_args(args: argparse.Namespace):
 
 
 def _gate_results(gate, clusters: dict, results, evidence: dict) -> dict:
-    """판정 결과를 승인 게이트에 태운다. cluster_id -> CrashApproval."""
+    """판정 결과의 승인 게이트 적용. cluster_id -> CrashApproval"""
     approvals = {}
     for r in results:
         cluster = clusters.get(r.cluster_id)
@@ -203,7 +203,7 @@ def _approval_summary(approvals: dict) -> dict:
 
 
 def _verified_crashes(clusters: dict, results, approvals: dict, evidence: dict) -> list:
-    """검증된 고유 크래시 목록 - 승인 게이트에서 정탐으로 확정된 것만."""
+    """검증된 고유 크래시 목록 - 승인 게이트에서 정탐으로 확정된 항목만"""
     verified = []
     for r in results:
         approval = approvals.get(r.cluster_id)
@@ -380,7 +380,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
 
 
 def add_gate_arguments(parser: argparse.ArgumentParser) -> None:
-    """triage/analyze 공통: 에러계약 KB 와 크래시 승인 게이트 옵션."""
+    """triage/analyze 공통: 에러계약 KB 와 크래시 승인 게이트 옵션"""
     parser.add_argument("--kb", help="지식베이스 JSON(에러계약·Bazel 타깃 근거, 선택)")
     parser.add_argument("--profile",
                         help="대상 프로필 targets/*.json (error_contract·domain·apis 로 판별, 선택)")

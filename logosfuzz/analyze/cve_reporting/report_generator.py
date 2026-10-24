@@ -6,8 +6,8 @@ ANA-05-02: 취약점(CVE) 리포트 생성기
 이 리포지토리에는 ANA-05-01 실제 구현체가 없으므로, 기존 ERD
 (API_METADATA / HARNESS / CRASH_REPORT)와 개발보고서에 기술된
 "LLM 기반 정탐/오탐 자동 판별" 출력을 근거로 아래와 같은 입력 딕셔너리
-구조를 가정한다. 실제 ANA-05-01 모듈의 출력 필드명이 다르다면
-`build_cve_report()` 상단의 필드 매핑 부분만 수정하면 된다.
+구조를 가정. 실제 ANA-05-01 모듈의 출력 필드명이 다르면
+`build_cve_report()` 상단의 필드 매핑 부분만 수정
 
 crash_report = {
     "crash_id": "CR-000123",
@@ -102,7 +102,7 @@ def build_cve_report(
     sequence: int = 1,
 ) -> CVEReport:
     """CRASH_REPORT + API_METADATA + HARNESS + ANA-05-01 출력을 종합해
-    CVEReport(취약점 리포트 초안)를 생성한다.
+    CVEReport(취약점 리포트 초안)를 생성
     """
     parsed_log = parse_asan_log(crash_report["asan_log"])
     cwe_info = lookup_cwe(parsed_log.error_type)

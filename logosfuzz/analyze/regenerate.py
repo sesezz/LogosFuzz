@@ -4,20 +4,20 @@ ANA-05-03 STEP 4: 재생성 트리거 (GEN-03-01 재호출 -> GEN-03-02 자가�
 
 승인된 KB 오버라이드를 반영한 컨텍스트로 새 하네스 초안을 만들고(“GEN-03-01
 재호출”), 실제로 동작하는 GEN-03-02 `SelfHealLoop`(컴파일 자가치유 루프)에
-태워 컴파일 성공 여부까지 검증한다.
+태워 컴파일 성공 여부까지 검증
 
 GEN-03-01(초안 생성)은 이 저장소에 재사용 가능한 형태로 구현되어 있지
-않다 - `logosfuzz/generate/llm_harness_generator.py`는 하드코딩된 데모 데이터와
-OpenAI 직접 호출 전용 `__main__` 스크립트라 함수로 불러 쓸 수 없다. 그래서
+않음 - `logosfuzz/generate/llm_harness_generator.py`는 하드코딩된 데모 데이터와
+OpenAI 직접 호출 전용 `__main__` 스크립트라 함수로 호출 불가. 따라서
 "GEN-03-01 재호출"은 이 모듈이 KB 컨텍스트(오버라이드 포함)로 프롬프트를
-구성해 `LLMClient`에 초안을 요청하는 `_draft_via_llm()`으로 대체한다.
-GEN-03-01이 실제로 구현되면 이 함수만 그 구현으로 교체하면 된다.
+구성해 `LLMClient`에 초안을 요청하는 `_draft_via_llm()`으로 대체
+GEN-03-01이 실제로 구현되면 이 함수만 그 구현으로 교체
 
 무한루프 방지: `SelfHealLoop.max_round`가 이미 GEN-03-02 자체의 컴파일
-재시도 상한이므로 새로 만들지 않고 그대로 물려받는다. 재생성이 다시
+재시도 상한이므로 새로 만들지 않고 그대로 사용. 재생성이 다시
 실패해도(EXHAUSTED/STAGNATED) 여기서 더 재시도하지 않고 `RegenerationRecord`로
-결과만 남긴다 - 그 이상은 기존 GEN-03-02 HITL 에스컬레이션 경로
-(`SelfHealLoop.hitl` -> Checkpoint.HARNESS_REVIEW)에 맡긴다.
+결과만 기록 - 그 이상은 기존 GEN-03-02 HITL 에스컬레이션 경로
+(`SelfHealLoop.hitl` -> Checkpoint.HARNESS_REVIEW)에 위임
 """
 from __future__ import annotations
 
@@ -92,7 +92,7 @@ def draft_via_llm(
     project: str = "",
     domain: str = "automotive",
 ) -> HarnessDraft:
-    """GEN-03-01을 대신하는 어댑터: 갱신된 KB 컨텍스트로 LLM에 초안을 요청한다."""
+    """GEN-03-01을 대신하는 어댑터: 갱신된 KB 컨텍스트로 LLM에 초안을 요청"""
     context_blocks = _api_context_blocks(kb, overrides, target_apis)
     prompt = _draft_prompt(logic_group, context_blocks)
     response = llm.complete(prompt, system=draft_system_prompt(domain))
@@ -119,7 +119,7 @@ def trigger_regeneration(
     project: str = "",
     hitl: Optional[object] = None,
 ) -> Tuple[RegenerationRecord, GenerateReport]:
-    """승인된 제안 -> 새 초안(GEN-03-01 대체) -> GEN-03-02 자가치유 -> 검증 결과."""
+    """승인된 제안 -> 새 초안(GEN-03-01 대체) -> GEN-03-02 자가치유 -> 검증 결과"""
     draft = draft_via_llm(kb, overrides, llm, logic_group, target_apis, project)
     loop = SelfHealLoop(compiler=compiler, llm=llm, max_round=max_round, hitl=hitl)
     report = loop.run(draft)

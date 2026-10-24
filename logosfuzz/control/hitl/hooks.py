@@ -3,9 +3,9 @@ CTR-06-02 HITL 인터페이스 - 파이프라인 연동 훅(예시)
 ====================================================
 
 각 파이프라인 단계(GEN/ANA 등)가 HITL 게이트를 어떻게 호출하는지 보여주는
-얇은 어댑터 계층이다. 실제 단계 구현에서 아래 함수를 호출하면 된다.
+얇은 어댑터 계층. 실제 단계 구현에서 아래 함수 호출
 
-여기서는 "골격"이므로 단계 내부 로직(재생성/리포트 작성 등)은 TODO 스텁으로 둔다.
+여기서는 "골격"이므로 단계 내부 로직(재생성/리포트 작성 등)은 TODO 스텁으로 유지
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def review_generated_harness(
     compile_log: str = "",
 ) -> bool:
     """
-    GEN-03 이후 호출. 생성된 하네스에 대해 HARNESS_REVIEW 체크포인트를 태운다.
+    GEN-03 이후 호출. 생성된 하네스에 대해 HARNESS_REVIEW 체크포인트 적용
 
     반환값: 이 하네스를 다음 단계(fuzz)로 넘겨도 되는가?
     """
@@ -61,13 +61,13 @@ def review_crash_triage(
     sanitizer: str = "",
 ) -> Optional[str]:
     """
-    ANA-05-01 이후 호출. 정탐/오탐 판정을 CRASH_TRIAGE 체크포인트로 확인한다.
+    ANA-05-01 이후 호출. 정탐/오탐 판정을 CRASH_TRIAGE 체크포인트로 확인
 
-    4주차부터 실제 게이트(`gate.CrashApprovalGate`)에 위임한다 - 재실행 시 중복
-    항목을 만들지 않고 사람의 이전 결정을 재사용한다.
+    4주차부터 실제 게이트(`gate.CrashApprovalGate`)에 위임 - 재실행 시 중복
+    항목을 만들지 않고 사람의 이전 결정을 재사용
 
     반환값: 최종 확정된 verdict 문자열, 보류/건너뜀이면 None.
-    REJECT 는 "검증된 크래시로 인정하지 않음"이므로 false_positive 로 확정된다.
+    REJECT 는 "검증된 크래시로 인정하지 않음"이므로 false_positive 로 확정
     """
     approval = CrashApprovalGate(hitl, project=project).review(
         crash_signature, verdict, confidence,
@@ -86,7 +86,7 @@ def approve_cve_disclosure(
     severity: str,
 ) -> bool:
     """
-    ANA-05-02 취약점 공개 전 최종 승인(항상 사람 필수 - 정책 기본값 MANUAL).
+    ANA-05-02 취약점 공개 전 최종 승인(항상 사람 필수 - 정책 기본값 MANUAL)
     """
     decision = hitl.request(
         Checkpoint.CVE_DISCLOSURE,

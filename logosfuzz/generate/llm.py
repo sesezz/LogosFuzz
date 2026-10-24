@@ -2,7 +2,7 @@
 GEN-03 하네스 생성 - LLM 클라이언트 & 리페어 프롬프트
 =====================================================
 
-자가 치유 루프(GEN-03-02)가 컴파일 에러를 LLM에 되먹여 소스를 수정할 때 사용한다.
+자가 치유 루프(GEN-03-02)가 컴파일 에러를 LLM에 되먹여 소스를 수정할 때 사용
 
 - LLMClient       : 인터페이스(complete)
 - OpenAILLMClient : GPT-4o 등 OpenAI 호환 모델 연동 (openai>=1.0 클라이언트 사용)
@@ -35,7 +35,7 @@ def default_gen_model() -> str:
 # LLM 클라이언트
 # --------------------------------------------------------------------------- #
 class LLMClient(ABC):
-    """텍스트 프롬프트를 받아 완성 텍스트를 반환하는 최소 인터페이스."""
+    """텍스트 프롬프트를 받아 완성 텍스트를 반환하는 최소 인터페이스"""
 
     @abstractmethod
     def complete(self, prompt: str, *, system: str = "") -> str:
@@ -96,7 +96,7 @@ class OpenAILLMClient(LLMClient):
 
 
 class FnLLMClient(LLMClient):
-    """콜백 함수를 LLM처럼 사용(테스트/커스텀 로직 주입용)."""
+    """콜백 함수를 LLM처럼 사용(테스트/커스텀 로직 주입용)"""
 
     def __init__(self, fn: Callable[[str, str], str]) -> None:
         self._fn = fn
@@ -106,7 +106,7 @@ class FnLLMClient(LLMClient):
 
 
 class ScriptedLLMClient(LLMClient):
-    """미리 정해진 응답을 순서대로 반환(데모/테스트용)."""
+    """미리 정해진 응답을 순서대로 반환(데모/테스트용)"""
 
     def __init__(self, responses: List[str]) -> None:
         self._responses = list(responses)
@@ -131,8 +131,8 @@ _FENCE_RE = re.compile(r"```(?:[a-zA-Z0-9+#]*)\n(?P<code>.*?)```", re.DOTALL)
 
 def extract_code(llm_response: str) -> str:
     """
-    LLM 응답에서 코드만 추출한다.
-    ```로 감싼 블록이 있으면 첫 블록을, 없으면 응답 전체를 코드로 간주.
+    LLM 응답에서 코드만 추출
+    ```로 감싼 블록이 있으면 첫 블록, 없으면 응답 전체를 코드로 간주
     """
     m = _FENCE_RE.search(llm_response or "")
     if m:
@@ -141,7 +141,7 @@ def extract_code(llm_response: str) -> str:
 
 
 def extract_note(llm_response: str) -> str:
-    """코드 블록 앞의 설명 텍스트(있으면)를 한 줄로 요약."""
+    """코드 블록 앞의 설명 텍스트(있으면)를 한 줄로 요약"""
     m = _FENCE_RE.search(llm_response or "")
     if not m:
         return ""
@@ -153,11 +153,11 @@ def extract_note(llm_response: str) -> str:
 # 리페어 프롬프트
 # --------------------------------------------------------------------------- #
 def truncate_middle(text: str, limit: int) -> str:
-    """가운데를 잘라 `limit` 안에 맞춘다. 머리와 꼬리를 남긴다.
+    """가운데를 잘라 `limit` 안에 맞춤. 머리와 꼬리 유지
 
-    빌드 로그는 꼬리만 남기면 안 된다. Bazel 은 핵심 `ERROR:` 를 앞쪽에 찍고 끝에는
+    빌드 로그는 꼬리만 남기면 안 됨. Bazel 은 핵심 `ERROR:` 를 앞쪽에 찍고 끝에는
     "Build did NOT complete successfully" 같은 요약만 남기므로, 꼬리 N자만 자르면
-    정작 원인이 통째로 사라진다. 반대로 머리만 남기면 clang/링커 진단을 잃는다.
+    정작 원인이 통째로 사라짐. 반대로 머리만 남기면 clang/링커 진단 손실
     """
     if len(text) <= limit:
         return text
@@ -165,7 +165,7 @@ def truncate_middle(text: str, limit: int) -> str:
     keep = limit - len(marker)
     if keep <= 0:
         return text[:limit]
-    head = keep * 2 // 3          # 원인은 앞쪽에 몰려 있다
+    head = keep * 2 // 3          # 원인은 앞쪽에 집중
     tail = keep - head
     return text[:head] + marker + text[-tail:]
 
@@ -178,7 +178,7 @@ def domain_subject(domain: str) -> str:
 
 
 class RepairPromptBuilder:
-    """컴파일 에러를 고치기 위한 수정 프롬프트를 만든다."""
+    """컴파일 에러 수정용 프롬프트 생성"""
 
     SYSTEM_TEMPLATE = (
         "You are a C/C++ fuzzing-harness repair assistant for the LogosFuzz project. "
@@ -192,9 +192,9 @@ class RepairPromptBuilder:
 
     def __init__(self, max_log_chars: int = 8000, domain: str = "automotive") -> None:
         self.domain = domain
-        # 기본값이 2000 이던 시절엔 `error_digest()`(파싱된 진단 몇 줄)만 넣었다.
-        # 이제 로그 **전문**을 넣으므로 한도를 넉넉히 잡는다. Bazel 로그는 진행률
-        # 줄이 섞여 길지만, 진단이 로그 전반에 흩어져 있어 요약하면 원인을 잃는다.
+        # 기본값이 2000 이던 시절엔 `error_digest()`(파싱된 진단 몇 줄)만 전달
+        # 현재는 로그 **전문**을 넣으므로 한도를 넉넉히 설정. Bazel 로그는 진행률
+        # 줄이 섞여 길지만, 진단이 로그 전반에 흩어져 있어 요약하면 원인 손실
         self.max_log_chars = max_log_chars
 
     def system_prompt(self) -> str:
@@ -209,13 +209,13 @@ class RepairPromptBuilder:
         knowledge: Optional[Dict[str, str]] = None,
         hint: str = "",
     ) -> str:
-        """수정 프롬프트를 만든다.
+        """수정 프롬프트 생성
 
         Args:
             hint: GEN-03-02 에러 분류기가 만든 진단 블록
                 (`logosfuzz.generate.bazel_errors.prompt_hint`). 로그 원문보다
-                **먼저** 싣는다 - 모델이 원인을 스스로 추론하기 전에 분류 결과를
-                보게 하려는 것이다. 빈 문자열이면 이 절을 넣지 않는다.
+                **먼저** 배치 - 모델이 원인을 스스로 추론하기 전에 분류 결과를
+                보게 하려는 목적. 빈 문자열이면 이 절 생략
         """
         log = truncate_middle(compile_result.log, self.max_log_chars)
         apis = ", ".join(draft.target_apis) if draft.target_apis else "(미지정)"
