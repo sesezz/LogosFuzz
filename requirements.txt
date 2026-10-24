@@ -4,5 +4,5 @@
 libclang==18.1.1
 tree_sitter
 pytest
-openai
-python-dotenv
+openai==2.53.0
+python-dotenv==1.2.2
