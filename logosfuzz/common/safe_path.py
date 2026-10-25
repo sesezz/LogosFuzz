@@ -28,11 +28,11 @@ class UnsafePathError(ValueError):
 
 
 def safe_component(name: str, *, default: str = "unnamed") -> str:
-    """``name`` 을 경로 한 칸(파일·디렉터리 이름)으로 안전하게 쓸 수 있게 바꾼다.
+    """``name`` 을 경로 한 칸(파일·디렉터리 이름)으로 안전하게 쓸 수 있는 형태로 변환.
 
     ``[\\w.-]`` 외 문자는 ``_`` 로 바꾸고, 앞쪽 ``.``/``-`` 는 떼어 낸다. 이미 안전한
     이름은 그대로 돌려준다. 바뀐 이름은 서로 다른 입력이 같은 이름으로 합쳐지지
-    않도록 원본의 짧은 해시를 뒤에 붙인다.
+    않도록 원본의 짧은 해시를 뒤에 추가.
     """
     original = str(name)
     cleaned = _UNSAFE_CHARS.sub("_", original).strip("._-")[:_MAX_COMPONENT_LEN]
@@ -45,10 +45,10 @@ def safe_component(name: str, *, default: str = "unnamed") -> str:
 def resolve_within(base: PathLike, *parts: PathLike, allow_base: bool = False) -> Path:
     """``base`` 아래로 ``parts`` 를 이어 붙인 경로를 돌려준다. 밖이면 예외.
 
-    ``..`` 와 절대경로 조각으로 ``base`` 를 벗어나면 :class:`UnsafePathError` 를 던진다.
+    ``..`` 와 절대경로 조각으로 ``base`` 를 벗어나면 :class:`UnsafePathError` 를 발생시킴.
     기본은 ``base`` 자신도 거부한다(패키지 경로가 비어 있을 때 작업 영역 전체를
-    지우는 사고를 막으려는 것). 심볼릭 링크는 따라가지 않고 경로 문자열만 정규화한다
-    (``bazel-bin`` 처럼 작업 영역 밖을 가리키는 링크를 쓰는 정상 경로가 있다).
+    지우는 사고를 막으려는 것). 심볼릭 링크는 따라가지 않고 경로 문자열만 정규화
+    (``bazel-bin`` 처럼 작업 영역 밖을 가리키는 링크를 쓰는 정상 경로 존재).
     """
     base_abs = os.path.abspath(os.fspath(base))
     for part in parts:

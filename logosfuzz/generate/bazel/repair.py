@@ -276,7 +276,7 @@ def classify_with_bazel_errors(log: str, spec: FuzzTargetSpec) -> Optional[Build
         return None
     try:
         report = d_classify(log or "", requested_target=spec.bin_label)
-    except Exception as exc:  # noqa: BLE001 — D 분류기 실패는 분류 없음으로 다루되 원인은 남긴다.
+    except Exception as exc:  # noqa: BLE001 — D 분류기 실패는 분류 없음으로 다루되 원인은 기록
         _LOG.warning("D 오류 분류기 실패: %s: %s", type(exc).__name__, exc)
         return None
     return fix_from_report(report, spec)

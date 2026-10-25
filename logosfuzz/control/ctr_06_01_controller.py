@@ -411,7 +411,7 @@ def _heal_details(heal) -> dict:
     if callable(digest):
         try:
             details["error_digest"] = digest()
-        except Exception as exc:  # noqa: BLE001 — 요약 실패가 결과 기록 전체를 막지 않게 한다.
+        except Exception as exc:  # noqa: BLE001 — 요약 실패가 결과 기록 전체를 막지 않도록 처리
             _LOG.warning("error_digest 생성 실패: %s: %s", type(exc).__name__, exc)
     rounds = []
     for item in getattr(heal, "rounds", None) or []:
@@ -721,7 +721,7 @@ class BuildStage:
             if not unit.get("binary"):
                 continue
             group = unit["group"]
-            # 코퍼스 매니저가 같은 규칙으로 정화한 이름으로 디렉터리를 만든다.
+            # 코퍼스 매니저가 같은 규칙으로 정화한 이름으로 디렉터리 생성
             corpus = None
             if root is not None:
                 candidate = resolve_within(root, safe_component(group))

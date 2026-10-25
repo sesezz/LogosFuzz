@@ -226,7 +226,7 @@ class RegressionRunner:
         cwd = (base_dir / case.get("cwd", ".")).resolve()
         timeout = float(case.get("timeout_sec", 5))
         env = {str(k): str(v) for k, v in case.get("env", {}).items()}
-        # 케이스 이름은 manifest 입력이라 로그 디렉터리 이름으로 쓰기 전에 정화한다.
+        # 케이스 이름은 manifest 입력이라 로그 디렉터리 이름으로 쓰기 전에 정화
         log_dir = resolve_within(self.output_dir, "logs", safe_component(case["name"]))
         log_dir.mkdir(parents=True, exist_ok=True)
 

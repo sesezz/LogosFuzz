@@ -76,8 +76,8 @@ class BazelAdapter:
     # 생성
     # ------------------------------------------------------------------ #
     def package_dir(self, spec: FuzzTargetSpec) -> Path:
-        # package 는 라벨에서 오므로 ``..``·절대경로로 작업 영역을 벗어나지 못하게 한다.
-        # 빈 package 도 작업 영역 자신이라 거부한다(remove 가 전체를 지우게 된다).
+        # package 는 라벨에서 오므로 ``..``·절대경로로 작업 영역을 벗어나지 못하도록 차단
+        # 빈 package 도 작업 영역 자신이라 거부(remove 가 전체를 삭제하게 되므로)
         return resolve_within(self.workspace_root, spec.package)
 
     def emit_build_definition(self, spec: FuzzTargetSpec, harness_source: str) -> Path:

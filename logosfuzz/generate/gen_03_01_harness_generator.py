@@ -252,7 +252,7 @@ def write_pairs(
         seen[pair.spec.package] = pair.group_name
 
     for pair in pairs:
-        # package·파일명은 라벨과 그룹 이름에서 오므로 root 밖으로 나가지 못하게 한다.
+        # package·파일명은 라벨과 그룹 이름에서 오므로 root 밖으로 나가지 못하도록 차단
         pkg_dir = resolve_within(root, pair.spec.package)
         pkg_dir.mkdir(parents=True, exist_ok=True)
         resolve_within(pkg_dir, pair.source_filename).write_text(pair.source, encoding="utf-8")

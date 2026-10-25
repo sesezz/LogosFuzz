@@ -38,7 +38,7 @@ _LOG = get_logger("EXE-04-05")
 
 
 def _group_dir(base_dir: Path, group_name: str, sub: str) -> Path:
-    """``<base_dir>/<그룹>/<sub>``. 그룹 이름은 디렉터리 한 칸으로 정화해서 쓴다."""
+    """``<base_dir>/<그룹>/<sub>``. 그룹 이름은 디렉터리 한 칸으로 정화하여 사용"""
     return resolve_within(base_dir, safe_component(group_name), sub)
 
 

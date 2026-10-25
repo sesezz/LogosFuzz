@@ -54,7 +54,7 @@ def test_resolve_within_allows_base_only_when_asked(tmp_path):
 
 
 def test_resolve_within_does_not_follow_symlink_out_of_the_base(tmp_path):
-    """bazel-bin 처럼 밖을 가리키는 링크 아래의 정상 경로는 허용한다."""
+    """bazel-bin 처럼 밖을 가리키는 링크 아래의 정상 경로는 허용"""
     outside = tmp_path / "outside"
     outside.mkdir()
     base = tmp_path / "ws"
@@ -64,7 +64,7 @@ def test_resolve_within_does_not_follow_symlink_out_of_the_base(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# BazelAdapter: package 가 작업 영역을 벗어나면 지우거나 쓰지 않는다
+# BazelAdapter: package 가 작업 영역을 벗어나면 지우거나 쓰지 않음
 # --------------------------------------------------------------------------- #
 def _spec(package, srcs=("h.cc",)):
     return FuzzTargetSpec(name="t_fuzz_test", package=package, srcs=srcs, deps=())
@@ -103,7 +103,7 @@ def test_bazel_emit_refuses_source_name_that_escapes_the_package(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# RegressionRunner: manifest 의 케이스 이름이 로그 위치를 정하지 못한다
+# RegressionRunner: manifest 의 케이스 이름이 로그 위치를 정하지 못함
 # --------------------------------------------------------------------------- #
 def test_regression_case_name_cannot_escape_the_logs_dir(tmp_path):
     manifest = tmp_path / "manifest.json"
@@ -121,7 +121,7 @@ def test_regression_case_name_cannot_escape_the_logs_dir(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# 코퍼스 매니저: 그룹명·시드 ID 가 base_dir 밖으로 쓰지 못한다
+# 코퍼스 매니저: 그룹명·시드 ID 가 base_dir 밖으로 쓰지 못함
 # --------------------------------------------------------------------------- #
 def test_corpus_manager_keeps_files_under_base_dir(tmp_path):
     base = tmp_path / "corpus"

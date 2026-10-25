@@ -257,7 +257,7 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
     print(f"\n[OUT] {output_dir}/ 에 그룹별 하네스 저장 중...")
     written = []
     for d in drivers:
-        # 그룹 이름은 LLM·스케줄 결과라 파일 이름으로 쓰기 전에 정화한다.
+        # 그룹 이름은 LLM·스케줄 결과라 파일 이름으로 쓰기 전에 정화
         harness_path = output_dir / f"{stem}_{safe_component(d.group_name)}.c"
         code = d.code.replace("```c", "").replace("```", "").strip()
         header = (

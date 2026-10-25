@@ -48,7 +48,7 @@ def test_redact_error_leaves_urls_and_relative_paths_alone():
 
 
 # --------------------------------------------------------------------------- #
-# 저장되는 오류에 절대경로가 남지 않는다
+# 저장되는 오류에 절대경로가 남지 않음
 # --------------------------------------------------------------------------- #
 def test_regression_execute_error_hides_the_missing_path(tmp_path):
     result = _execute(["/nonexistent_dir_xyz/tool"], tmp_path, 2.0, {})
@@ -69,7 +69,7 @@ def test_auto_pipeline_stores_redacted_stderr(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# exists() 확인 없이도 파일이 없을 때 같은 결과를 낸다
+# exists() 확인 없이도 파일이 없을 때 같은 결과 반환
 # --------------------------------------------------------------------------- #
 def test_failed_only_without_previous_summary_reruns_nothing(tmp_path):
     """이전 요약이 없으면 다시 돌릴 실패 케이스가 없다(기존 동작 유지, 예외 없음)."""
@@ -112,7 +112,7 @@ def test_seed_checksum_is_sha256():
 
 
 # --------------------------------------------------------------------------- #
-# write_pairs: package·파일명이 out_root 밖으로 나가지 못한다
+# write_pairs: package·파일명이 out_root 밖으로 나가지 못함
 # --------------------------------------------------------------------------- #
 def _pair(package, src="h.cc"):
     spec = FuzzTargetSpec(name="x_fuzz_test", package=package, srcs=(src,), deps=())
