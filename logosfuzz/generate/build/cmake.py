@@ -111,6 +111,9 @@ def _coverage_flags() -> List[str]:
 class CMakeAdapter:
     """CMake 대상용 빌드 어댑터. ``BuildAdapter`` 계약(emit/build/remove)을 따름."""
 
+    #: BuildAdapter Protocol 의 build_system (build_summary.json 에 그대로 기록)
+    build_system = "cmake"
+
     def __init__(
         self,
         profile: "TargetProfile",
@@ -196,6 +199,9 @@ class CMakeAdapter:
         flags = " ".join(self.compile_flags())
         env = dict(os.environ)
         env.update({"CC": self.cc, "CXX": self.cxx, "CFLAGS": flags, "CXXFLAGS": flags})
+        if self.coverage:
+            # configure 검사 프로그램의 default.profraw 저장소 루트 유출 방지
+            env["LLVM_PROFILE_FILE"] = str(self.build_dir / "configure-%p.profraw")
         return env
 
     def _bin_dir(self) -> Path:

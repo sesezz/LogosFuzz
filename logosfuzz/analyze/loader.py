@@ -1,14 +1,11 @@
-"""ANA 입력 로더: EXE-04-02 산출물을 :class:`CrashRecord` 목록으로 읽는다.
+"""ANA 입력 로더: EXE-04-02 산출물의 :class:`CrashRecord` 목록 변환
 
 지원 입력
 ---------
-1. 그룹별 JSONL: ``out/logs/sanitizer/<group>.jsonl`` — EXE-04-02가
-   ``write_findings()``로 남긴 결함 스트림. 한 줄당 결함 1건.
-2. 세션 요약: ``out/fuzz_summary.json`` — 각 그룹에 ``sanitizer_findings``
-   배열이 포함된다(EXE-04-02 개발보고서 §"출력").
+1. 그룹별 JSONL: ``out/logs/sanitizer/<group>.jsonl`` (한 줄당 결함 1건)
+2. 세션 요약: ``out/fuzz_summary.json`` (그룹별 ``sanitizer_findings`` 배열)
 
-파일이 깨졌거나 일부 라인이 JSON이 아니어도 전체가 죽지 않고(파이프라인
-견고성) 읽을 수 있는 레코드만 모은다.
+손상 파일·라인은 건너뛰고 읽을 수 있는 레코드만 수집
 """
 
 from __future__ import annotations
@@ -20,7 +17,7 @@ from logosfuzz.analyze.models import CrashRecord
 
 
 def load_jsonl_findings(path: str | Path, group: str = "") -> list[CrashRecord]:
-    """단일 JSONL 파일에서 레코드 목록을 읽는다."""
+    """단일 JSONL 파일의 레코드 목록 로드"""
     p = Path(path)
     group = group or p.stem
     records: list[CrashRecord] = []
@@ -32,7 +29,7 @@ def load_jsonl_findings(path: str | Path, group: str = "") -> list[CrashRecord]:
         try:
             data = json.loads(line)
         except json.JSONDecodeError:
-            continue  # 손상 라인은 건너뛴다
+            continue  # 손상 라인 건너뜀
         if isinstance(data, dict):
             records.append(CrashRecord.from_finding(data, group=group))
     return records
@@ -60,11 +57,7 @@ def load_sanitizer_dir(logs_dir: str | Path) -> list[CrashRecord]:
 
 
 def load_fuzz_summary(path: str | Path) -> list[CrashRecord]:
-    """``fuzz_summary.json``의 그룹별 ``sanitizer_findings``에서 레코드를 읽는다.
-
-    요약 JSON의 정확한 스키마는 그룹 목록을 담은 dict거나 list일 수 있으므로,
-    ``sanitizer_findings`` 키를 재귀적으로 탐색해 최대한 견고하게 수집한다.
-    """
+    """``fuzz_summary.json`` 그룹별 ``sanitizer_findings`` 레코드 로드 (키 재귀 탐색)"""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     records: list[CrashRecord] = []
 
@@ -88,7 +81,7 @@ def load_fuzz_summary(path: str | Path) -> list[CrashRecord]:
 
 
 def load_records(inputs: list[str | Path]) -> list[CrashRecord]:
-    """입력 경로 목록(파일/디렉터리 혼합)을 자동 판별해 레코드로 통합한다.
+    """입력 경로 목록(파일/디렉터리 혼합) 자동 판별 및 레코드 통합
 
     - 디렉터리          → ``load_sanitizer_dir``
     - ``*.jsonl`` 파일   → ``load_jsonl_findings``

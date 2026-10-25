@@ -1,0 +1,35 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2831970836
+INFO: Loaded 1 modules   (98 inline 8-bit counters): 98 [0x562d7676b2d0, 0x562d7676b332), 
+INFO: Loaded 1 PC tables (98 PCs): 98 [0x562d7676b338,0x562d7676b958), 
+INFO:        0 files found in c2
+INFO: -max_len is not provided; libFuzzer will not generate inputs larger than 4096 bytes
+INFO: A corpus is not provided, starting from an empty corpus
+#2	INITED cov: 19 ft: 20 corp: 1/1b exec/s: 0 rss: 32Mb
+/home/user/LogosFuzz/examples/embedded/proto_parser.c:49:10: runtime error: member access within null pointer of type 'proto_ctx_t' (aka 'struct proto_ctx')
+SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior /home/user/LogosFuzz/examples/embedded/proto_parser.c:49:10 
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==1034==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000014 (pc 0x562d767237e7 bp 0x7ffce544bf70 sp 0x7ffce544bf20 T0)
+==1034==The signal is caused by a WRITE memory access.
+==1034==Hint: address points to the zero page.
+    #0 0x562d767237e7 in proto_parse /home/user/LogosFuzz/examples/embedded/proto_parser.c:49:20
+    #1 0x562d767233e4 in LLVMFuzzerTestOneInput /tmp/claude-0/emb/harness_unchecked.c:8:5
+    #2 0x562d76630ca4 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/tmp/claude-0/emb/fuzz_unchecked+0x4dca4) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #3 0x562d76630399 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool, bool*) (/tmp/claude-0/emb/fuzz_unchecked+0x4d399) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #4 0x562d76631b85 in fuzzer::Fuzzer::MutateAndTestOne() (/tmp/claude-0/emb/fuzz_unchecked+0x4eb85) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #5 0x562d766326e5 in fuzzer::Fuzzer::Loop(std::vector<fuzzer::SizedFile, std::allocator<fuzzer::SizedFile>>&) (/tmp/claude-0/emb/fuzz_unchecked+0x4f6e5) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #6 0x562d7661f9bf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/tmp/claude-0/emb/fuzz_unchecked+0x3c9bf) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #7 0x562d7664a046 in main (/tmp/claude-0/emb/fuzz_unchecked+0x67046) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+    #8 0x7ff5d4c2a1c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+    #9 0x7ff5d4c2a28a in __libc_start_main csu/../csu/libc-start.c:360:3
+    #10 0x562d766149a4 in _start (/tmp/claude-0/emb/fuzz_unchecked+0x319a4) (BuildId: a7abbdc59cb2054ccd07b962b6fd3f7c44cbc344)
+
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /home/user/LogosFuzz/examples/embedded/proto_parser.c:49:20 in proto_parse
+==1034==ABORTING
+MS: 3 InsertByte-ShuffleBytes-ChangeByte-; base unit: adc83b19e793491b1c6ea0fd8b46cd9f32e592fc
+0xe0,0xbd,
+\340\275
+artifact_prefix='c2/'; Test unit written to c2/crash-e1419a31b0fa77167d4ad8f9ba4a16ce4166099d
+Base64: 4L0=

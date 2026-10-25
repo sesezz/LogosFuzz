@@ -1,16 +1,15 @@
-"""EXE-04-01: Docker 기반 격리 퍼징 실행.
+"""EXE-04-01: Docker 기반 격리 퍼징 실행
 
-퍼징 중 발생하는 크래시로부터 호스트를 보호하기 위해, 각 로직 그룹의
-하네스를 격리된 Docker 컨테이너 안에서 실행한다.
+크래시로부터 호스트 보호를 위한 로직 그룹별 컨테이너 격리 실행
 
 격리 정책:
-  - --network none        : 외부 네트워크 완전 차단(오탐/유출 방지)
-  - --cap-drop ALL        : 리눅스 capability 전부 제거
+  - --network none        : 외부 네트워크 차단
+  - --cap-drop ALL        : 리눅스 capability 전체 제거
   - --security-opt no-new-privileges
   - --memory / --cpus / --pids-limit : 자원 상한
-  - 하네스는 읽기 전용(:ro)으로, 출력만 쓰기 가능(/out)으로 마운트
+  - 하네스는 읽기 전용(:ro), 출력(/out)만 쓰기 가능으로 마운트
 
-테스트 용이성을 위해 실제 프로세스 실행은 `executor` 콜러블로 주입한다.
+실제 프로세스 실행은 `executor` 콜러블로 주입.
 기본 executor는 stdout/stderr를 각각 스레드로 읽어 큐에 모으고, 메인
 스레드는 `queue.get(timeout=...)`으로 소비한다 - 자식이 침묵해도(예: ASAN이
 크래시 시 심볼라이저를 내부에서 fork하며 응답 없이 대기) 데드라인이 정확히
@@ -31,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from logosfuzz.config import Engine, FuzzConfig, LogicGroup
+from logosfuzz.config import FuzzConfig, LogicGroup
 from logosfuzz.execute.errors import (
     DockerUnavailableError,
     HarnessNotFoundError,
@@ -60,30 +59,26 @@ class ProcResult:
 
 @dataclass
 class GroupResult:
-    """단일 로직 그룹 퍼징 결과."""
+    """단일 로직 그룹 퍼징 결과"""
 
     group: str
     exit_code: int
     timed_out: bool
     stats: LiveStats
-    crashes: list  # 수집된 크래시 경로(fuzz_session이 채움)
+    crashes: list  # 수집된 크래시 경로 (fuzz_session에서 기록)
     duration_sec: float
     sanitizer_findings: list[SanitizerFinding] = field(default_factory=list)
-    coverage: object = None  # EXE-04-04 CoverageSummary(없으면 None); fuzz_session이 채움
+    coverage: object = None  # EXE-04-04 CoverageSummary (없으면 None)
     stdout_log: Optional[str] = None  # 표준 출력 로그 파일 경로(저장 실패 시 None)
     stderr_log: Optional[str] = None  # 표준 오류 로그 파일 경로
+    timeout_sec: Optional[int] = None  # 그룹별 퍼징 시간 (run 의 SCH 배분)
 
     @property
     def failed_to_start(self) -> bool:
-        """하네스가 입력을 한 번도 실행하지 못하고 죽었는가.
+        """하네스 시작 실패 여부 (비정상 종료 + 실행 횟수 0)
 
-        컨테이너 안에서 공유 라이브러리를 못 찾거나(libatomic.so.1, GLIBC_2.38
-        - 5주차 실측) 바이너리가 아예 실행되지 않으면 종료코드는 0 이 아닌데
-        실행 횟수는 0 이다. 이걸 크래시로 세면 "크래시 0건, 완료" 또는 가짜
-        크래시로 보고돼 퍼징이 실제로는 안 돌았다는 사실이 가려진다.
-
-        첫 입력에서 바로 크래시한 경우와 구분하기 위해 크래시 산출물이나
-        새니타이저 결함이 있으면 실행 실패로 보지 않는다.
+        공유 라이브러리 누락 등으로 미실행된 경우를 크래시와 구분하기 위함
+        크래시 산출물이나 새니타이저 결함이 있으면 시작 실패로 미판정
         """
         return (
             self.exit_code not in (0, None)
@@ -94,7 +89,7 @@ class GroupResult:
 
     @property
     def crashed(self) -> bool:
-        # libFuzzer는 크래시 시 non-zero 종료, 크래시 산출물도 남긴다.
+        # libFuzzer는 크래시 시 non-zero 종료 및 크래시 산출물 생성
         if self.crashes:
             return True
         return (
@@ -235,59 +230,35 @@ class DockerIsolationRunner:
             raise ImageBuildError(f"이미지 빌드 실패: {self.config.image}")
 
     # ---- 하네스 바이너리 위치 해석 -------------------------------------
-    #
-    # GEN이 Bazel 어댑터로 넘어가면서 하네스 바이너리가 harness_dir 밖에
-    # 생긴다. cc_fuzz_test 는 `<name>_bin`(계측된 퍼저 바이너리)을 워크스페이스
-    # 의 bazel-bin 출력 트리에 떨구고, 그 경로는 빌드 설정(--platform_suffix)
-    # 에 따라 달라진다. 그래서 EXE 계층은 경로를 **추측하지 않고** 빌드
-    # 어댑터가 돌려준 실제 경로를 그대로 받는다(GEN 파트 결정사항 ④:
-    # "EXE 계층은 bazel run 이 아니라 바이너리를 직접 실행한다").
-    #
-    # 덕분에 이 계층은 빌드 시스템을 모른다 - Bazel 산출물이든 CMake
-    # 산출물이든 docker_runner 에겐 그냥 실행 파일 하나다.
+    # 빌드 어댑터가 돌려준 실제 경로 그대로 사용 (경로 추측 없음)
+    # 빌드 시스템과 무관하게 실행 파일 하나로 취급
     def harness_binary_path(self, group: LogicGroup) -> Path:
-        """하네스 바이너리의 호스트 경로.
-
-        ``harness_path`` 에 디렉토리가 붙어 있으면(절대경로 등) 그 경로를
-        그대로 쓰고, 이름만 있으면 지금까지처럼 ``harness_dir`` 기준으로 푼다.
-        """
+        """하네스 바이너리의 호스트 경로 (이름만 있으면 ``harness_dir`` 기준)"""
         p = Path(group.harness_path)
         if p.parent != Path("."):
             return p.resolve()
         return (self.config.harness_dir / p.name).resolve()
 
     def harness_mount_dir(self, group: LogicGroup) -> Path:
-        """``/harness`` 로 읽기 전용 마운트할 호스트 디렉토리.
+        """``/harness`` 읽기 전용 마운트 대상 호스트 디렉토리
 
-        바이너리가 harness_dir 밖(bazel-bin 등)에 있으면 그 바이너리가 있는
-        디렉토리를 대신 마운트한다. 컨테이너 안 경로는 두 경우 모두
-        ``/harness/<파일명>`` 이라 내부 커맨드 구성은 달라지지 않는다.
+        바이너리가 harness_dir 밖에 있으면 바이너리 소재 디렉토리 마운트
         """
         return self.harness_binary_path(group).parent
 
-    # ---- 실행 커맨드 구성 (EXE-04-01 핵심 로직) -----------------------
+    # ---- 실행 커맨드 구성 ---------------------------------------------
     def _in_container_cmd(self, group: LogicGroup) -> str:
-        """엔진별로 컨테이너 내부에서 실행할 셸 명령 문자열."""
+        """컨테이너 내부 libFuzzer 실행 셸 명령 문자열"""
         harness = f"/harness/{group.harness_path.name}"
-        corpus = "/corpus" if group.corpus_dir else ""
-        t = self.config.timeout_sec
-        if self.config.engine is Engine.LIBFUZZER:
-            parts = [
-                shlex.quote(harness),
-                f"-max_total_time={t}",
-                "-artifact_prefix=/out/crashes/",
-                "-print_final_stats=1",
-            ]
-            if corpus:
-                parts.append(shlex.quote(corpus))
-            return "chmod +x %s 2>/dev/null; %s" % (shlex.quote(harness), " ".join(parts))
-        # AFL++
-        indir = shlex.quote(corpus) if corpus else "/tmp/seed"
-        seed_prep = "" if corpus else "mkdir -p /tmp/seed && printf a > /tmp/seed/seed;"
-        return (
-            f"{seed_prep} chmod +x {shlex.quote(harness)} 2>/dev/null; "
-            f"afl-fuzz -i {indir} -o /out/afl -V {t} -- {shlex.quote(harness)} @@"
-        )
+        parts = [
+            shlex.quote(harness),
+            f"-max_total_time={self.config.timeout_sec}",
+            "-artifact_prefix=/out/crashes/",
+            "-print_final_stats=1",
+        ]
+        if group.corpus_dir:
+            parts.append("/corpus")
+        return "chmod +x %s 2>/dev/null; %s" % (shlex.quote(harness), " ".join(parts))
 
     def _host_user(self) -> str | None:
         """호스트 uid:gid. Windows 등 uid 개념이 없는 플랫폼이면 None."""
@@ -323,12 +294,13 @@ class DockerIsolationRunner:
             "-v", f"{c.output_dir.resolve()}:/out",
         ]
         if group.corpus_dir:
-            argv += ["-v", f"{group.corpus_dir.resolve()}:/corpus:ro"]
+            # 쓰기 가능 마운트 (최종 코퍼스를 커버리지 바이너리로 재생하기 위함)
+            argv += ["-v", f"{group.corpus_dir.resolve()}:/corpus"]
         argv += [
             "-e", f"ASAN_OPTIONS={c.asan_options}",
             "-e", f"TSAN_OPTIONS={c.tsan_options}",
         ]
-        # EXE-04-04: 커버리지 계측 활성 시 profraw 출력 경로를 환경변수로 주입.
+        # EXE-04-04: 커버리지 계측 시 profraw 출력 경로 환경변수 주입
         for k, v in self._coverage_env_pairs(group, in_docker=True).items():
             argv += ["-e", f"{k}={v}"]
         argv += [
@@ -338,26 +310,20 @@ class DockerIsolationRunner:
         return argv
 
     def _coverage_env_pairs(self, group: LogicGroup, *, in_docker: bool) -> dict:
-        """EXE-04-04 커버리지 환경변수(LLVM_PROFILE_FILE 등). NONE이면 빈 dict."""
-        # 지연 임포트로 config→execute 순환 의존을 피한다.
+        """EXE-04-04 커버리지 환경변수 (NONE이면 빈 dict)"""
+        # config→execute 순환 의존 회피용 지연 임포트
         from logosfuzz.execute.coverage import profile_env
 
         return profile_env(group, self.config, in_docker=in_docker)
 
     def _local_argv(self, group: LogicGroup) -> list:
-        """--docker 미사용 시(디버그) 호스트에서 직접 실행하는 커맨드."""
+        """Docker 미사용 시 호스트 직접 실행 커맨드"""
         harness = str(self.harness_binary_path(group))
-        t = self.config.timeout_sec
-        if self.config.engine is Engine.LIBFUZZER:
-            argv = [harness, f"-max_total_time={t}",
-                    f"-artifact_prefix={self.config.crashes_dir}/",
-                    "-print_final_stats=1"]
-            if group.corpus_dir:
-                argv.append(str(group.corpus_dir))
-        else:
-            argv = ["afl-fuzz", "-i", str(group.corpus_dir or "/tmp/seed"),
-                    "-o", str(self.config.output_dir / "afl"), "-V", str(t),
-                    "--", harness, "@@"]
+        argv = [harness, f"-max_total_time={self.config.timeout_sec}",
+                f"-artifact_prefix={self.config.crashes_dir}/",
+                "-print_final_stats=1"]
+        if group.corpus_dir:
+            argv.append(str(group.corpus_dir))
         # 호스트 실행에서는 env 프리픽스로 환경변수를 주입한다(기본 executor
         # 시그니처를 바꾸지 않기 위함). Docker 경로(build_run_argv)는
         # `-e ASAN_OPTIONS=...`로 넘기지만, 이 로컬 경로는 그동안 ASAN_OPTIONS/
@@ -389,7 +355,7 @@ class DockerIsolationRunner:
         stats = mon.stats
         argv = self.build_run_argv(group) if self.config.use_docker else self._local_argv(group)
 
-        # 엔진이 스스로 종료하지 못할 경우를 대비한 하드 월클럭 상한(+ grace).
+        # 엔진 미종료 대비 하드 월클럭 상한 (+ grace)
         hard_timeout = self.config.timeout_sec + 30
         start = time.monotonic()
         sanitizer = sanitizer_monitor or SanitizerMonitor()

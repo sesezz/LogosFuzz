@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "build_system": "bazel",
+  "workspace": "/home/worle/baselibs",
+  "config": "fuzz",
+  "total_units": 1,
+  "built_units": 0,
+  "repaired_units": 0,
+  "healed_units": 0,
+  "failed_units": 0,
+  "emitted_units": 1,
+  "skipped_groups": [],
+  "regression": [],
+  "units": [
+    {
+      "group": "ar_probe",
+      "build_target": "//score/json:json",
+      "build_system": "bazel",
+      "fuzz_target": "//score/json/fuzz/ar_probe:ar_probe_fuzz_test",
+      "bin_target": "//score/json/fuzz/ar_probe:ar_probe_fuzz_test_bin",
+      "source": "score/json/fuzz/ar_probe/ar_probe_fuzz.cc",
+      "build_file": "score/json/fuzz/ar_probe/BUILD.bazel",
+      "status": "emitted",
+      "ok": null,
+      "repaired": false,
+      "rounds_used": 0,
+      "binary": null,
+      "deps": [
+        "@score_baselibs//score/json",
+        "@score_baselibs//score/json:parser_interface"
+      ]
+    }
+  ]
+}

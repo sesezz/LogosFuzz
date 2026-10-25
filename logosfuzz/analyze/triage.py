@@ -1,40 +1,25 @@
-"""ANA-05-01: LLM 기반 정탐/오탐(True/False Positive) 자동 판별.
+"""ANA-05-01: LLM 기반 정탐/오탐(True/False Positive) 자동 판별
 
-입력: ANA-05-04(Crash Deduplication)가 만든 :class:`CrashCluster` 목록
-      (설계서: "5주 Dedup 결과 입력받아 진행").
-출력: 클러스터별 :class:`TriageResult`. 각 결과의 ``to_triage_dict()``는
-      ANA-05-02 ``build_cve_report(triage_result=...)`` 입력 계약과 일치한다.
+입력: ANA-05-04(Crash Deduplication)의 :class:`CrashCluster` 목록
+출력: 클러스터별 :class:`TriageResult` (``to_triage_dict()`` 는 ANA-05-02 입력 계약과 일치)
 
-왜 중복 제거 결과를 입력으로 받나
---------------------------------
-정/오탐 판별은 비싸다(LLM 추론 호출). Dedup으로 버그 1개당 대표 1건만 남겨,
-같은 버그를 수백 번 다시 판별하지 않는다. 대표에 대한 판정을 그 묶음 전체에
-적용한다.
+대표 1건 판정 결과를 클러스터 전체에 적용해 LLM 호출 최소화
 
-두 가지 판별기
+판별기
 --------------
-- :class:`RuleBasedTriager` (기본): 표준 라이브러리만 쓰는 결정적 휴리스틱.
-  설계서의 결함 분류 규칙(특히 ``mocking-fail-fp`` = 가짜 크래시)과 콜스택
-  위치·재현성 신호를 결합한다. 의존성/네트워크 없이 항상 같은 결과를 낸다.
-- :class:`LLMTriager`: 설계서가 명시한 "추론 특화 LLM"(예: DeepSeek-R1) 연동
-  자리. ``logosfuzz.generate.llm.LLMClient`` 인터페이스를 재사용하며, 실제
-  모델이 없으면 규칙 기반으로 안전하게 폴백한다.
+- :class:`RuleBasedTriager` (기본): 결함 분류 규칙과 콜스택 위치·재현성 신호 기반 결정적 휴리스틱
+- :class:`LLMTriager`: 추론 특화 LLM 연동 (모델 부재 시 규칙 기반 폴백)
 
-설계 근거(설계서에 판정 규약이 명시되지 않아 합리적 기본값 + 근거 기록)
----------------------------------------------------------------------
-설계서는 "LLM이 실행 로그와 Sanitizer 결과를 분석해 정/오탐 분류"라고만 하고
-구체적 규칙·점수·임계값을 정의하지 않는다. 그래서 아래 신호를 근거로
-투명한 점수화를 구현하고, 각 판정에 사용한 신호를 ``signals``로 남겨
-설명가능성(HITL 검토)을 확보한다.
+판정에 사용한 신호는 HITL 검토용으로 ``signals`` 에 기록
 """
 
 from __future__ import annotations
 
-from logosfuzz.analyze import error_contract as _ec
+from logosfuzz.analyze import contracts as _contracts
 from logosfuzz.analyze.models import CrashCluster, TriageResult, Verdict
 from logosfuzz.analyze.signature import application_frames, has_application_frame
 
-# 전통적 메모리 커럽션 계열: sanitizer 탐지 신뢰도가 높아 정탐 사전확률이 크다.
+# 메모리 커럽션 계열: sanitizer 탐지 신뢰도가 높아 정탐 사전확률 높음
 _MEMORY_BUGS = {
     "use-after-free",
     "double-free",
@@ -45,12 +30,12 @@ _MEMORY_BUGS = {
     "bad-alloc",
     "null-pointer-dereference",
 }
-# 동시성 계열: 실재하지만 문맥(락 순서/공유자원) 확인이 필요.
+# 동시성 계열: 문맥(락 순서/공유자원) 확인 필요
 _CONCURRENCY_BUGS = {"race-condition", "data-race", "deadlock"}
 
 RULE_MODEL_NAME = "logosfuzz-rule-triage/v1"
 
-# 판정 임계값(정탐 점수 기준). 근거는 모듈 docstring 참조.
+# 판정 임계값 (정탐 점수 기준)
 _TP_THRESHOLD = 0.65
 _FP_THRESHOLD = 0.35
 
@@ -59,36 +44,74 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
 
 
-def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageResult:
-    """결정적 휴리스틱으로 하나의 클러스터를 판별한다.
+# 프로필 없이 부르면(기존 자동차 모드 호출부) 지금까지와 같게 score::Result 계약과
+# 자동차 문구를 쓴다. 프로필이 있으면 profile.error_contract / profile.domain 을 따른다.
+_LEGACY_CONTRACT = "score_result"
+_LEGACY_DOMAIN = "automotive"
+
+
+def _domain(profile) -> str:
+    if profile is None:
+        return _LEGACY_DOMAIN
+    return getattr(profile, "domain", "") or "generic"
+
+
+def _resolve_contract(rep, contract=None, profile=None, kb=None):
+    """(플러그인, 근거). 근거가 주어지면 그 타입의 플러그인을 쓴다."""
+    if contract is not None:
+        plugin = _contracts.contract_for_evidence(contract)
+        if plugin is not None:
+            return plugin, contract
+    if profile is None:
+        plugin = _contracts.get_contract(_LEGACY_CONTRACT)
+    else:
+        plugin = _contracts.contract_for_profile(profile)
+    return plugin, plugin.analyze(rep, kb=kb, profile=profile)
+
+
+def _mocking_rationale(profile) -> str:
+    """mocking-fail-fp 근거문. 자동차 표현(CAN/UDS)은 automotive 에서만 쓴다."""
+    if _domain(profile) == "automotive":
+        return (
+            "하네스의 가상 네트워크(CAN/UDS) 모킹 미구현으로 발생한 가짜 크래시다. "
+            "대상 라이브러리 결함이 아니라 하네스 환경 문제이므로 오탐으로 판정한다. "
+            "원인 모킹 코드를 보완하면 사라진다(GEN-03-03 피드백 대상)."
+        )
+    return (
+        "하네스의 외부 장치·주변장치(HAL) 모킹 미구현으로 발생한 가짜 크래시다. "
+        "대상 라이브러리 결함이 아니라 하네스 환경 문제이므로 오탐으로 판정한다. "
+        "원인 모킹 코드를 보완하면 사라진다(GEN-03-03 피드백 대상)."
+    )
+
+
+def rule_triage(cluster: CrashCluster, context=None, contract=None,
+                profile=None) -> TriageResult:
+    """결정적 휴리스틱 기반 단일 클러스터 판별
 
     Args:
-        cluster: 판별 대상.
+        cluster: 판별 대상
         context: :class:`~logosfuzz.analyze.reachability.ReachabilityContext`
-            (선택). 주어지면 정적으로 증명 가능한 도달 가능성 신호를 점수에
-            반영한다. 불변식 추론이 필요한 사안은 여기서 판정하지 않는다 —
-            그건 ``reachability.render_for_prompt()`` 로 LLM 판별기에 넘긴다.
-        contract: :class:`~logosfuzz.analyze.error_contract.ErrorContractEvidence`
-            (선택). 없으면 대표 레코드의 원문 로그만으로 계산한다 — 스택에서
-            읽히는 계약 위반은 KB 없이도 증명되기 때문이다. KB 의 선언된 계약까지
-            보려면 ``KnowledgeBaseContractProvider(kb)`` 로 만든 근거를 넘긴다.
+            (선택). 정적으로 증명 가능한 도달 가능성 신호만 점수에 반영
+            (불변식 추론은 ``reachability.render_for_prompt()`` 로 LLM 판별기에 위임)
+        contract: 에러계약 근거(선택). ``analyze.contracts`` 플러그인이 만든 객체
+            (``ErrorContractEvidence``/``CReturnCodeEvidence``/...). 없으면 대표 레코드의
+            원문 로그만으로 계산한다 — 스택에서 읽히는 계약 위반은 KB 없이도 증명되기
+            때문이다. KB 의 선언된 계약까지 보려면 ``ContractProvider`` 로 만든 근거를 넘긴다.
+        profile: :class:`~logosfuzz.common.target_profile.TargetProfile` (선택).
+            있으면 ``profile.error_contract`` 로 계약 플러그인을, ``profile.domain`` 으로
+            근거문 표현을 고른다. 없으면 기존 동작(``score_result``, 자동차 표현)이다.
     """
     rep = cluster.representative
-    if contract is None:
-        contract = _ec.analyze_error_contract(rep)
+    plugin, contract = _resolve_contract(rep, contract, profile)
     cat = cluster.bug_type
     signals: list[str] = []
 
-    # (0) mocking 실패 = 가상 네트워크 모킹 실패로 인한 가짜 크래시 → 오탐(설계서 명시)
+    # (0) mocking 실패 = 외부 장치 모킹 실패로 인한 가짜 크래시 → 오탐(설계서 명시)
     if cat == "mocking-fail-fp":
         return TriageResult(
             verdict=Verdict.FALSE_POSITIVE,
             confidence=0.9,
-            rationale=(
-                "하네스의 가상 네트워크(CAN/UDS) 모킹 미구현으로 발생한 가짜 크래시다. "
-                "대상 라이브러리 결함이 아니라 하네스 환경 문제이므로 오탐으로 판정한다. "
-                "원인 모킹 코드를 보완하면 사라진다(GEN-03-03 피드백 대상)."
-            ),
+            rationale=_mocking_rationale(profile),
             triage_model=RULE_MODEL_NAME,
             cluster_id=cluster.cluster_id,
             signals=["mocking-fail-fp"],
@@ -103,20 +126,20 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageRes
         signals.append("concurrency-needs-context")
     elif cat == "watchdog-timeout":
         score = 0.35
-        signals.append("realtime-timeout")  # 타임아웃 임계치 튜닝(EXE-04-03) 사안일 수 있음
+        signals.append("realtime-timeout")  # 타임아웃 임계치 튜닝(EXE-04-03) 대상 가능성
     else:  # unknown 등
         score = 0.30
         signals.append("unclassified-category")
 
-    # (2) 크래시 위치: 대상 라이브러리 코드인가, 하네스뿐인가
+    # (2) 크래시 위치: 대상 라이브러리 코드 또는 하네스
     if has_application_frame(rep):
         score += 0.20
         signals.append("target-code-frame")
     else:
         score -= 0.35
-        signals.append("harness-only-frame")  # 대상 코드가 아닌 하네스/드라이버 문제일 가능성
+        signals.append("harness-only-frame")  # 하네스/드라이버 문제 가능성
 
-    # (3) 재현성: 같은 시그니처로 여러 입력이 모였는가
+    # (3) 재현성: 같은 시그니처의 입력 수
     if cluster.count >= 3:
         score += 0.10
         signals.append("highly-reproducible")
@@ -124,15 +147,14 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageRes
         score += 0.05
         signals.append("reproduced")
 
-    # (4) sanitizer 신뢰도: ASAN 메모리 오류는 오탐이 드물다. 다만 프레임이
-    # 하네스에만 있으면 sanitizer가 확인한 것은 대상 라이브러리가 아니라
-    # 하네스의 메모리 접근이므로 이 보너스를 주지 않는다.
+    # (4) sanitizer 신뢰도: ASAN 메모리 오류는 오탐이 드묾
+    # 단, 프레임이 하네스에만 있으면 대상 라이브러리 검증이 아니므로 보너스 미부여
     if (rep.sanitizer.upper() == "ASAN" and cat in _MEMORY_BUGS
             and has_application_frame(rep)):
         score += 0.05
         signals.append("asan-high-fidelity")
 
-    # (5) 도달 가능성: 이 함수를 실제 제품 코드가 부르는가
+    # (5) 도달 가능성: 실제 제품 코드의 호출 여부
     if context is not None:
         from logosfuzz.analyze.reachability import derive_signals
 
@@ -140,9 +162,9 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageRes
         score += delta
         signals.extend(reach_signals)
 
-    # (6) 에러계약: score::Result 의 오류 대안을 누가 무시했는가 / 거부 통로가
-    # 있는 API 가 거부 대신 메모리를 깨뜨렸는가
-    delta, contract_signals = _ec.derive_signals(contract, cat)
+    # (6) 에러계약: API 가 알린 오류(score::Result 오류 대안, NULL/오류 반환 코드)를
+    # 누가 무시했는가 / 거부 통로가 있는 API 가 거부 대신 메모리를 깨뜨렸는가
+    delta, contract_signals = plugin.derive_signals(contract, cat)
     score += delta
     signals.extend(contract_signals)
 
@@ -153,7 +175,7 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageRes
     loc = f"{top[0].file}:{top[0].line}" if top else "위치 미상"
     if score >= _TP_THRESHOLD:
         verdict = Verdict.TRUE_POSITIVE
-        # 자동 판정은 절대 확신(1.0)을 피한다: 최종 확정은 HITL(사람)이 한다.
+        # 자동 판정은 1.0 미만으로 제한 (최종 확정은 HITL)
         confidence = _clamp(score, hi=0.95)
         rationale = (
             f"{rep.sanitizer}가 {cat.replace('-', ' ')}를 탐지했고 대상 코드({loc})에서 "
@@ -174,7 +196,7 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageRes
             f"사람 검토(HITL)로 확정이 필요하다."
         )
 
-    # 도달 가능성 근거는 HITL 검토자가 가장 먼저 봐야 할 정보이므로 근거문에 남긴다.
+    # 도달 가능성 근거는 HITL 검토 우선 정보이므로 근거문에 기록
     if "harness-only-caller" in signals:
         rationale += (
             " 이 함수는 헤더에 선언돼 있지 않고 대상 트리에서 하네스/테스트 코드만 "
@@ -192,7 +214,7 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageRes
             "도달 불가로 해석하면 안 된다."
         )
     # 에러계약 근거는 위 도달 가능성 근거와 독립이라 함께 남긴다.
-    rationale += _ec.render_rationale(contract)
+    rationale += plugin.render_rationale(contract)
 
     return TriageResult(
         verdict=verdict,
@@ -205,33 +227,37 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None) -> TriageRes
 
 
 class RuleBasedTriager:
-    """결정적 규칙 기반 판별기(기본).
+    """결정적 규칙 기반 판별기 (기본)
 
     Args:
-        context_provider: ``cluster -> ReachabilityContext`` 콜러블(선택).
-            ``reachability.SourceReachabilityProvider(대상_소스_루트)`` 를 넣으면
-            호출부 증거를 점수에 반영한다. 없으면 기존 동작 그대로다.
-        contract_provider: ``cluster -> ErrorContractEvidence`` 콜러블(선택).
+        context_provider: ``cluster -> ReachabilityContext`` 콜러블 (선택)
+            ``reachability.SourceReachabilityProvider(대상_소스_루트)`` 지정 시
+            호출부 증거를 점수에 반영 (없으면 기존 동작)
+        contract_provider: ``cluster -> 에러계약 근거`` 콜러블(선택).
+            ``contracts.ContractProvider.for_profile(profile, kb)`` 나
             ``error_contract.KnowledgeBaseContractProvider(kb)`` 를 넣으면 KB 에
             선언된 에러계약까지 근거로 쓴다. 없으면 원문 로그만 본다.
+        profile: TargetProfile (선택). 계약 플러그인·근거문 표현을 고른다.
     """
 
     model_name = RULE_MODEL_NAME
 
-    def __init__(self, context_provider=None, contract_provider=None) -> None:
+    def __init__(self, context_provider=None, contract_provider=None, profile=None) -> None:
         self.context_provider = context_provider
         self.contract_provider = contract_provider
+        self.profile = profile
 
     def triage(self, cluster: CrashCluster) -> TriageResult:
         return rule_triage(
             cluster,
             context=_safe_context(self.context_provider, cluster),
             contract=_safe_context(self.contract_provider, cluster),
+            profile=self.profile,
         )
 
 
 def _safe_context(provider, cluster):
-    """컨텍스트 수집 실패가 판별 자체를 막지 않게 감싼다."""
+    """컨텍스트 수집 실패가 판별을 막지 않도록 감싸는 래퍼"""
     if provider is None:
         return None
     try:
@@ -241,7 +267,7 @@ def _safe_context(provider, cluster):
 
 
 # --------------------------------------------------------------------------- #
-# LLM 연동 판별기 (설계서의 추론형 LLM 자리)
+# LLM 연동 판별기
 # --------------------------------------------------------------------------- #
 
 _TRIAGE_SYSTEM = (
@@ -254,8 +280,7 @@ _TRIAGE_SYSTEM = (
     "판단이 모호하면 needs_review로 답한다. 반드시 JSON 하나만 출력한다."
 )
 
-# 도달 가능성 판정을 실제로 시키는 질문. 1단계 검증에서 두 판별기가 똑같이
-# 틀린 이유가 "이 질문을 받은 적이 없어서"였다.
+# 도달 가능성 판정을 명시적으로 요구하는 질문 (1단계 검증 공통 오판 원인 보완)
 _REACHABILITY_QUESTION = """\
 판별 절차 — 아래 순서로 따져라.
   1. 크래시가 난 지점에서 무엇을 읽거나 쓰다 경계를 벗어났는가?
@@ -281,15 +306,15 @@ _REACHABILITY_QUESTION = """\
   취급하고, 3번 질문(계약 위반이 필요한가)으로 판단하라."""
 
 
-def build_triage_prompt(cluster: CrashCluster, context=None, contract=None) -> str:
-    """클러스터 대표 결함을 LLM 판별용 프롬프트로 직렬화한다.
+def build_triage_prompt(cluster: CrashCluster, context=None, contract=None,
+                        profile=None) -> str:
+    """클러스터 대표 결함의 LLM 판별용 프롬프트 직렬화
 
     Args:
-        cluster: 판별 대상.
+        cluster: 판별 대상
         context: :class:`~logosfuzz.analyze.reachability.ReachabilityContext`
-            (선택). 주어지면 호출부·링키지·결함 라인 소스를 증거로 함께 싣는다.
-            이게 없으면 모델이 볼 수 있는 건 콜스택뿐이라 "ASAN 이 잡았으니
-            정탐"이라는 결론밖에 못 낸다.
+            (선택). 호출부·링키지·결함 라인 소스를 증거로 함께 탑재
+            (없으면 콜스택만으로 판단해 "ASAN 검출 = 정탐" 편향)
     """
     rep = cluster.representative
     frames = "\n".join(f"  #{i} {f.file}:{f.line}" for i, f in enumerate(rep.traceback))
@@ -301,8 +326,8 @@ def build_triage_prompt(cluster: CrashCluster, context=None, contract=None) -> s
 
         evidence = render_for_prompt(context) + "\n\n"
 
-    contract = contract if contract is not None else _ec.analyze_error_contract(rep)
-    contract_block = _ec.render_for_prompt(contract)
+    plugin, contract = _resolve_contract(rep, contract, profile)
+    contract_block = plugin.render_for_prompt(contract)
     if contract_block:
         evidence += contract_block + "\n\n"
 
@@ -324,7 +349,7 @@ def build_triage_prompt(cluster: CrashCluster, context=None, contract=None) -> s
 
 
 def parse_llm_verdict(text: str) -> dict | None:
-    """LLM 응답 텍스트에서 판정 JSON을 추출한다. 실패 시 None."""
+    """LLM 응답 텍스트의 판정 JSON 추출 (실패 시 None)"""
     import json
     import re
 
@@ -345,26 +370,24 @@ def parse_llm_verdict(text: str) -> dict | None:
 
 
 class LLMTriager:
-    """추론형 LLM(예: DeepSeek-R1) 기반 판별기.
-
-    실제 모델 호출은 주입된 ``LLMClient``(``logosfuzz.generate.llm``)가 담당한다.
-    모델이 없거나 응답 파싱에 실패하면 규칙 기반으로 폴백해 파이프라인을
-    멈추지 않는다.
+    """추론형 LLM 기반 판별기 (모델 부재·파싱 실패 시 규칙 기반 폴백)
 
     Args:
-        client: ``complete(prompt, system=...) -> str`` 를 제공하는 LLM 클라이언트.
-        model_name: 판정 결과에 기록할 모델 식별자.
-        fallback: 폴백 판별기(기본 RuleBasedTriager).
+        client: ``complete(prompt, system=...) -> str`` 제공 LLM 클라이언트
+        model_name: 판정 결과에 기록할 모델 식별자
+        fallback: 폴백 판별기 (기본 RuleBasedTriager)
     """
 
     def __init__(self, client, model_name: str = "deepseek-r1", fallback=None,
-                 context_provider=None, contract_provider=None) -> None:
+                 context_provider=None, contract_provider=None, profile=None) -> None:
         self.client = client
         self.model_name = model_name
         self.context_provider = context_provider
         self.contract_provider = contract_provider
+        self.profile = profile
         self.fallback = fallback or RuleBasedTriager(
-            context_provider=context_provider, contract_provider=contract_provider
+            context_provider=context_provider, contract_provider=contract_provider,
+            profile=profile,
         )
 
     def triage(self, cluster: CrashCluster) -> TriageResult:
@@ -372,7 +395,8 @@ class LLMTriager:
         contract = _safe_context(self.contract_provider, cluster)
         try:
             raw = self.client.complete(
-                build_triage_prompt(cluster, context=context, contract=contract),
+                build_triage_prompt(cluster, context=context, contract=contract,
+                                    profile=self.profile),
                 system=_TRIAGE_SYSTEM,
             )
         except Exception:
@@ -383,8 +407,7 @@ class LLMTriager:
         signals = ["llm-judgment"]
         if context is not None and context.resolved:
             signals.append("reachability-context")
-        if contract is None:
-            contract = _ec.analyze_error_contract(cluster.representative)
+        _, contract = _resolve_contract(cluster.representative, contract, self.profile)
         if contract.found:
             signals.append("error-contract-context")
         return TriageResult(
@@ -403,13 +426,13 @@ class LLMTriager:
 
 
 def triage_clusters(clusters: list[CrashCluster], triager=None) -> list[TriageResult]:
-    """클러스터 목록을 판별한다(기본: 규칙 기반)."""
+    """클러스터 목록 판별 (기본: 규칙 기반)"""
     triager = triager or RuleBasedTriager()
     return [triager.triage(c) for c in clusters]
 
 
 def summarize(results: list[TriageResult]) -> dict:
-    """판정 결과 개수 요약."""
+    """판정 결과 개수 요약"""
     summary = {v.value: 0 for v in Verdict}
     for r in results:
         summary[r.verdict.value] += 1

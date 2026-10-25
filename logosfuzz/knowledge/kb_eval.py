@@ -1,23 +1,22 @@
-"""6주차 평가: KB Coverage / API 추출 정확도 / RAG 검색 성공률.
+"""6주차 평가: KB Coverage / API 추출 정확도 / RAG 검색 성공률
 
-정답셋(ground truth)은 두 가지 경로로 얻는다.
+정답셋(ground truth) 경로
 
-  A. clang 기준 대조 (기본)
-     libclang 으로 파싱한 함수 정의 목록을 정답으로 삼는다. 대상 프로젝트를
-     가리지 않고 자동으로 정답을 만들 수 있다.
+  A. clang 기준 대조 (기본): libclang 으로 파싱한 함수 정의 목록
+  B. 라벨 파일 폴백: libclang 부재 시 수작업 라벨 JSON
 
-  B. 라벨 파일 폴백
-     libclang 바이너리가 없는 환경(설치가 까다롭다)에서는 손으로 적어 둔
-     라벨 JSON 을 정답으로 쓴다.
-
-A 를 먼저 시도하고 실패하면 B 로 내려간다. 어느 쪽을 썼는지는 결과에
-`ground_truth.source` 로 남기므로, 수치를 볼 때 근거를 알 수 있다.
+A 실패 시 B 로 폴백, 사용한 경로는 ``ground_truth.source`` 에 기록
 
 사용법
 ------
   python -m logosfuzz.knowledge.kb_eval run --paths examples/uds --labels examples/uds/labels.json \
       --output build/eval.json
   python -m logosfuzz.knowledge.kb_eval run --paths examples/uds --labels examples/uds/labels.json --report
+  python -m logosfuzz.knowledge.kb_eval run --profile targets/libsndfile.json \
+      --labels targets/labels/libsndfile.json --prefer labels --report
+
+``--profile`` 지정 시 프로필 기반 KB 생성 및 정답셋을 ``profile.apis`` 로 제한
+(미제한 시 라이브러리 내부 함수가 전부 미탐으로 집계)
 """
 from __future__ import annotations
 
@@ -44,7 +43,7 @@ EVAL_VERSION = 1
 
 @dataclass
 class GroundTruth:
-    """평가 기준이 되는 함수 정의 목록."""
+    """평가 기준 함수 정의 목록"""
 
     source: str                       # "clang" | "labels"
     apis: Dict[str, dict] = field(default_factory=dict)
@@ -60,7 +59,7 @@ class GroundTruthUnavailable(RuntimeError):
 
 def clang_ground_truth(paths: Sequence[str],
                        clang_args: Optional[Sequence[str]] = None) -> GroundTruth:
-    """libclang 으로 함수 '정의'를 수집한다. 사용할 수 없으면 예외."""
+    """libclang 기반 함수 '정의' 수집 (사용 불가 시 예외)"""
     try:
         from clang import cindex
     except Exception as exc:  # pragma: no cover - 바인딩 자체가 없는 환경
@@ -122,7 +121,7 @@ def clang_ground_truth(paths: Sequence[str],
             location = cursor.location
             if not location.file:
                 continue
-            # 시스템 헤더에서 딸려온 정의는 제외한다
+            # 시스템 헤더에서 딸려온 정의 제외
             if os.path.normcase(os.path.abspath(location.file.name)) != source_key:
                 continue
             name = qualified_name(cursor) or cursor.spelling
@@ -160,10 +159,9 @@ def clang_ground_truth(paths: Sequence[str],
 
 def nm_ground_truth(paths: Sequence[str], cc: str = "gcc",
                     cc_args: Optional[Sequence[str]] = None) -> GroundTruth:
-    """소스를 컴파일한 뒤 `nm` 으로 '정의된 함수 심볼'을 수집한다.
+    """소스 컴파일 후 `nm` 으로 '정의된 함수 심볼' 수집
 
-    컴파일러/링커가 직접 알려주는 값이라 추출기와 독립적이다. 대신 대상이
-    실제로 컴파일돼야 하므로 헤더가 갖춰진 프로젝트에만 쓸 수 있다.
+    추출기와 독립적인 정답셋, 단 대상이 실제로 컴파일 가능해야 함
     """
     import shutil
     import subprocess
@@ -180,7 +178,7 @@ def nm_ground_truth(paths: Sequence[str], cc: str = "gcc",
 
     underscore_prefixed = _toolchain_prefixes_underscore(compiler, reader)
 
-    # 소스가 있는 디렉터리를 포함 경로로 넣어 준다 (헤더가 옆에 있는 흔한 배치)
+    # 소스 디렉터리를 포함 경로로 추가 (헤더가 옆에 있는 흔한 배치)
     include_flags = [f"-I{d}" for d in sorted({os.path.dirname(s) or "." for s in sources})]
     args = list(cc_args or []) + include_flags
 
@@ -221,11 +219,10 @@ _PROBE_SYMBOL = "logosfuzz_nm_probe"
 
 
 def _nm_defined_symbols(listing: str, underscore_prefixed: bool) -> List[str]:
-    """`nm` 출력에서 '정의된 함수' 심볼 이름을 뽑는다.
+    """`nm` 출력의 '정의된 함수' 심볼 이름 추출
 
-    `_internal` 처럼 밑줄로 시작하는 함수는 C 에서 완전히 정상이므로 버리면
-    안 된다. 다만 일부 툴체인(32비트 Windows, macOS)은 모든 C 심볼 앞에
-    밑줄을 하나 덧붙이므로, 그 경우에만 하나를 떼어 낸다.
+    밑줄 시작 이름(`_internal`)은 유지, C 심볼에 밑줄을 덧붙이는 툴체인
+    (32비트 Windows, macOS)에서만 밑줄 1개 제거
     """
     names: List[str] = []
     for line in listing.splitlines():
@@ -245,7 +242,7 @@ def _nm_defined_symbols(listing: str, underscore_prefixed: bool) -> List[str]:
 
 
 def _toolchain_prefixes_underscore(compiler: str, reader: str) -> bool:
-    """이 툴체인이 C 심볼 앞에 밑줄을 붙이는지 실제로 확인한다."""
+    """툴체인의 C 심볼 밑줄 접두 여부 실측"""
     import subprocess
     import tempfile
 
@@ -266,7 +263,7 @@ def _toolchain_prefixes_underscore(compiler: str, reader: str) -> bool:
 
 
 def label_ground_truth(path: str) -> GroundTruth:
-    """손으로 적어 둔 라벨 JSON 을 정답으로 읽는다.
+    """수작업 라벨 JSON 의 정답셋 로드
 
     형식: {"apis": [{"name": "uds_open", "file": "...", "return_type": "int",
                      "params": ["ctx", "path"]}, ...]}
@@ -293,10 +290,9 @@ def label_ground_truth(path: str) -> GroundTruth:
 def resolve_ground_truth(paths: Sequence[str], labels: Optional[str] = None,
                          prefer: str = "auto",
                          clang_args: Optional[Sequence[str]] = None) -> GroundTruth:
-    """정답셋을 구한다: clang -> nm -> 라벨 파일 순으로 내려간다.
+    """정답셋 결정: clang -> nm -> 라벨 파일 순 폴백
 
-    어떤 경로를 썼는지는 `GroundTruth.note` 에 남는다. 수치만 보고 근거를
-    오해하지 않도록, 폴백한 이유도 함께 기록한다.
+    사용 경로와 폴백 사유는 `GroundTruth.note` 에 기록
     """
     if prefer == "labels":
         if not labels:
@@ -304,12 +300,13 @@ def resolve_ground_truth(paths: Sequence[str], labels: Optional[str] = None,
         return label_ground_truth(labels)
     if prefer in ("clang", "nm"):
         return (clang_ground_truth(paths, clang_args=clang_args) if prefer == "clang"
-                else nm_ground_truth(paths))
+                else nm_ground_truth(paths, cc_args=clang_args))
 
     reasons: List[str] = []
     for provider in (
         lambda: clang_ground_truth(paths, clang_args=clang_args),
-        lambda: nm_ground_truth(paths),
+        # 프로필의 compile_db 플래그(-I 등)는 nm 경로 컴파일에도 필요
+        lambda: nm_ground_truth(paths, cc_args=clang_args),
     ):
         try:
             truth = provider()
@@ -349,7 +346,7 @@ def _prf(true_positive: int, false_positive: int, false_negative: int) -> dict:
 
 
 def evaluate_extraction(kb: KnowledgeBase, truth: GroundTruth) -> dict:
-    """추출한 API 집합을 정답과 대조한다 (precision/recall/F1)."""
+    """추출 API 집합과 정답 대조 (precision/recall/F1)"""
     extracted = {d["function"] for d in kb.documents}
     expected = truth.names()
 
@@ -361,10 +358,8 @@ def evaluate_extraction(kb: KnowledgeBase, truth: GroundTruth) -> dict:
     result["false_positive_names"] = spurious[:20]
     result["false_negative_names"] = missed[:20]
 
-    # 이름이 맞은 것들에 한해 시그니처 세부까지 맞는지 본다
-    # 세부 일치율은 '정답셋이 그 정보를 갖고 있는 항목' 만 분모로 센다.
-    # nm 정답셋은 심볼 이름만 알려 주므로 인자/반환형 비교가 불가능한데,
-    # 그걸 분모에 넣으면 0% 로 잘못 보인다.
+    # 이름 일치 항목에 한해 시그니처 세부 비교
+    # 분모는 정답셋에 해당 정보가 있는 항목만 (nm 정답셋은 이름만 있어 제외)
     by_name = {d["function"]: d for d in kb.documents}
     param_ok = param_comparable = 0
     return_ok = return_comparable = 0
@@ -379,7 +374,7 @@ def evaluate_extraction(kb: KnowledgeBase, truth: GroundTruth) -> dict:
         if expected_return:
             return_comparable += 1
             actual_return = document["return_type"].replace(" ", "")
-            # 저장 형태가 'static int' 처럼 한정자를 포함할 수 있다
+            # 'static int' 처럼 한정자 포함 가능
             if expected_return in actual_return or actual_return.endswith(expected_return):
                 return_ok += 1
 
@@ -401,7 +396,7 @@ def evaluate_extraction(kb: KnowledgeBase, truth: GroundTruth) -> dict:
 
 
 def evaluate_coverage(kb: KnowledgeBase, truth: GroundTruth) -> dict:
-    """지식베이스가 대상 API 를 얼마나 담고 있는지."""
+    """지식베이스의 대상 API 포함 정도"""
     documents = kb.documents
     total = len(documents)
     expected = truth.names()
@@ -434,10 +429,9 @@ def evaluate_coverage(kb: KnowledgeBase, truth: GroundTruth) -> dict:
 
 
 def _strip_identifier(text: str, name: str) -> str:
-    """질의에서 함수 이름과 그 부분 토큰을 지운다.
+    """질의에서 함수 이름과 부분 토큰 제거
 
-    이름이 그대로 남아 있으면 식별자 완전일치로 걸려서 검색기 성능이 아니라
-    이름 노출 여부를 재게 된다.
+    이름이 남으면 검색기 성능 대신 이름 노출 여부를 측정하게 됨
     """
     tokens = {name.lower(), *split_identifier(name)}
     def replace(match: re.Match) -> str:
@@ -446,7 +440,7 @@ def _strip_identifier(text: str, name: str) -> str:
 
 
 def build_auto_queries(kb: KnowledgeBase, max_queries: int = 200) -> List[dict]:
-    """문서/제약조건 텍스트로 질의를 만든다 (함수 이름은 제거)."""
+    """문서/제약조건 텍스트 기반 질의 생성 (함수 이름 제거)"""
     queries: List[dict] = []
     for document in kb.documents:
         parts: List[str] = []
@@ -468,7 +462,7 @@ def build_auto_queries(kb: KnowledgeBase, max_queries: int = 200) -> List[dict]:
 
 
 def load_queries(path: str) -> List[dict]:
-    """질의 파일을 읽는다. `{"queries": [...]}` 와 최상위 배열을 모두 받는다."""
+    """질의 파일 로드 (`{"queries": [...]}` 와 최상위 배열 모두 지원)"""
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if isinstance(payload, dict):
         entries = payload.get("queries", [])
@@ -484,7 +478,7 @@ def load_queries(path: str) -> List[dict]:
 
 def evaluate_retrieval(kb: KnowledgeBase, queries: Sequence[dict],
                        top_k: int = 5) -> dict:
-    """recall@1 / recall@k / MRR 을 잰다."""
+    """recall@1 / recall@k / MRR 측정"""
     if not queries:
         return {"queries": 0, "note": "질의를 만들 수 없었습니다(문서/제약조건 부족)"}
 
@@ -520,17 +514,38 @@ def evaluate_retrieval(kb: KnowledgeBase, queries: Sequence[dict],
 # ---------------------------------------------------------------------------
 
 
+def restrict_to_apis(truth: GroundTruth, apis: Sequence[str]) -> GroundTruth:
+    """정답셋을 프로필의 대상 API 로 제한 (``apis`` 가 비면 그대로)"""
+    if not apis:
+        return truth
+    wanted = set(apis)
+    kept = {name: entry for name, entry in truth.apis.items() if name in wanted}
+    note = f"{truth.note} (profile.apis {len(wanted)}개로 제한)".strip()
+    return GroundTruth(source=truth.source, apis=kept, note=note)
+
+
 def evaluate(paths: Sequence[str], labels: Optional[str] = None,
              queries_path: Optional[str] = None,
-             prefer: str = "auto", top_k: int = 5) -> dict:
-    kb = KnowledgeBase.build(paths=list(paths) or None)
-    truth = resolve_ground_truth(paths, labels=labels, prefer=prefer)
+             prefer: str = "auto", top_k: int = 5,
+             profile=None) -> dict:
+    kb = KnowledgeBase.build(paths=list(paths) or None, profile=profile)
+    truth_paths = list(paths)
+    clang_args = None
+    if profile is not None:
+        unit = kb.build_units[0] if kb.build_units else {}
+        if not truth_paths:
+            truth_paths = list(unit.get("sources") or [str(profile.root)])
+        clang_args = list(unit.get("compile_flags") or []) or None
+    truth = resolve_ground_truth(truth_paths, labels=labels, prefer=prefer,
+                                 clang_args=clang_args)
+    if profile is not None:
+        truth = restrict_to_apis(truth, profile.apis)
 
     queries = load_queries(queries_path) if queries_path else build_auto_queries(kb)
 
     return {
         "version": EVAL_VERSION,
-        "target": list(paths),
+        "target": list(paths) or ([profile.name] if profile is not None else []),
         "ground_truth": {
             "source": truth.source,
             "apis": len(truth.apis),
@@ -544,7 +559,7 @@ def evaluate(paths: Sequence[str], labels: Optional[str] = None,
 
 
 def render_report(result: dict) -> str:
-    """사람이 읽는 요약."""
+    """사람이 읽는 요약"""
     truth = result["ground_truth"]
     accuracy = result["extraction_accuracy"]
     coverage = result["kb_coverage"]
@@ -610,6 +625,7 @@ def parse_args(argv=None):
 
     run_parser = subparsers.add_parser("run", help="평가 실행")
     run_parser.add_argument("--paths", nargs="*", default=[])
+    run_parser.add_argument("--profile", help="targets/*.json — 프로필로 KB 를 만들고 정답을 apis 로 제한")
     run_parser.add_argument("--labels", help="clang 을 쓸 수 없을 때 사용할 라벨 JSON")
     run_parser.add_argument("--queries", help="RAG 질의 JSON (없으면 자동 생성)")
     run_parser.add_argument("--prefer", choices=["auto", "clang", "labels"],
@@ -625,13 +641,18 @@ def main(argv=None):
     args = parse_args(argv)
     if args.command != "run":
         return
-    if not args.paths:
-        raise SystemExit("--paths 가 필요합니다")
+    if not args.paths and not args.profile:
+        raise SystemExit("--paths 또는 --profile 이 필요합니다")
+    profile = None
+    if args.profile:
+        from logosfuzz.common.target_profile import load_profile
+        profile = load_profile(args.profile)
 
     try:
         result = evaluate(
             args.paths, labels=args.labels,
             queries_path=args.queries, prefer=args.prefer, top_k=args.top_k,
+            profile=profile,
         )
     except GroundTruthUnavailable as exc:
         raise SystemExit(

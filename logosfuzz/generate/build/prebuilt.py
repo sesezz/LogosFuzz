@@ -24,6 +24,8 @@ from .cmake import CMakeAdapter
 class PrebuiltAdapter(CMakeAdapter):
     """라이브러리를 만들지 않고 링크만 수행하는 어댑터."""
 
+    build_system = "prebuilt"
+
     def prepare(self, *, force: bool = False) -> BuildResult:  # noqa: ARG002 - 호환용 인자
         """``libraries`` 와 ``include_dirs`` 의 실제 존재 여부만 확인."""
         target = f"prebuilt:{self.profile.name}"

@@ -1,0 +1,11 @@
+{
+  "purpose": "GENERIC-C 링커 오류 분류(generate/errors.py classify_toolchain_log)·스텁 생성 정답지.",
+  "collected_at": "2026-10-11",
+  "toolchain": "Ubuntu clang 18.1.3, GNU ld 2.42, Ubuntu LLD 18.1.3",
+  "cases": {
+    "undefined_reference_gnu_ld.txt": "examples/embedded 하네스 + libproto.a 를 HAL 정의 없이 링크 (기본 ld)",
+    "undefined_symbol_lld.txt": "같은 링크를 -fuse-ld=lld 로",
+    "multiple_definition.txt": "HAL_GetTick 을 정의한 같은 소스 두 개를 함께 링크",
+    "cannot_find_lib.txt": "존재하지 않는 -lhal_vendor 링크"
+  }
+}

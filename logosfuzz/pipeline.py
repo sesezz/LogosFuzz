@@ -85,8 +85,7 @@ def ext_to_api_metadata(ext_json: list[dict]) -> list[ApiMetadata]:
             param_str = ", ".join(
                 f"{p['type']} {p['name']}".strip() for p in params
             )
-            # 가변인자 함수는 `...`까지 살려야 헤더 선언과 타입이 일치한다.
-            # 빠뜨리면 하네스의 extern 선언이 conflicting types를 낸다.
+            # 가변인자 `...` 유지 (누락 시 헤더 선언과 conflicting types)
             if fn.get("is_variadic"):
                 param_str = f"{param_str}, ..." if param_str else "..."
             signature = f"{return_type} {name}({param_str})"
@@ -128,11 +127,9 @@ def auto_group(apis: list[ApiMetadata]) -> dict[str, list[int]]:
 # ---------------------------------------------------------------------
 
 def resolve_include_dirs(source_path: str, extra: list[str] | None = None) -> list[str]:
-    """EXT 분석과 컴파일에서 공통으로 쓸 include 경로를 정한다.
+    """EXT 분석과 컴파일 공통 include 경로 결정
 
-    소스 디렉터리와 그 안의 ``include/``는 자동으로 잡고, 프로젝트 헤더가
-    저장소 최상단(``<repo>/include``)이나 빌드 산출물(``build/include``)에
-    있는 경우를 위해 ``--include``로 추가 지정할 수 있게 한다.
+    소스 디렉터리와 ``include/`` 는 자동 포함, 그 외 경로는 ``--include`` 로 추가
     """
     source_dir = Path(source_path).resolve().parent
     dirs: list[str] = []
@@ -152,10 +149,7 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
                  max_round: int = 3, cc: str = "clang",
                  include: list[str] | None = None):
 
-    # EXT에도 include 경로를 넘겨야 한다. 넘기지 않으면 libclang이 프로젝트
-    # 헤더를 찾지 못해 typedef된 struct 포인터를 전부 `int *`로 보고한다
-    # (dlt-daemon에서 실제로 `DltMessage *msg` → `int * msg`로 추출됐다).
-    # 그 상태로 GEN에 넘기면 잘못된 타입의 하네스가 대량 생성된다.
+    # EXT에도 include 경로 전달 (누락 시 typedef 포인터가 `int *` 로 추출됨)
     include_dirs = resolve_include_dirs(source_path, include)
     clang_args = ["-std=c11"] + [f"-I{d}" for d in include_dirs]
 
@@ -214,20 +208,15 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
                                header_content=header_content,
                                header_filenames=header_filenames)
 
-    # GEN-03-02: 생성된 하네스를 실제로 컴파일해보고, 실패하면 컴파일 에러를
-    # LLM에 되먹여 고친다. 이 단계가 없으면 컴파일 불가 하네스가 그대로
-    # 저장돼서 사용자가 손으로 고쳐야 했다.
-    # 대상 프로젝트가 커널 UAPI 헤더를 동봉하는 경우(can-utils의 include/)
-    # 시스템 헤더보다 먼저 오도록 include 경로 앞에 넣는다.
-    # EXT 분석에 쓴 경로를 그대로 재사용해서, 분석과 컴파일이 같은 헤더를
-    # 보도록 맞춘다(둘이 어긋나면 자가 치유가 멀쩡한 하네스를 실패로 잡는다).
+    # GEN-03-02: 생성 하네스 컴파일 및 실패 시 컴파일 에러를 LLM에 피드백해 수정
+    # 동봉 커널 UAPI 헤더가 시스템 헤더보다 우선하도록 include 경로 앞에 배치
+    # EXT 분석과 같은 include 경로 재사용
 
     heal_reports = []
     if max_round > 0:
         print(f"\n[GEN-03-02] 자가 치유 (max-round={max_round})...")
-        # 컴파일 조건은 아래 [OUT]이 안내하는 실제 빌드 명령과 맞춰야 한다.
-        # `-std=c11`(엄격 ISO)을 주면 struct timespec 같은 POSIX 타입이 가려져,
-        # 실제 빌드는 되는 하네스가 자가 치유 단계에서만 실패로 잡힌다.
+        # 컴파일 조건은 아래 [OUT] 안내 빌드 명령과 일치 필요
+        # (`-std=c11` 지정 시 POSIX 타입 미노출로 오판)
         loop = SelfHealLoop(
             compiler=SubprocessCompiler(
                 cc=cc, sanitizers="address", include_dirs=include_dirs,

@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# LogosFuzz 격리 컨테이너 참고용 진입 스크립트 (EXE-04-01).
+# LogosFuzz 격리 컨테이너 참고용 진입 스크립트 (EXE-04-01)
 #
-# 실제 퍼징 실행 커맨드는 DockerIsolationRunner 가 구성해 주입한다. 이 파일은
-# 수동 디버깅/문서용이며, "컨테이너 안에서 하네스를 빌드하고 실행해 크래시를
-# 재현한다"를 한 줄로 재현하기 위한 헬퍼다.
+# 수동 디버깅용 헬퍼 (실제 퍼징 커맨드는 DockerIsolationRunner 가 주입)
 #
 # 사용:
 #   logosfuzz-entrypoint build      //score/json/fuzz:json_parser_fuzz_test
@@ -12,36 +10,22 @@
 #   logosfuzz-entrypoint shell
 #
 # ---------------------------------------------------------------------------
-# config 선택 (GEN 파트가 1주차에 실측으로 확정한 결정사항)
+# config 선택
 # ---------------------------------------------------------------------------
 #
-# ① --config=fuzz 와 --config=bl-x86_64-linux 는 상호 배타다.
-#    둘을 같이 주면 뒤에 오는 --extra_toolchains 가 이겨 GCC 가 clang 을
-#    밀어내고, GCC 에는 -fsanitize=fuzzer 가 없어 링크에서 죽는다
-#    (g++ 13.3 실측: "unrecognized argument to '-fsanitize=' option: 'fuzzer'").
+# ① --config=fuzz 와 --config=bl-x86_64-linux 상호 배타 (동시 지정 시 링크 실패)
 #      fuzz            = 퍼징 주경로   (clang, @llvm_toolchain)
 #      bl-x86_64-linux = 회귀 게이트만 (GCC 12.2.0)
 #
-# ② 퍼징에 --config=asan_ubsan_lsan 을 쓰지 않는다. 오버레이의 build:fuzz 가
-#    ASan 을 켜며(rules_fuzzing cc_engine_sanitizer), run/test 가 build 를
-#    상속하므로 세 커맨드 모두에서 쓸 수 있다.
-#    (1주차에는 asan_ubsan_lsan 이 test: 전용이라 build 에서 못 썼다. 5주차
-#    baselibs 09be72c 에서는 build: 로 바뀌어 GCC 재생 빌드가 이 config 를
-#    쓴다 - logosfuzz/execute/regression.py 참고. 퍼징 쪽 결정은 그대로다.)
+# ② 퍼징에 --config=asan_ubsan_lsan 미사용 (build:fuzz 가 ASan 적용)
 #
-# ③ 크래시 종료코드는 55 다(baselibs 가 ASAN_OPTIONS/UBSAN_OPTIONS 에
-#    exitcode=55, halt_on_error=1 을 박아 둔다). 크래시 판정은 종료코드와
-#    출력 파싱을 같이 봐야 한다.
+# ③ 크래시 종료코드 55 (baselibs 의 exitcode=55, halt_on_error=1)
+#    크래시 판정은 종료코드와 출력 파싱 병행
 #
-# ④ EXE 계층은 bazel run 이 아니라 <name>_bin 을 직접 실행한다. cc_fuzz_test
-#    가 만드는 _run 타깃은 bazel run 전용 런처라 libFuzzer 인자를 그대로
-#    넘기지 못한다. 그래서 이 스크립트에도 run 서브커맨드를 두지 않는다 -
-#    빌드해서 바이너리 경로를 얻고(binpath), 그 바이너리를 직접 실행한다.
+# ④ bazel run 대신 <name>_bin 직접 실행 (run 서브커맨드 없음, binpath 로 경로 획득)
 #
-# 주의(네트워크): 첫 실행은 외부 저장소를 받아야 하므로 네트워크가 필요하다.
-# 캐시 볼륨(/bazel)을 한 번 데운 뒤부터 --network none 으로 격리 실행할 수 있다.
-# cc_engine_instrumentation 이 전이(transition)라 의존 클로저 전체가
-# clang+sancov 로 재컴파일되므로 첫 빌드는 길다(GEN 파트 실측: 7분 12초).
+# 주의: 첫 실행은 외부 저장소 다운로드로 네트워크 필요
+# 캐시 볼륨(/bazel) 준비 후 --network none 격리 실행 가능, 첫 빌드는 장시간 소요
 set -euo pipefail
 
 FUZZ_CONFIG="${LOGOSFUZZ_FUZZ_CONFIG:-fuzz}"
@@ -52,8 +36,8 @@ shift || true
 
 mkdir -p /out/crashes /out/logs
 
-# cc_fuzz_test //pkg:name 에서 실제 퍼저 바이너리 타깃 //pkg:name_bin 을 만든다.
-# 이미 _bin 으로 끝나면 그대로 둔다.
+# cc_fuzz_test //pkg:name 의 실제 퍼저 바이너리 타깃 //pkg:name_bin 생성
+# 이미 _bin 으로 끝나면 그대로 유지
 bin_label() {
     local label="$1"
     [[ "${label}" == *_bin ]] && { printf '%s' "${label}"; return; }
@@ -67,17 +51,14 @@ case "${CMD}" in
         exec bazel build "--config=${FUZZ_CONFIG}" "$@" "${TARGET}"
         ;;
     binpath)
-        # 빌드 산출물의 실제 경로를 찍는다. bazel-bin 심링크는 직전 빌드
-        # 설정을 가리키는 편의 링크라 config 가 섞이면 무효가 되므로,
-        # 경로를 조립하지 않고 cquery 로 설정에 맞는 실제 경로를 질의한다.
+        # cquery 로 설정에 맞는 빌드 산출물 실제 경로 출력 (bazel-bin 심링크 미사용)
         TARGET="$(bin_label "${1:?bazel target required}")"
         shift
         exec bazel cquery "--config=${FUZZ_CONFIG}" --output=files "$@" "${TARGET}"
         ;;
     regression)
-        # 퍼징 오버레이가 기존 GCC 빌드를 깨지 않았는지 확인한다.
-        # 퍼징 타깃에는 tags=["manual"] 이 붙어 있어 //... 에 딸려 들어가지
-        # 않는 것이 정상이다.
+        # 퍼징 오버레이의 기존 GCC 빌드 영향 확인
+        # 퍼징 타깃은 tags=["manual"] 로 //... 에서 제외
         TARGET="${1:?bazel target required}"
         shift
         exec bazel build "--config=${REGRESSION_CONFIG}" "$@" "${TARGET}"

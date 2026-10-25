@@ -1,6 +1,6 @@
 """EXE-04-00 fuzz 커맨드 실행 루프 및 하위 기능 연동 지점.
 
-``logosfuzz fuzz --engine <libfuzzer|afl++> --timeout <sec> --docker``의 코어 루프.
+``logosfuzz fuzz --engine libfuzzer --timeout <sec> --docker``의 코어 루프.
 Logic Group을 우선순위 순으로 순회하며 그룹마다 다음을 수행한다.
 
   1. EXE-04-03 :class:`TimeoutManager`로 그룹별 :class:`TimeoutPlan` 산정.

@@ -1,14 +1,14 @@
-"""ANA 파트 CLI.
+"""ANA 파트 CLI
 
-설계서 기능 흐름도의 ``analyze`` 단계(Step 5/6)를 담당한다.
+설계서 기능 흐름도의 ``analyze`` 단계(Step 5/6) 담당
 
     python -m logosfuzz.analyze.cli dedup   <sanitizer-jsonl|dir|summary.json>... [-o out.json]
     python -m logosfuzz.analyze.cli triage  <dedup.json | sanitizer 입력...>     [-o out.json]
     python -m logosfuzz.analyze.cli analyze <sanitizer 입력...>                   [-o out.json]
 
-``dedup``  : ANA-05-04. 크래시 결함 스트림 → 고유 클러스터 목록(JSON).
-``triage`` : ANA-05-01. 클러스터(또는 원시 입력) → 정/오탐 판별 결과(JSON).
-``analyze``: dedup → triage 를 한 번에 실행하는 파이프라인 편의 명령.
+``dedup``  : ANA-05-04. 크래시 결함 스트림 → 고유 클러스터 목록(JSON)
+``triage`` : ANA-05-01. 클러스터(또는 원시 입력) → 정/오탐 판별 결과(JSON)
+``analyze``: dedup → triage 일괄 실행
 
 크래시 승인 게이트 (CTR-06-02 CRASH_TRIAGE, 4주차 활성화)
 --------------------------------------------------------
@@ -50,7 +50,7 @@ def _write(path: str | None, payload: dict) -> None:
 
 
 def _clusters_from_inputs(inputs: list[str], depth: int) -> tuple[list[CrashCluster], dict]:
-    """입력이 dedup.json이면 클러스터를 복원하고, 원시 입력이면 dedup을 실행한다."""
+    """dedup.json이면 클러스터 복원, 원시 입력이면 dedup 실행"""
     if len(inputs) == 1 and Path(inputs[0]).suffix == ".json":
         data = json.loads(Path(inputs[0]).read_text(encoding="utf-8"))
         if isinstance(data, dict) and "clusters" in data:
@@ -64,19 +64,19 @@ def _clusters_from_inputs(inputs: list[str], depth: int) -> tuple[list[CrashClus
 def _triager_for_args(
     args: argparse.Namespace,
 ) -> tuple[RuleBasedTriager | LLMTriager, SourceReachabilityProvider | None]:
-    """CLI 옵션에 따라 도달 가능성 증거를 주입한 판별기를 만든다.
+    """CLI 옵션에 따른 도달 가능성 증거 주입 판별기 생성
 
-    ``--source-root``를 주지 않으면 기존 규칙 기반 동작을 그대로 유지한다.
-    소스 루트를 지정한 경우에만 ANA-05-01이 대상 함수의 정의, 공개 헤더,
-    프로덕션/하네스 호출부를 수집한다. 하네스 디렉터리는 선택 사항이라,
-    크래시 콜스택의 하네스 소스까지 연결할 때만 지정하면 된다.
+    ``--source-root`` 미지정 시 기존 규칙 기반 동작 유지
+    지정 시 대상 함수 정의·공개 헤더·프로덕션/하네스 호출부 수집 (하네스 디렉터리는 선택)
     """
     provider = None
     if getattr(args, "source_root", None):
         provider = SourceReachabilityProvider(args.source_root, args.harness_dir)
     contracts = _contract_provider_for_args(args)
+    profile = _profile_for_args(args)
 
-    fallback = RuleBasedTriager(context_provider=provider, contract_provider=contracts)
+    fallback = RuleBasedTriager(context_provider=provider, contract_provider=contracts,
+                                profile=profile)
     if not getattr(args, "llm", False):
         return fallback, provider
 
@@ -90,13 +90,31 @@ def _triager_for_args(
             fallback=fallback,
             context_provider=provider,
             contract_provider=contracts,
+            profile=profile,
         ),
         provider,
     )
 
 
-def _contract_provider_for_args(args: argparse.Namespace) -> KnowledgeBaseContractProvider:
-    """에러계약 근거 공급자. ``--kb`` 가 있으면 선언된 계약·Bazel 타깃까지 본다."""
+def _profile_for_args(args: argparse.Namespace):
+    """``--profile`` 이 있으면 TargetProfile, 없으면 None(기존 자동차 동작)."""
+    if not getattr(args, "profile", None):
+        return None
+    cached = getattr(args, "_profile", None)
+    if cached is None:
+        from logosfuzz.common.target_profile import load_profile
+
+        cached = load_profile(args.profile)
+        args._profile = cached
+    return cached
+
+
+def _contract_provider_for_args(args: argparse.Namespace):
+    """에러계약 근거 공급자. ``--kb`` 가 있으면 선언된 계약·Bazel 타깃까지 본다.
+
+    ``--profile`` 이 있으면 ``profile.error_contract`` 플러그인을, 없으면 기존
+    ``score::Result`` 공급자를 쓴다.
+    """
     cached = getattr(args, "_contract_provider", None)
     if cached is not None:
         return cached
@@ -105,7 +123,13 @@ def _contract_provider_for_args(args: argparse.Namespace) -> KnowledgeBaseContra
         from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 
         kb = KnowledgeBase.load(args.kb)
-    provider = KnowledgeBaseContractProvider(kb)
+    profile = _profile_for_args(args)
+    if profile is not None:
+        from logosfuzz.analyze.contracts import ContractProvider
+
+        provider = ContractProvider.for_profile(profile, kb=kb)
+    else:
+        provider = KnowledgeBaseContractProvider(kb)
     args._contract_provider = provider
     return provider
 
@@ -222,12 +246,12 @@ def _print_gate(approvals: dict, verified: list) -> None:
 
 
 def _reachability_dict(provider, cluster: CrashCluster) -> dict | None:
-    """판별 결과에 소스 근거를 보존한다(ANA/JSON 소비용)."""
+    """판별 결과에 소스 근거 보존 (ANA/JSON 소비용)"""
     if provider is None:
         return None
     try:
         return provider(cluster).to_dict()
-    except Exception as exc:  # 분석 실패가 판별 전체를 막지 않도록 한다.
+    except Exception as exc:  # 분석 실패가 판별 전체를 막지 않도록 처리
         return {"error": f"reachability analysis failed: {exc}"}
 
 
@@ -303,7 +327,7 @@ def _run_triage(args: argparse.Namespace) -> int:
 
 
 def _run_analyze(args: argparse.Namespace) -> int:
-    """dedup → triage 파이프라인 한 번에."""
+    """dedup → triage 일괄 실행"""
     dedup = CrashDeduplicator(depth=args.depth)
     dedup.extend(load_records(args.inputs))
     clusters = dedup.clusters()
@@ -358,6 +382,8 @@ def _run_analyze(args: argparse.Namespace) -> int:
 def add_gate_arguments(parser: argparse.ArgumentParser) -> None:
     """triage/analyze 공통: 에러계약 KB 와 크래시 승인 게이트 옵션."""
     parser.add_argument("--kb", help="지식베이스 JSON(에러계약·Bazel 타깃 근거, 선택)")
+    parser.add_argument("--profile",
+                        help="대상 프로필 targets/*.json (error_contract·domain·apis 로 판별, 선택)")
     parser.add_argument("--review-store", dest="review_store",
                         help="HITL 리뷰 저장소 경로(기본 .logosfuzz/hitl/reviews.json)")
     parser.add_argument("--project", default="", help="리뷰 항목에 붙일 프로젝트 이름")
