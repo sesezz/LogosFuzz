@@ -162,7 +162,7 @@ def truncate_middle(text: str, limit: int) -> str:
 
 
 def domain_subject(domain: str) -> str:
-    """시스템 프롬프트가 설명하는 대상. automotive 만 자동차 문구를 쓴다."""
+    """시스템 프롬프트가 설명하는 대상. automotive 만 자동차 문구를 사용."""
     if domain == "automotive":
         return "automotive open-source libraries"
     return "C/C++ libraries and embedded firmware"
@@ -178,7 +178,7 @@ class RepairPromptBuilder:
         "Do not add explanations outside the code block. Preserve the LLVMFuzzerTestOneInput "
         "entry point and the intended target API calls."
     )
-    # 기존 호출부·테스트가 읽는 값(automotive 문구). 도메인별 문구는 system_prompt() 가 만든다.
+    # 기존 호출부·테스트가 읽는 값(automotive 문구). 도메인별 문구는 system_prompt() 가 생성
     SYSTEM = SYSTEM_TEMPLATE.format(subject=domain_subject("automotive"))
 
     def __init__(self, max_log_chars: int = 8000, domain: str = "automotive") -> None:

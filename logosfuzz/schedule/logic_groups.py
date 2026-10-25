@@ -113,9 +113,9 @@ def extract_realtime_signals(texts: Iterable[str], source: str = "",
                              domain: str = "automotive") -> List[RealtimeSignal]:
     """문서/제약조건 텍스트에서 타이밍 신호를 뽑는다.
 
-    워치독·CAN 주기·UDS P2 같은 키워드는 자동차 도메인 용어라 ``domain`` 이
-    ``automotive`` 일 때만 뽑는다(그 외에는 빈 목록). 기본값은 프로필 없이 부르는
-    기존 호출부의 동작을 지키려고 ``automotive`` 로 둔다.
+    워치독·CAN 주기·UDS P2 같은 키워드는 자동차 도메인 용어이므로 ``domain`` 이
+    ``automotive`` 일 때만 추출(그 외에는 빈 목록). 기본값은 프로필 없이 호출하는
+    기존 호출부의 동작 유지를 위해 ``automotive`` 로 지정.
 
     한 문장 안에 신호 종류 키워드와 시간 값이 함께 있어야 인정한다. 문서 전체를
     한 덩어리로 보면 무관한 숫자가 엮이기 때문이다.
@@ -516,7 +516,7 @@ def build_groups(kb: KnowledgeBase, link_calls: bool = True,
                  with_priority: bool = True,
                  max_group: int = MAX_CALL_LINK_GROUP,
                  domain: str = "automotive") -> List[GroupInfo]:
-    """추출 + 실시간 신호 결합 + 우선순위까지 한 번에. ``domain`` 은 프로필의 domain."""
+    """추출 + 실시간 신호 결합 + 우선순위 부여를 한 번에 수행. ``domain`` 은 프로필의 domain."""
     groups = extract_groups(kb, link_calls=link_calls, max_group=max_group)
     attach_realtime_signals(groups, kb, domain=domain)
     if with_priority:

@@ -2,33 +2,33 @@
 CMake 어댑터 (GENERIC-B)
 ========================
 
-CMake 로 빌드하는 C/C++ 대상(libsndfile 등)에서 퍼저 바이너리를 만든다.
+CMake 로 빌드하는 C/C++ 대상(libsndfile 등)에서 퍼저 바이너리를 생성함.
 
 Bazel 과 다른 점
 ----------------
-Bazel 은 하네스를 ``cc_fuzz_test`` 로 BUILD 에 선언하고 deps 로 링크한다. CMake 대상은
-**라이브러리를 CMake 가 먼저 빌드하고(``prepare``), 하네스는 clang 으로 직접 링크한다**
-(``build``). 그래서 BUILD 파일을 쓰지 않고, 빌드 실패는 하네스 소스의 컴파일·링크 오류뿐이다.
-오류 원문은 ``BuildResult.log`` 에 그대로 남겨 자가치유 분류기(D)가 읽게 한다.
+Bazel 은 하네스를 ``cc_fuzz_test`` 로 BUILD 에 선언하고 deps 로 링크함. CMake 대상은
+**라이브러리를 CMake 가 먼저 빌드하고(``prepare``), 하네스는 clang 으로 직접 링크**
+(``build``)함. 그래서 BUILD 파일을 쓰지 않으며, 빌드 실패는 하네스 소스의 컴파일·링크 오류뿐임.
+오류 원문은 ``BuildResult.log`` 에 그대로 보존하여 자가치유 분류기(D)가 읽도록 함.
 
 흐름::
 
     prepare()                        라이브러리를 계측해서 한 번 빌드(캐시됨)
       cmake -S <source_root> -B <build_dir> [-G Ninja] -DCMAKE_EXPORT_COMPILE_COMMANDS=ON <configure_args>
       cmake --build <build_dir> --parallel N
-    emit_build_definition(spec, src) 하네스 소스를 작업 디렉터리에 쓴다
+    emit_build_definition(spec, src) 하네스 소스를 작업 디렉터리에 기록
     build(spec)                      clang -fsanitize=address,undefined,fuzzer 하네스 + libraries ... -o <binary>
 
-``prepare()`` 가 만드는 ``compile_commands.json`` 은 EXT(``extract/compile_db.py``)의 입력이기도 하다.
-그래서 파이프라인에서는 ``prepare`` → EXT → GEN → ``build`` 순서가 되어야 한다.
+``prepare()`` 가 만드는 ``compile_commands.json`` 은 EXT(``extract/compile_db.py``)의 입력이기도 함.
+따라서 파이프라인에서는 ``prepare`` → EXT → GEN → ``build`` 순서가 필요함.
 
-계측은 어댑터가 넣는다: 프로필의 ``configure_args`` 에는 ``-fsanitize`` 가 없다. 계측 없는
-라이브러리는 커버리지를 못 본다. ``coverage=True`` 는 같은 과정을 ``<build_dir>-cov`` 에서
-``-fprofile-instr-generate -fcoverage-mapping`` 으로 한 번 더 한다(``execute/coverage.py`` 의
+계측은 어댑터가 추가함: 프로필의 ``configure_args`` 에는 ``-fsanitize`` 가 없음. 계측 없는
+라이브러리는 커버리지를 볼 수 없음. ``coverage=True`` 는 같은 과정을 ``<build_dir>-cov`` 에서
+``-fprofile-instr-generate -fcoverage-mapping`` 으로 한 번 더 수행(``execute/coverage.py`` 의
 ``instrumentation_flags()`` 재사용).
 
-``TargetProfile`` 은 타입 힌트로만 import 한다(런타임 의존 없음). 이 어댑터는 프로필의
-``build.*``, ``language``, ``name``, ``root``, ``abs()`` 만 읽는다.
+``TargetProfile`` 은 타입 힌트로만 import 함(런타임 의존 없음). 이 어댑터는 프로필의
+``build.*``, ``language``, ``name``, ``root``, ``abs()`` 만 읽음.
 """
 from __future__ import annotations
 
@@ -48,9 +48,9 @@ from .base import DEFAULT_BUILD_TIMEOUT_S, BuildResult, HarnessSpecLike
 if TYPE_CHECKING:  # pragma: no cover
     from logosfuzz.common.target_profile import TargetProfile
 
-# 라이브러리 컴파일에는 fuzzer 런타임을 링크하지 않는다(fuzzer-no-link: 계측만).
+# 라이브러리 컴파일에는 fuzzer 런타임을 링크하지 않음(fuzzer-no-link: 계측만)
 _SANITIZE_COMPILE = "-fsanitize=address,undefined,fuzzer-no-link"
-# 하네스를 링크할 때는 libFuzzer 엔트리(main)가 필요하다.
+# 하네스 링크 시에는 libFuzzer 엔트리(main)가 필요함
 _SANITIZE_LINK = "-fsanitize=address,undefined,fuzzer"
 _BASE_FLAGS = ("-g", "-O1", "-fno-omit-frame-pointer")
 
@@ -67,7 +67,7 @@ class RunResult:
     stderr: str = ""
 
 
-# runner(argv, cwd, env, timeout_s) -> RunResult. 테스트에서 가짜를 주입한다.
+# runner(argv, cwd, env, timeout_s) -> RunResult. 테스트에서 가짜 실행기를 주입
 Runner = Callable[
     [Sequence[str], Optional[Path], Optional[Mapping[str, str]], Optional[float]],
     RunResult,
@@ -80,7 +80,7 @@ def default_runner(
     env: Optional[Mapping[str, str]],
     timeout_s: Optional[float],
 ) -> RunResult:
-    """subprocess 로 실행한다. 도구가 없거나 시간이 넘어도 예외 대신 RunResult 로 돌려준다."""
+    """subprocess 로 실행. 도구가 없거나 시간이 초과되어도 예외 대신 RunResult 로 반환."""
     try:
         proc = subprocess.run(
             list(argv), cwd=cwd, env=dict(env) if env is not None else None,
@@ -101,7 +101,7 @@ def default_runner(
 
 def _coverage_flags() -> List[str]:
     """llvm-cov 소스 기반 커버리지 계측 플래그 (``execute/coverage.py`` 재사용)."""
-    # 지연 import: execute 패키지는 이 모듈이 import 될 때마다 필요하지는 않다.
+    # 지연 import: execute 패키지는 이 모듈이 import 될 때마다 필요하지는 않음
     from logosfuzz.config import CoverageMode
     from logosfuzz.execute.coverage import instrumentation_flags
 
@@ -109,7 +109,7 @@ def _coverage_flags() -> List[str]:
 
 
 class CMakeAdapter:
-    """CMake 대상용 빌드 어댑터. ``BuildAdapter`` 계약(emit/build/remove)을 따른다."""
+    """CMake 대상용 빌드 어댑터. ``BuildAdapter`` 계약(emit/build/remove)을 따름."""
 
     def __init__(
         self,
@@ -132,7 +132,7 @@ class CMakeAdapter:
         self.cc = cc
         self.cxx = cxx
         self._which = which
-        # 하네스 소스(harness/)와 바이너리(bin/)는 대상 소스 트리 밖에 둔다.
+        # 하네스 소스(harness/)와 바이너리(bin/)는 대상 소스 트리 밖에 배치
         self.work_dir = (
             Path(work_dir).expanduser() if work_dir is not None
             else Path.cwd() / "out" / "generic" / profile.name
@@ -160,7 +160,7 @@ class CMakeAdapter:
         return self.cxx if self.profile.language == "cpp" else self.cc
 
     def _rewrite_for_coverage(self, path: str) -> str:
-        """커버리지 변형이면 ``<build_dir>/x`` 를 ``<build_dir>-cov/x`` 로 바꾼다."""
+        """커버리지 변형이면 ``<build_dir>/x`` 를 ``<build_dir>-cov/x`` 로 변환."""
         if not self.coverage:
             return path
         base = (self.profile.build.build_dir or DEFAULT_BUILD_DIR).rstrip("/")
@@ -179,14 +179,14 @@ class CMakeAdapter:
         return [self.profile.abs(d) for d in self.profile.build.include_dirs]
 
     def compile_flags(self) -> List[str]:
-        """라이브러리를 컴파일할 때의 CFLAGS/CXXFLAGS."""
+        """라이브러리 컴파일 시의 CFLAGS/CXXFLAGS."""
         flags = [*_BASE_FLAGS, _SANITIZE_COMPILE]
         if self.coverage:
             flags += _coverage_flags()
         return flags
 
     def link_flags(self) -> List[str]:
-        """하네스를 컴파일·링크할 때의 플래그(퍼저 엔트리 포함)."""
+        """하네스 컴파일·링크 시의 플래그(퍼저 엔트리 포함)."""
         flags = [*_BASE_FLAGS, _SANITIZE_LINK]
         if self.coverage:
             flags += _coverage_flags()
@@ -224,7 +224,7 @@ class CMakeAdapter:
         return all(lib.is_file() for lib in self.libraries)
 
     def prepare(self, *, force: bool = False) -> BuildResult:
-        """대상 라이브러리를 계측해서 한 번 빌드한다. 이미 되어 있으면 건너뛴다(캐시)."""
+        """대상 라이브러리를 계측해서 1회 빌드. 이미 되어 있으면 생략(캐시)."""
         target = f"cmake:{self.profile.name}" + (":cov" if self.coverage else "")
         started = time.monotonic()
 
@@ -244,7 +244,7 @@ class CMakeAdapter:
         configure = [
             "cmake", "-S", str(self.source_dir), "-B", str(self.build_dir),
         ]
-        # 이미 다른 생성기로 configure 된 캐시가 있으면 -G 를 주면 거부당한다.
+        # 다른 생성기로 이미 configure 된 캐시가 있으면 -G 지정 시 거부되므로 캐시가 없을 때만 지정
         if not (self.build_dir / "CMakeCache.txt").is_file() and self._which("ninja"):
             configure += ["-G", "Ninja"]
         configure += ["-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", *self.profile.build.configure_args]
@@ -274,16 +274,16 @@ class CMakeAdapter:
     # BuildAdapter 계약
     # ------------------------------------------------------------------ #
     def emit_build_definition(self, spec: HarnessSpecLike, harness_source: str) -> Path:
-        """하네스 소스를 쓴다. CMake 는 BUILD 정의가 없으므로 소스 경로를 돌려준다."""
+        """하네스 소스를 기록. CMake 는 BUILD 정의가 없으므로 소스 경로를 반환."""
         path = self._harness_path(spec)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(harness_source, encoding="utf-8")
         return path
 
     def build(self, spec: HarnessSpecLike) -> BuildResult:
-        """하네스를 라이브러리와 링크해 퍼저 바이너리를 만든다.
+        """하네스를 라이브러리와 링크해 퍼저 바이너리를 생성.
 
-        실패하면 컴파일러·링커 원문을 ``log`` 에 그대로 남긴다(자가치유 분류기의 입력).
+        실패하면 컴파일러·링커 원문을 ``log`` 에 그대로 보존(자가치유 분류기의 입력).
         """
         started = time.monotonic()
         source = self._harness_path(spec)
@@ -306,7 +306,7 @@ class CMakeAdapter:
             self.compiler, *self.link_flags(),
             *[f"-I{d}" for d in self.include_dirs],
             str(source),
-            *[str(lib) for lib in self.libraries],   # 소스 뒤에 두어야 정적 라이브러리가 풀린다
+            *[str(lib) for lib in self.libraries],   # 소스 뒤에 배치해야 정적 라이브러리가 해석됨
             *self.profile.build.link_flags,
             "-o", str(binary),
         ]
@@ -322,7 +322,7 @@ class CMakeAdapter:
         )
 
     def remove(self, spec: HarnessSpecLike) -> None:
-        """생성한 하네스 소스와 바이너리를 지운다(없어도 오류 없음)."""
+        """생성한 하네스 소스와 바이너리를 삭제(없어도 오류 없음)."""
         for path in (self._harness_path(spec), self._binary_path(spec)):
             try:
                 path.unlink()

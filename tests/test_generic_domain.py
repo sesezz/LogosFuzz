@@ -1,4 +1,4 @@
-"""domain 별 동작 분리 테스트 (GENERIC-B 2일차). automotive 는 기존과 같고, 그 외에는 자동차 용어를 쓰지 않는다."""
+"""domain 별 동작 분리 테스트 (GENERIC-B 2일차). automotive 는 기존과 동일, 그 외에는 자동차 용어 미사용."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -53,7 +53,7 @@ def test_cpp_prompt_names_score_result_only_for_automotive():
 
     assert "score::Result" in automotive
     assert "score::Result" not in generic
-    assert "REFERENCE HARNESS" in automotive and "REFERENCE HARNESS" not in generic   # S-CORE 참조는 automotive 만
+    assert "REFERENCE HARNESS" in automotive and "REFERENCE HARNESS" not in generic   # S-CORE 참조는 automotive 전용
     assert "ERROR CONTRACTS (Result" in generic and "Result<T> / expected" in generic
     assert build_prompt("g", [CTX], language="cpp", **kwargs) == automotive    # 기본값 = 기존 프롬프트
 

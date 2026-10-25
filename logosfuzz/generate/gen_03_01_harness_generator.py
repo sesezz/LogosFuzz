@@ -897,8 +897,8 @@ def generate_pairs_from_kb(
     ``meta_out`` 을 주면 그룹별 프롬프트 부가 정보(``header_content`` 등)를 채워 준다
     (BUILD 단계의 소스 자가치유가 같은 API 선언을 힌트로 쓴다).
 
-    ``domain`` 은 프로필의 domain. automotive 가 아니면 실시간 신호를 뽑지 않고
-    프롬프트에도 ``score::Result`` 라는 이름을 쓰지 않는다(기본 automotive = 기존 동작).
+    ``domain`` 은 프로필의 domain. automotive 가 아니면 실시간 신호를 추출하지 않고
+    프롬프트에도 ``score::Result`` 라는 이름을 사용하지 않음(기본 automotive = 기존 동작).
 
     ``deps_provider`` 를 안 주면 KB 기반 공급자를 기본으로 쓴다(``make_deps_provider``).
     ``plans_out`` 은 ``group_meta_from_kb`` 로 그대로 넘어간다.

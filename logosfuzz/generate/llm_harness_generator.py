@@ -208,7 +208,7 @@ def build_cpp_prompt(group_name: str, contexts: Sequence[ApiContext],
     """C++ / FuzzedDataProvider / Bazel cc_fuzz_test 용 프롬프트.
 
     ``domain`` 이 ``automotive`` 가 아니면 ``score::Result`` 라는 이름을 프롬프트에
-    쓰지 않는다(기본값은 기존 호출부와 같은 프롬프트를 위해 ``automotive``).
+    사용하지 않음(기본값은 기존 호출부와 동일한 프롬프트를 위해 ``automotive``).
     """
     result_type = "score::Result" if domain == "automotive" else "Result"
     api_block = ""
@@ -270,8 +270,8 @@ ERROR CONTRACTS ({result_type} — returning an error is EXPECTED behaviour):
   NEVER abort()/assert()/__builtin_trap() on an error result.
 """
 
-    # 기본 참조 하네스는 S-CORE(score::Result) 용이라 automotive 에서만 기본으로 넣는다.
-    # 다른 도메인은 reference_harness 를 직접 줄 때만 참조 섹션이 생긴다.
+    # 기본 참조 하네스는 S-CORE(score::Result) 전용이므로 automotive 에서만 기본 포함
+    # 다른 도메인은 reference_harness 를 직접 지정할 때만 참조 섹션 생성
     if reference_harness is None:
         reference = load_reference_harness() if domain == "automotive" else ""
     else:
@@ -515,8 +515,8 @@ def generate_harness(schedule: list[ScheduleResult],
                   error_contracts, header_content
     llm         : ``prompt -> str`` 호출 가능 객체. 없으면 OpenAI 를 쓴다.
                   테스트에서는 가짜 함수를 주입한다.
-    domain      : 프로필의 domain. automotive 가 아니면 C++ 프롬프트가 score::Result
-                  이름을 쓰지 않는다(기본 automotive = 기존 동작).
+    domain      : 프로필의 domain. automotive 가 아니면 C++ 프롬프트에서 score::Result
+                  이름을 사용하지 않음(기본 automotive = 기존 동작).
     """
     if language not in SUPPORTED_LANGUAGES:
         raise ValueError(f"지원하지 않는 언어: {language!r}")

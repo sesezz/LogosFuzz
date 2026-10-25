@@ -213,7 +213,7 @@ function renderHeader(data) {
   const meta = data.metadata || {};
   const commit = meta.commit ? ` @${meta.commit}` : "";
   const domain = meta.domain ? ` (${meta.domain})` : "";
-  // 탭 제목에도 대상 이름과 도메인을 보여 준다. 메타데이터가 없으면 기본 제목을 그대로 둔다.
+  // 탭 제목에도 대상 이름과 도메인 표시. 메타데이터가 없으면 기본 제목 유지
   document.title = meta.target
     ? `LogosFuzz — ${meta.target}${domain} 퍼징 결과 리포트`
     : "LogosFuzz — 퍼징 결과 리포트";

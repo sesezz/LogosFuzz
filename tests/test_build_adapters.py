@@ -1,4 +1,4 @@
-"""GEN 빌드 어댑터 테스트 (GENERIC-B). 외부 명령은 FakeRunner 로 대신해서 cmake/clang 없이 돈다."""
+"""GEN 빌드 어댑터 테스트 (GENERIC-B). 외부 명령은 FakeRunner 로 대체하여 cmake/clang 없이 동작함."""
 from __future__ import annotations
 
 import json
@@ -26,7 +26,7 @@ HARNESS = "int LLVMFuzzerTestOneInput(const unsigned char *d, unsigned long n) {
 
 
 class FakeRunner:
-    """외부 명령을 실행하지 않고 호출만 기록한다. 빌드가 만드는 파일은 흉내 낸다."""
+    """외부 명령을 실행하지 않고 호출만 기록함. 빌드가 만드는 파일은 흉내만 냄."""
 
     def __init__(self, libraries=(), fail=None):
         self.calls = []
@@ -89,7 +89,7 @@ def make_adapter(tmp_path, *, profile=None, runner=None, cls=CMakeAdapter, which
 # 계약: 승격과 재수출
 # --------------------------------------------------------------------------- #
 def test_bazel_adapter_reexports_the_promoted_types():
-    """승격 뒤에도 기존 import 경로가 같은 객체를 가리킨다 (Bazel 동작 불변)."""
+    """승격 뒤에도 기존 import 경로가 같은 객체를 가리킴 (Bazel 동작 불변)."""
     assert bazel_adapter.BuildResult is BuildResult
     assert bazel_adapter.BuildAdapter is BuildAdapter
 
@@ -105,11 +105,11 @@ def test_short_log_covers_build_tool_errors_compiler_and_linker_lines():
     )
     short = BuildResult(ok=False, target="t", log=log).short_log
 
-    assert short.splitlines()[0].startswith("CMake Error")           # 빌드 도구의 오류 줄이 먼저
+    assert short.splitlines()[0].startswith("CMake Error")           # 빌드 도구의 오류 줄 우선
     assert "ERROR: bazel style line" in short
     assert "expected ';'" in short
     assert "undefined reference to `foo'" in short and "undefined symbol: bar" in short
-    assert "unused variable" not in short                            # 경고는 싣지 않는다
+    assert "unused variable" not in short                            # 경고는 제외
     assert "Cannot find source file" not in short                    # 진단이 아닌 줄
 
 
@@ -146,7 +146,7 @@ def test_prepare_configures_then_builds_with_instrumentation(tmp_path):
     assert configure.argv[:5] == ["cmake", "-S", str(adapter.source_dir), "-B", str(adapter.build_dir)]
     assert configure.argv[5:7] == ["-G", "Ninja"]
     assert "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON" in configure.argv
-    assert configure.argv[-2:] == ["-DBUILD_SHARED_LIBS=OFF", "-DENABLE_EXTERNAL_LIBS=OFF"]  # 프로필 인자가 뒤
+    assert configure.argv[-2:] == ["-DBUILD_SHARED_LIBS=OFF", "-DENABLE_EXTERNAL_LIBS=OFF"]  # 프로필 인자는 뒤쪽 배치
     env = configure.env
     assert env["CC"] == "clang" and env["CXX"] == "clang++"
     for flag in ("-g", "-O1", "-fno-omit-frame-pointer", "-fsanitize=address,undefined,fuzzer-no-link"):
@@ -165,10 +165,10 @@ def test_prepare_is_cached_and_force_reruns(tmp_path):
     assert adapter.prepare().ok and len(runner.calls) == 2
 
     again = adapter.prepare()
-    assert again.ok and "캐시" in again.log and len(runner.calls) == 2   # 명령을 다시 실행하지 않는다
+    assert again.ok and "캐시" in again.log and len(runner.calls) == 2   # 명령 재실행 없음
 
     assert adapter.prepare(force=True).ok and len(runner.calls) == 4
-    assert "-G" not in runner.calls[2].argv      # 캐시가 있으면 생성기를 다시 지정하지 않는다(거부당함)
+    assert "-G" not in runner.calls[2].argv      # 캐시가 있으면 생성기를 다시 지정하지 않음(지정 시 거부됨)
 
 
 def test_prepare_reports_a_missing_source_tree(tmp_path):
@@ -191,7 +191,7 @@ def test_prepare_stops_after_a_failed_configure(tmp_path):
 
     result = adapter.prepare()
 
-    assert not result.ok and len(runner.calls) == 1                  # build 단계로 가지 않는다
+    assert not result.ok and len(runner.calls) == 1                  # build 단계로 진행하지 않음
     assert "CMake Error" in result.short_log
 
 
@@ -209,7 +209,7 @@ def test_coverage_variant_uses_a_separate_instrumented_build_dir(tmp_path):
     adapter, _ = make_adapter(tmp_path, profile=profile, runner=runner, coverage=True)
 
     assert adapter.build_dir == profile.abs("build-fuzz-cov")
-    assert adapter.libraries == [profile.abs("build-fuzz-cov/libx.a")]   # 라이브러리 경로도 -cov 로
+    assert adapter.libraries == [profile.abs("build-fuzz-cov/libx.a")]   # 라이브러리 경로도 -cov 로 변환
     result = adapter.prepare()
     assert result.ok and result.target == "cmake:x:cov"
     cflags = runner.calls[0].env["CFLAGS"]
@@ -300,13 +300,13 @@ def test_remove_deletes_source_and_binary_and_is_idempotent(tmp_path):
     assert source.is_file() and binary.is_file()
 
     adapter.remove(SPEC)
-    adapter.remove(SPEC)                                              # 두 번째는 오류 없이 지나간다
+    adapter.remove(SPEC)                                              # 두 번째 호출도 오류 없음
 
     assert not source.exists() and not binary.exists() and adapter.binary_path(SPEC) is None
 
 
 def test_fuzz_target_spec_from_bazel_is_accepted_as_is(tmp_path):
-    """Bazel 명세(name/package/srcs)도 그대로 받는다 — 기존 하네스 쌍 코드를 바꾸지 않아도 된다."""
+    """Bazel 명세(name/package/srcs)도 그대로 수용 — 기존 하네스 쌍 코드 변경 불필요."""
     adapter, _ = make_adapter(tmp_path)
     spec = FuzzTargetSpec(name="lg_x_fuzz_test", package="score/x/fuzz/lg_x",
                           srcs=("lg_x_fuzz.cc",), deps=())
@@ -412,7 +412,7 @@ def test_cli_rejects_bad_profiles_and_bazel_profiles(tmp_path, capsys):
 
 
 # --------------------------------------------------------------------------- #
-# 보안: spec 의 package·name 이 작업 디렉터리 밖을 가리키면 쓰거나 지우지 않는다
+# 보안: spec 의 package·name 이 작업 디렉터리 밖을 가리키면 쓰기·삭제 거부
 # --------------------------------------------------------------------------- #
 def test_cmake_adapter_refuses_paths_outside_work_dir(tmp_path):
     from logosfuzz.common.safe_path import UnsafePathError

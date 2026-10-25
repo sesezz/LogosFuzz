@@ -2,8 +2,8 @@
 CMake / prebuilt 어댑터 확인용 진입점 (GENERIC-B)
 ================================================
 
-컨트롤러(``--mode generic``) 없이 **어댑터만** 시험한다. 손으로 쓴 하네스를 프로필의
-라이브러리에 링크해 퍼저 바이너리를 만든다.
+컨트롤러(``--mode generic``) 없이 **어댑터만** 시험하는 도구임. 손으로 쓴 하네스를 프로필의
+라이브러리에 링크해 퍼저 바이너리를 생성.
 
     # 라이브러리만 계측 빌드 (캐시됨)
     python -m logosfuzz.generate.build --profile targets/libsndfile.json --prepare-only
@@ -16,8 +16,8 @@ CMake / prebuilt 어댑터 확인용 진입점 (GENERIC-B)
     python -m logosfuzz.generate.build --profile targets/libsndfile.json \\
         --harness my_fuzz.c --coverage
 
-성공하면 실행 파일 경로를 출력한다. 그 경로가 EXE 의 ``LogicGroup.harness_path`` 로 그대로 쓰인다.
-Bazel 프로필은 이 도구 대신 ``ctr_06_01_controller --mode bazel`` 로 빌드한다.
+성공하면 실행 파일 경로를 출력함. 그 경로가 EXE 의 ``LogicGroup.harness_path`` 로 그대로 사용됨.
+Bazel 프로필은 이 도구 대신 ``ctr_06_01_controller --mode bazel`` 로 빌드.
 """
 from __future__ import annotations
 

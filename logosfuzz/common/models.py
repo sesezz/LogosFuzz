@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# 실시간 신호 종류(kind) 상수 — 자동차 도메인 특화. SCH 가 ``domain == "automotive"`` 일 때만 뽑는다.
+# 실시간 신호 종류(kind) 상수 — 자동차 도메인 특화. SCH 가 ``domain == "automotive"`` 일 때만 추출함.
 SIGNAL_WATCHDOG = "watchdog"        # 워치독 리셋 주기
 SIGNAL_CONTROL_LOOP = "control_loop"  # 실시간 제어 루프 주기
 SIGNAL_CAN_CYCLE = "can_cycle"      # CAN 메시지 주기

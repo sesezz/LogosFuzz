@@ -41,12 +41,12 @@ _DRAFT_SYSTEM_TEMPLATE = (
     "harness. Return ONLY the full source inside a single ```c code block. The file "
     "must define LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)."
 )
-# 기존 호출부·테스트가 읽는 값(automotive 문구). 도메인별 문구는 draft_system_prompt().
+# 기존 호출부·테스트가 읽는 값(automotive 문구). 도메인별 문구는 draft_system_prompt() 사용
 DRAFT_SYSTEM_PROMPT = _DRAFT_SYSTEM_TEMPLATE.format(subject=domain_subject("automotive"))
 
 
 def draft_system_prompt(domain: str = "automotive") -> str:
-    """프로필 domain 에 맞는 초안 시스템 프롬프트."""
+    """프로필 domain 에 맞는 초안 시스템 프롬프트 반환."""
     return _DRAFT_SYSTEM_TEMPLATE.format(subject=domain_subject(domain))
 
 FALLBACK_SOURCE = (

@@ -27,10 +27,10 @@ _GROUP_STATUSES = {"passed", "failed", "timeout", "crashed"}
 
 
 def profile_metadata(profile: Any, **extra: Any) -> dict[str, Any]:
-    """대상 프로필에서 리포트 ``metadata`` 를 만든다 (``project`` / ``target`` / ``domain``).
+    """대상 프로필에서 리포트 ``metadata`` 생성 (``project`` / ``target`` / ``domain``).
 
-    웹 리포트가 제목에 대상 이름과 도메인을 보여 주는 데 쓴다. ``extra`` 로
-    ``commit`` / ``environment`` 같은 값을 덧붙일 수 있다.
+    웹 리포트가 제목에 대상 이름과 도메인을 표시하는 데 사용. ``extra`` 로
+    ``commit`` / ``environment`` 같은 값을 추가 가능.
     """
     meta: dict[str, Any] = {
         "project": str(profile.name),
