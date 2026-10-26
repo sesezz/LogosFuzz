@@ -30,7 +30,8 @@ class CrashCollector:
     _seen: set[str] = field(default_factory=set)
 
     def _digest(self, path: Path) -> str:
-        h = hashlib.sha1()
+        # 중복 크래시 판별용 지문이다(보안 용도 아님).
+        h = hashlib.sha1(usedforsecurity=False)
         h.update(path.read_bytes())
         return h.hexdigest()
 

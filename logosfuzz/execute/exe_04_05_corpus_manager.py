@@ -213,7 +213,7 @@ class SeedEntry:
 
     @property
     def checksum(self) -> str:
-        return hashlib.md5(self.data).hexdigest()
+        return hashlib.md5(self.data, usedforsecurity=False).hexdigest()  # 중복 판별용(보안 용도 아님)
 
 
 @dataclass

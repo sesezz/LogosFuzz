@@ -32,6 +32,8 @@ Bazel 은 하네스를 ``cc_fuzz_test`` 로 BUILD 에 선언하고 deps 로 링�
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -41,6 +43,8 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING, Callable, Dict, List, Mapping, Optional, Sequence,
 )
+
+from logosfuzz.common.security import minimal_env, safe_component, safe_join
 
 from .base import BuildResult, HarnessSpecLike
 
@@ -55,6 +59,11 @@ _BASE_FLAGS = ("-g", "-O1", "-fno-omit-frame-pointer")
 
 DEFAULT_BUILD_DIR = "build-fuzz"
 COVERAGE_SUFFIX = "-cov"
+# 외부 명령 1회의 기본 상한. CMake configure 는 대상 프로젝트가 정한 스크립트를 실행하므로
+# 상한 없이 두면 멈춘 configure 하나가 파이프라인 전체를 붙잡는다(자원 관리, CWE-400).
+DEFAULT_TIMEOUT_S = 3600.0
+# 빌드 설정 지문. 소스·컴파일러·플래그가 바뀌었는데 예전 산출물을 캐시로 재사용하지 않게 한다.
+FINGERPRINT_FILE = ".logosfuzz-build.json"
 
 
 @dataclass
@@ -127,7 +136,7 @@ class CMakeAdapter:
         self.coverage = coverage
         self.runner: Runner = runner or default_runner
         self.jobs = jobs or os.cpu_count() or 4
-        self.timeout_s = timeout_s
+        self.timeout_s = DEFAULT_TIMEOUT_S if timeout_s is None else timeout_s
         self.cc = cc
         self.cxx = cxx
         self._which = which
@@ -192,10 +201,14 @@ class CMakeAdapter:
         return flags
 
     def _env(self) -> Dict[str, str]:
+        """빌드 환경. 부모 환경을 통째로 복사하지 않는다.
+
+        configure/build 는 대상 프로젝트의 CMake 스크립트를 실행한다. ``os.environ`` 을
+        그대로 주면 ``OPENAI_API_KEY`` 나 클라우드 자격증명을 비신뢰 빌드 코드가 읽을 수
+        있으므로, 허용 목록으로 새 환경을 만든다(``common.security.minimal_env``).
+        """
         flags = " ".join(self.compile_flags())
-        env = dict(os.environ)
-        env.update({"CC": self.cc, "CXX": self.cxx, "CFLAGS": flags, "CXXFLAGS": flags})
-        return env
+        return minimal_env({"CC": self.cc, "CXX": self.cxx, "CFLAGS": flags, "CXXFLAGS": flags})
 
     def _bin_dir(self) -> Path:
         return self.work_dir / ("bin" + COVERAGE_SUFFIX if self.coverage else "bin")
@@ -204,20 +217,70 @@ class CMakeAdapter:
         srcs = list(spec.srcs)
         if len(srcs) != 1:
             raise ValueError(f"하네스 소스는 1개여야 한다(현재 {len(srcs)}개): {srcs}")
-        return self.work_dir / "harness" / spec.package / srcs[0]
+        # package·srcs 는 생성기가 정한 값이라 '../' 나 절대경로가 섞이면 작업 디렉터리
+        # 밖을 덮어쓴다. 칸마다 검사하고 결과가 harness/ 안인지 확인한다.
+        return safe_join(self.work_dir / "harness", spec.package, srcs[0], what="하네스 경로")
+
+    def _binary_file(self, spec: HarnessSpecLike) -> Path:
+        return self._bin_dir() / safe_component(spec.name, what="하네스 이름")
 
     def binary_path(self, spec: HarnessSpecLike) -> Optional[Path]:
         """빌드된 실행 파일의 실제 경로. 없으면 None."""
-        path = self._bin_dir() / spec.name
+        path = self._binary_file(spec)
         return path if path.is_file() else None
 
     # ------------------------------------------------------------------ #
     # prepare: 라이브러리 계측 빌드 (캐시)
     # ------------------------------------------------------------------ #
+    def _source_revision(self) -> str:
+        """대상 소스의 git commit(있으면). 외부 명령 없이 .git 을 직접 읽는다."""
+        git = self.source_dir / ".git"
+        try:
+            head = (git / "HEAD").read_text(encoding="utf-8").strip()
+            if head.startswith("ref: "):
+                ref = git / head[5:]
+                return ref.read_text(encoding="utf-8").strip() if ref.is_file() else head
+            return head
+        except OSError:
+            return ""
+
+    def build_fingerprint(self) -> str:
+        """캐시 키: 소스 commit·컴파일러·플래그·configure 인자·라이브러리 목록의 해시."""
+        material = {
+            "source": str(self.source_dir.resolve()),
+            "revision": self._source_revision(),
+            "cc": self.cc, "cxx": self.cxx,
+            "compile_flags": self.compile_flags(),
+            "configure_args": list(self.profile.build.configure_args),
+            "libraries": [str(lib) for lib in self.libraries],
+            "coverage": self.coverage,
+        }
+        blob = json.dumps(material, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        return hashlib.sha256(blob).hexdigest()
+
+    def _fingerprint_path(self) -> Path:
+        return self.build_dir / FINGERPRINT_FILE
+
     def _is_built(self) -> bool:
         if not (self.build_dir / "CMakeCache.txt").is_file():
             return False
-        return all(lib.is_file() for lib in self.libraries)
+        if not all(lib.is_file() for lib in self.libraries):
+            return False
+        # 지문이 없거나(예전 캐시) 다르면 설정이 바뀐 것이므로 다시 빌드한다.
+        try:
+            saved = json.loads(self._fingerprint_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return isinstance(saved, dict) and saved.get("fingerprint") == self.build_fingerprint()
+
+    def _write_fingerprint(self) -> Optional[str]:
+        """지문을 남긴다. 실패하면 오류 문구를 돌려준다(다음 실행이 캐시를 못 쓸 뿐)."""
+        try:
+            self._fingerprint_path().write_text(
+                json.dumps({"fingerprint": self.build_fingerprint()}), encoding="utf-8")
+            return None
+        except OSError as exc:
+            return f"WARNING: 빌드 지문을 저장하지 못했다({exc}) — 다음 실행은 캐시를 쓰지 않는다"
 
     def prepare(self, *, force: bool = False) -> BuildResult:
         """대상 라이브러리를 계측해서 한 번 빌드한다. 이미 되어 있으면 건너뛴다(캐시)."""
@@ -262,6 +325,9 @@ class CMakeAdapter:
             return BuildResult(ok=False, target=target, log="\n".join(logs),
                                duration_s=time.monotonic() - started, command=tuple(build))
 
+        warning = self._write_fingerprint()
+        if warning:
+            logs.append(warning)
         self._prepared = True
         return BuildResult(ok=True, target=target, log="\n".join(logs),
                            duration_s=time.monotonic() - started, command=tuple(build))
@@ -296,7 +362,7 @@ class CMakeAdapter:
                                    duration_s=time.monotonic() - started,
                                    command=prepared.command)
 
-        binary = self._bin_dir() / spec.name
+        binary = self._binary_file(spec)
         binary.parent.mkdir(parents=True, exist_ok=True)
         command = [
             self.compiler, *self.link_flags(),
@@ -306,7 +372,7 @@ class CMakeAdapter:
             *self.profile.build.link_flags,
             "-o", str(binary),
         ]
-        result = self.runner(command, None, None, self.timeout_s)
+        result = self.runner(command, None, minimal_env(), self.timeout_s)
         log = result.stdout + result.stderr
         ok = result.returncode == 0 and binary.is_file()
         if result.returncode == 0 and not binary.is_file():
@@ -319,7 +385,7 @@ class CMakeAdapter:
 
     def remove(self, spec: HarnessSpecLike) -> None:
         """생성한 하네스 소스와 바이너리를 지운다(없어도 오류 없음)."""
-        for path in (self._harness_path(spec), self._bin_dir() / spec.name):
+        for path in (self._harness_path(spec), self._binary_file(spec)):
             try:
                 path.unlink()
             except FileNotFoundError:

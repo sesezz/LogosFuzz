@@ -271,7 +271,9 @@ def parse_query_xml(xml_text: str, workspace: str,
     """Parse ``bazel query --output=xml`` into :class:`BazelGraph`."""
     workspace_path = str(Path(workspace).resolve())
     try:
-        query = ET.fromstring(xml_text)
+        # 입력은 이 도구가 직접 실행한 `bazel query --output=xml` 의 출력이다. 표준 ElementTree 는
+        # 외부 엔티티를 해석하지 않고, 엔티티 확장 폭탄은 expat(>=2.4.1)이 막는다.
+        query = ET.fromstring(xml_text)  # nosec B314
     except ET.ParseError as exc:
         raise BazelQueryError(f"invalid Bazel query XML: {exc}") from exc
 

@@ -45,6 +45,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
+from logosfuzz.common.security import minimal_env
+
 from .compiler import Compiler
 from .models import CompileResult, HarnessDraft
 
@@ -67,6 +69,7 @@ def _default_runner(argv: Sequence[str], cwd: str, timeout: float) -> BazelRunRe
         proc = subprocess.run(
             list(argv), cwd=cwd, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=timeout,
+            env=minimal_env(network=True),   # 외부 저장소 받기용 프록시만, 비밀값 제외
         )
         return BazelRunResult(proc.returncode, proc.stdout or "", proc.stderr or "")
     except subprocess.TimeoutExpired as exc:
