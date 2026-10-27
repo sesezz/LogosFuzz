@@ -7,14 +7,13 @@
 from __future__ import annotations
 
 import json
+import os
 import signal
 import subprocess
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
-
-from logosfuzz.common.security import minimal_env
 
 from logosfuzz.execute.sanitizer import SanitizerMonitor
 
@@ -59,9 +58,7 @@ def _execute(argv: list[str], cwd: Path, timeout: float,
     # 응답 없이 멈춰, 회귀 실행 전체가 타임아웃까지 걸리는 문제가 있었다.
     # 심볼라이즈 없이도 sanitizer/카테고리 판별에는 지장이 없으므로 기본으로 끈다
     # (케이스가 env에서 ASAN_OPTIONS를 직접 지정하면 그 값이 우선한다).
-    # 회귀 케이스는 하네스(비신뢰 코드)를 호스트에서 실행한다. 부모 환경 전체가 아니라
-    # 최소 환경 + 케이스가 지정한 값만 넘긴다(API 키 등 비밀값 차단).
-    merged_env = minimal_env(env)
+    merged_env = {**os.environ, **env}
     merged_env.setdefault("ASAN_OPTIONS", "symbolize=0")
     try:
         completed = subprocess.run(

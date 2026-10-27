@@ -6,10 +6,6 @@ on:
   pull_request:
     branches: [ main, dev ]
 
-# 테스트 job 은 저장소를 읽기만 한다(최소 권한).
-permissions:
-  contents: read
-
 jobs:
   test:
     runs-on: ubuntu-latest

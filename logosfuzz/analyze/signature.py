@@ -168,8 +168,7 @@ def signature_key(record: CrashRecord, depth: int = 3) -> str:
 
 def signature_digest(key: str) -> str:
     """시그니처 문자열 → 짧고 안정적인 다이제스트(클러스터 ID용)."""
-    # 보안 용도가 아니라 클러스터 식별용 지문이다(서명·무결성 검증에 쓰지 않는다).
-    return hashlib.sha1(key.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
 
 
 def cluster_id_for(record: CrashRecord, depth: int = 3) -> str:
