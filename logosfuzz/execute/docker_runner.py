@@ -20,10 +20,12 @@
 
 from __future__ import annotations
 
+import collections
 import os
 import queue
 import shlex
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -31,6 +33,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from logosfuzz.common.logging import get_logger
+from logosfuzz.common.security import minimal_env, safe_component, safe_join
 from logosfuzz.config import Engine, FuzzConfig, LogicGroup
 from logosfuzz.execute.errors import (
     DockerUnavailableError,
@@ -48,6 +52,66 @@ Executor = Callable[[list, float, OnLine], "ProcResult"]
 # 큐 소비 폴링 주기(초). 이 값 이상 자식이 침묵해도 이 주기마다 데드라인을
 # 재확인하므로, 무한정 블로킹되지 않는다.
 _POLL_INTERVAL_SEC = 0.5
+
+# 출력 상한(자원 관리, CWE-400). 하네스는 비신뢰 코드라 출력을 무한히 쏟을 수 있다.
+#   - 큐: 가득 차면 읽기 스레드가 기다리고, 그동안 자식은 파이프에서 막힌다(배압).
+#   - 줄: 개행 없는 거대한 한 줄이 메모리를 다 먹지 않도록 자른다.
+#   - 보존: 스트림마다 앞쪽 _KEEP_HEAD_LINES 줄과 마지막 _KEEP_TAIL_LINES 줄만 남긴다.
+#     크래시 원인(ASAN 보고)은 끝에 오므로 꼬리를 반드시 남긴다. 모니터(on_line)는
+#     버린 줄도 모두 본다 - 통계·새니타이저 판정은 상한과 무관하다.
+_QUEUE_MAXSIZE = 10000
+_MAX_LINE_CHARS = 64 * 1024
+_KEEP_HEAD_LINES = 2000
+_KEEP_TAIL_LINES = 20000
+
+# Docker CLI 가 데몬에 붙는 데 필요한 변수. 컨테이너 안으로는 전달되지 않는다.
+_DOCKER_CLI_ENV = ("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
+                   "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY")
+
+_log = get_logger("EXE-04-01")
+
+
+class _BoundedLines:
+    """앞 N줄 + 뒤 M줄만 보존하는 줄 버퍼."""
+
+    def __init__(self, head: int = _KEEP_HEAD_LINES, tail: int = _KEEP_TAIL_LINES) -> None:
+        self.head: list[str] = []
+        self.tail: "collections.deque[str]" = collections.deque(maxlen=tail)
+        self._head_max = head
+        self.dropped = 0
+
+    def append(self, line: str) -> None:
+        if len(self.head) < self._head_max:
+            self.head.append(line)
+            return
+        if len(self.tail) == self.tail.maxlen:
+            self.dropped += 1
+        self.tail.append(line)
+
+    def text(self) -> str:
+        lines = list(self.head)
+        if self.dropped:
+            lines.append(f"... (출력 상한 초과로 {self.dropped}줄 생략) ...")
+        lines.extend(self.tail)
+        return "\n".join(lines)
+
+
+def _kill_tree(proc: "subprocess.Popen", sig: int) -> None:
+    """자식과 그 자손(같은 프로세스 그룹)에 신호를 보낸다.
+
+    부모만 죽이면 하네스가 fork 한 자손이나 docker CLI 아래 프로세스가 남을 수 있다.
+    """
+    killpg = getattr(os, "killpg", None)
+    if killpg is not None:
+        try:
+            killpg(proc.pid, sig)
+            return
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    try:
+        proc.send_signal(sig)
+    except (ProcessLookupError, OSError):
+        pass
 
 
 @dataclass
@@ -72,6 +136,13 @@ class GroupResult:
     coverage: object = None  # EXE-04-04 CoverageSummary(없으면 None); fuzz_session이 채움
     stdout_log: Optional[str] = None  # 표준 출력 로그 파일 경로(저장 실패 시 None)
     stderr_log: Optional[str] = None  # 표준 오류 로그 파일 경로
+    # 증적(로그) 저장 실패 사유. 비어 있지 않으면 이 결과는 "증적 불완전"이다 -
+    # 저장 실패를 정상 완료처럼 보고하지 않기 위해 남긴다.
+    log_error: str = ""
+
+    @property
+    def evidence_complete(self) -> bool:
+        return not self.log_error
 
     @property
     def failed_to_start(self) -> bool:
@@ -116,19 +187,29 @@ def _default_executor(argv: list, timeout: float, on_line: OnLine) -> ProcResult
     ASAN이 크래시 시 심볼라이저를 내부에서 fork하며 응답 없이 대기하는
     경우 90초 넘게 하드 타임아웃까지 멈춘 뒤에야 겨우 빠져나왔다).
     """
+    # 부모 환경(API 키·클라우드 자격증명)을 하네스나 docker CLI 에 물려주지 않는다.
+    # 새 세션으로 띄워 타임아웃 때 자손까지 프로세스 그룹 단위로 정리한다.
+    popen_kwargs = {"start_new_session": True} if os.name == "posix" else {}
     proc = subprocess.Popen(
         argv,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
         text=True,
+        errors="replace",
         bufsize=1,
+        env=minimal_env(allow=_DOCKER_CLI_ENV),
+        **popen_kwargs,
     )
 
-    lines: "queue.Queue[tuple[str, Optional[str]]]" = queue.Queue()
+    lines: "queue.Queue[tuple[str, Optional[str]]]" = queue.Queue(maxsize=_QUEUE_MAXSIZE)
 
     def _pump(stream, tag: str) -> None:
         try:
-            for line in stream:
+            while True:
+                line = stream.readline(_MAX_LINE_CHARS)
+                if not line:
+                    break
                 lines.put((tag, line.rstrip("\n")))
         finally:
             lines.put((tag, None))  # EOF 신호
@@ -141,8 +222,8 @@ def _default_executor(argv: list, timeout: float, on_line: OnLine) -> ProcResult
     for reader in readers:
         reader.start()
 
-    stdout_lines: list[str] = []
-    stderr_lines: list[str] = []
+    stdout_lines = _BoundedLines()
+    stderr_lines = _BoundedLines()
     deadline = time.monotonic() + timeout
     timed_out = False
     open_streams = len(readers)
@@ -166,20 +247,25 @@ def _default_executor(argv: list, timeout: float, on_line: OnLine) -> ProcResult
     if open_streams > 0:
         timed_out = True
 
+    kill_sig = getattr(signal, "SIGKILL", signal.SIGTERM)
     if timed_out:
-        proc.terminate()
+        _kill_tree(proc, signal.SIGTERM)
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            _kill_tree(proc, kill_sig)
             proc.wait()
     else:
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             timed_out = True
-            proc.kill()
+            _kill_tree(proc, kill_sig)
             proc.wait()
+
+    # 큐가 가득 차 읽기 스레드가 막혀 있을 수 있으니, 스레드를 기다리기 전에 비운다.
+    while _drain_once(block=False):
+        pass
 
     # 프로세스가 끝난 뒤에도 큐에 남아있던 마지막 줄들을 마저 비운다(막
     # 종료된 시점까지 나온 출력을 최대한 보존 - 특히 크래시 직전 ASAN 로그).
@@ -191,8 +277,8 @@ def _default_executor(argv: list, timeout: float, on_line: OnLine) -> ProcResult
     return ProcResult(
         exit_code=proc.returncode if proc.returncode is not None else -1,
         timed_out=timed_out,
-        stdout="\n".join(stdout_lines),
-        stderr="\n".join(stderr_lines),
+        stdout=stdout_lines.text(),
+        stderr=stderr_lines.text(),
     )
 
 
@@ -282,7 +368,8 @@ class DockerIsolationRunner:
                 parts.append(shlex.quote(corpus))
             return "chmod +x %s 2>/dev/null; %s" % (shlex.quote(harness), " ".join(parts))
         # AFL++
-        indir = shlex.quote(corpus) if corpus else "/tmp/seed"
+        # 컨테이너 전용 /tmp(--rm 으로 매번 새로 생긴다)라 호스트 임시 디렉터리 경쟁과 무관하다.
+        indir = shlex.quote(corpus) if corpus else "/tmp/seed"  # nosec B108
         seed_prep = "" if corpus else "mkdir -p /tmp/seed && printf a > /tmp/seed/seed;"
         return (
             f"{seed_prep} chmod +x {shlex.quote(harness)} 2>/dev/null; "
@@ -355,7 +442,9 @@ class DockerIsolationRunner:
             if group.corpus_dir:
                 argv.append(str(group.corpus_dir))
         else:
-            argv = ["afl-fuzz", "-i", str(group.corpus_dir or "/tmp/seed"),
+            # 호스트에서는 예측 가능한 /tmp/seed 를 쓰지 않는다(다른 사용자가 미리 만들어 둔
+            # 디렉터리·심볼릭 링크를 따라갈 수 있다). 출력 디렉터리 아래에 시드를 만든다.
+            argv = ["afl-fuzz", "-i", str(group.corpus_dir or self._local_seed_dir()),
                     "-o", str(self.config.output_dir / "afl"), "-V", str(t),
                     "--", harness, "@@"]
         # 호스트 실행에서는 env 프리픽스로 환경변수를 주입한다(기본 executor
@@ -375,9 +464,20 @@ class DockerIsolationRunner:
         argv = ["env", *[f"{k}={v}" for k, v in pairs.items()], *argv]
         return argv
 
+    def _local_seed_dir(self) -> Path:
+        seed_dir = self.config.output_dir / "afl-seed"
+        seed_dir.mkdir(parents=True, exist_ok=True)
+        seed = seed_dir / "seed"
+        if not seed.exists():
+            seed.write_bytes(b"a")
+        return seed_dir
+
     # ---- 그룹 1개 실행 ------------------------------------------------
     def run_group(self, group: LogicGroup, monitor: Optional[StatsMonitor] = None,
                   sanitizer_monitor: Optional[SanitizerMonitor] = None) -> GroupResult:
+        # 그룹 이름은 컨테이너 이름·로그 디렉터리·커버리지 파일 이름이 된다.
+        # '../x' 같은 값이 출력 디렉터리 밖에 쓰지 못하게 실행 전에 거부한다.
+        safe_component(group.name, what="로직 그룹 이름")
         harness_file = self.harness_binary_path(group)
         if not harness_file.exists():
             raise HarnessNotFoundError(
@@ -402,7 +502,7 @@ class DockerIsolationRunner:
         duration = time.monotonic() - start
         mon.finish()
         findings = sanitizer.finish()
-        stdout_log, stderr_log = self._write_run_logs(group, result)
+        stdout_log, stderr_log, log_error = self._write_run_logs(group, result)
 
         return GroupResult(
             group=group.name,
@@ -414,24 +514,27 @@ class DockerIsolationRunner:
             sanitizer_findings=findings,
             stdout_log=stdout_log,
             stderr_log=stderr_log,
+            log_error=log_error,
         )
 
     def _write_run_logs(self, group: LogicGroup, result: "ProcResult"
-                        ) -> tuple[Optional[str], Optional[str]]:
+                        ) -> tuple[Optional[str], Optional[str], str]:
         """표준 출력/표준 오류 전문을 그룹별 로그 파일로 남긴다.
 
         정상 종료든 타임아웃이든 크래시든 상관없이 항상 저장한다 - 사후에
         "무엇이 출력됐는지" 볼 방법이 하나도 없으면 컴파일 실패나 실행 실패의
         원인을 알 수 없다. 로그 저장 자체가 실패해도(디스크 문제 등) 퍼징
-        결과를 잃으면 안 되므로 예외를 삼키고 경로만 None 으로 둔다.
+        결과를 잃으면 안 되므로 세션은 계속하되, 경로를 None 으로 두고 사유를
+        ``log_error`` 로 돌려줘 "증적 불완전"으로 표시한다(조용히 삼키지 않는다).
         """
-        log_dir = self.config.logs_dir / group.name
         try:
+            log_dir = safe_join(self.config.logs_dir, group.name, what="로직 그룹 이름")
             log_dir.mkdir(parents=True, exist_ok=True)
             stdout_path = log_dir / "run.stdout.log"
             stderr_path = log_dir / "run.stderr.log"
             stdout_path.write_text(result.stdout, encoding="utf-8")
             stderr_path.write_text(result.stderr, encoding="utf-8")
-            return str(stdout_path), str(stderr_path)
-        except OSError:
-            return None, None
+            return str(stdout_path), str(stderr_path), ""
+        except (OSError, ValueError) as exc:
+            _log.warning("실행 로그 저장 실패(group=%s): %s", group.name, exc)
+            return None, None, f"실행 로그 저장 실패: {exc}"

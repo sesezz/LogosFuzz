@@ -28,12 +28,15 @@ from __future__ import annotations
 
 import glob
 import json
+import os
 import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from logosfuzz.common.logging import get_logger
+from logosfuzz.common.security import minimal_env, safe_component
 from logosfuzz.config import CoverageMode, FuzzConfig, LogicGroup
 
 # ---------------------------------------------------------------------------
@@ -326,9 +329,28 @@ class CmdResult:
 CommandRunner = Callable[[list], CmdResult]
 
 
+_log = get_logger("EXE-04-04")
+
+# llvm-profdata / llvm-cov 1회의 상한. 상한이 없으면 멈춘 도구 하나가 세션 전체를 붙잡는다.
+DEFAULT_TOOL_TIMEOUT_SEC = 600
+
+
 def _default_runner(argv: list) -> CmdResult:
-    """subprocess 기반 기본 실행기(표준출력을 문자열로 캡처)."""
-    proc = subprocess.run(argv, capture_output=True, text=True)
+    """subprocess 기반 기본 실행기(표준출력을 문자열로 캡처).
+
+    부모 환경의 비밀값을 넘기지 않고(Docker CLI 접속 변수만 허용), 시간 상한을 둔다.
+    시간 초과·실행 불가도 예외 대신 실패 결과로 돌려준다.
+    """
+    env = minimal_env(allow=("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
+                             "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY"))
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, errors="replace",
+                              timeout=DEFAULT_TOOL_TIMEOUT_SEC, env=env,
+                              stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        return CmdResult(124, "", f"ERROR: 시간 초과({DEFAULT_TOOL_TIMEOUT_SEC}s): {argv[0]}")
+    except OSError as exc:
+        return CmdResult(127, "", f"ERROR: 실행할 수 없음: {argv[0]} ({exc})")
     return CmdResult(proc.returncode, proc.stdout, proc.stderr)
 
 
@@ -387,13 +409,14 @@ class CoverageCollector:
 
     # ---- 경로 헬퍼 ----------------------------------------------------
     def profraw_dir(self, group: LogicGroup) -> Path:
-        return self.cfg.coverage_dir / group.name
+        # 그룹 이름이 파일·디렉터리 이름과 컨테이너 셸 명령에 들어가므로 검사한다.
+        return self.cfg.coverage_dir / safe_component(group.name, what="로직 그룹 이름")
 
     def profdata_path(self, group: LogicGroup) -> Path:
-        return self.cfg.coverage_dir / f"{group.name}.profdata"
+        return self.cfg.coverage_dir / f"{safe_component(group.name, what='로직 그룹 이름')}.profdata"
 
     def export_path(self, group: LogicGroup) -> Path:
-        return self.cfg.coverage_dir / f"{group.name}.coverage.json"
+        return self.cfg.coverage_dir / f"{safe_component(group.name, what='로직 그룹 이름')}.coverage.json"
 
     def has_profraw(self, group: LogicGroup) -> bool:
         return bool(glob.glob(str(self.profraw_dir(group) / "*.profraw")))
@@ -411,7 +434,7 @@ class CoverageCollector:
         """``llvm-profdata merge`` argv. profraw들을 하나의 profdata로 병합."""
         sparse = ["-sparse"] if self.cfg.coverage_merge_sparse else []
         if self._in_docker():
-            g = group.name
+            g = safe_component(group.name, what="로직 그룹 이름")
             inner = " ".join([
                 shlex.quote(self.cfg.llvm_profdata), "merge", *sparse,
                 f"/out/{self.cfg.coverage_subdir}/{g}/*.profraw",
@@ -436,7 +459,7 @@ class CoverageCollector:
         """
         sources = list(self.cfg.coverage_sources)
         if self._in_docker():
-            g = group.name
+            g = safe_component(group.name, what="로직 그룹 이름")
             harness = f"/harness/{group.harness_path.name}"
             parts = [
                 shlex.quote(self.cfg.llvm_cov), "export", "-format=text",
@@ -452,13 +475,33 @@ class CoverageCollector:
         return argv
 
     def _docker_prefix(self) -> list:
+        """커버리지 도구 컨테이너. 퍼징 컨테이너와 같은 격리·자원 정책을 쓴다.
+
+        예전에는 ``--network none`` 만 있어 capability·권한 상승·자원 상한이 빠져
+        있었다. 퍼징 단계만 격리하고 후속 단계를 느슨하게 두면 정책이 단계마다
+        달라지므로, ``FuzzConfig`` 의 같은 설정을 그대로 적용한다.
+        """
         c = self.cfg
-        return [
-            self.docker_bin, "run", "--rm", "--network", "none",
+        argv = [
+            self.docker_bin, "run", "--rm",
+            "--network", c.network,
+            "--memory", c.memory_limit,
+            "--cpus", c.cpus,
+            "--pids-limit", str(c.pids_limit),
+        ]
+        if c.drop_all_caps:
+            argv += ["--cap-drop", "ALL"]
+        if c.no_new_privileges:
+            argv += ["--security-opt", "no-new-privileges"]
+        getuid, getgid = getattr(os, "getuid", None), getattr(os, "getgid", None)
+        if c.run_as_host_user and getuid and getgid:
+            argv += ["--user", f"{getuid()}:{getgid()}"]
+        argv += [
             "-v", f"{c.harness_dir.resolve()}:/harness:ro",
             "-v", f"{c.output_dir.resolve()}:/out",
             c.image,
         ]
+        return argv
 
     # ---- 실행 단계 ----------------------------------------------------
     def merge(self, group: LogicGroup) -> CmdResult:
@@ -495,8 +538,9 @@ class CoverageCollector:
             self.export_path(group).parent.mkdir(parents=True, exist_ok=True)
             self.export_path(group).write_text(exported.stdout, encoding="utf-8")
             summary.export_path = str(self.export_path(group))
-        except OSError:
-            pass
+        except OSError as exc:
+            # 요약은 돌려주되 원문 증적이 없다는 사실을 숨기지 않는다(export_path=None).
+            _log.warning("커버리지 export 원문 저장 실패(group=%s): %s", group.name, exc)
         return summary
 
 

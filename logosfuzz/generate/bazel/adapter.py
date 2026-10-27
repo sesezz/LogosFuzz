@@ -15,11 +15,15 @@ CMake 든 동일하다. 그래서 `build()` 는 **바이너리 경로**를 돌�
 """
 from __future__ import annotations
 
-import shutil
+import json
 import subprocess
 import time
 from pathlib import Path
 from typing import List, Optional, Sequence
+
+from logosfuzz.common.security import (
+    UnsafePathError, minimal_env, safe_component, safe_join,
+)
 
 from ..build.base import BuildAdapter, BuildResult, _DIAGNOSTIC_RE  # noqa: F401 (재수출)
 from .build_file import FuzzTargetSpec, render_build_file
@@ -31,6 +35,11 @@ DEFAULT_FUZZ_CONFIG = "fuzz"
 
 # 오버레이가 손대지 않은 원래 빌드가 여전히 도는지 보는 회귀 게이트.
 REGRESSION_CONFIG = "bl-x86_64-linux"
+
+# 어댑터가 패키지에 쓴 파일 목록. remove() 는 이 목록에 있는 파일만 지운다.
+MANIFEST_NAME = ".logosfuzz-generated.json"
+# BUILD 문자열 리터럴 안에 들어가면 Starlark 구문을 깨거나 규칙을 끼워 넣을 수 있는 문자.
+_UNSAFE_LITERAL_CHARS = ('"', "\\", "\n", "\r")
 
 
 # `BuildResult` / `BuildAdapter` 는 빌드 시스템 중립 위치(generate/build/base.py)로 옮겼다.
@@ -61,26 +70,72 @@ class BazelAdapter:
     # 생성
     # ------------------------------------------------------------------ #
     def package_dir(self, spec: FuzzTargetSpec) -> Path:
-        return self.workspace_root / spec.package
+        """생성 패키지의 경로. ``..``·절대경로로 워크스페이스 밖을 가리키면 거부한다."""
+        return safe_join(self.workspace_root, spec.package, what="Bazel 패키지 경로")
+
+    @staticmethod
+    def _check_spec(spec: FuzzTargetSpec) -> None:
+        safe_component(spec.name, what="cc_fuzz_test 이름")
+        for value in (*spec.srcs, *spec.deps, *spec.tags, *spec.corpus, *spec.dicts, spec.size):
+            if any(ch in value for ch in _UNSAFE_LITERAL_CHARS):
+                raise UnsafePathError(f"BUILD 문자열에 쓸 수 없는 문자가 있다: {value!r}")
+
+    def _manifest(self, pkg: Path) -> List[str]:
+        try:
+            data = json.loads((pkg / MANIFEST_NAME).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return [str(x) for x in data.get("files", [])] if isinstance(data, dict) else []
 
     def emit_build_definition(self, spec: FuzzTargetSpec, harness_source: str) -> Path:
-        pkg = self.package_dir(spec)
-        pkg.mkdir(parents=True, exist_ok=True)
-
         if len(spec.srcs) != 1:
             raise ValueError(
                 f"하네스 소스는 1개여야 한다(현재 {len(spec.srcs)}개): {spec.srcs}"
             )
-        (pkg / spec.srcs[0]).write_text(harness_source, encoding="utf-8")
-
+        self._check_spec(spec)
+        pkg = self.package_dir(spec)
+        src_path = safe_join(pkg, spec.srcs[0], what="하네스 소스 이름")
         build_path = pkg / "BUILD.bazel"
+
+        # 사용자가 원래 가지고 있던 BUILD 를 덮어쓰지 않는다. 이 어댑터가 만든 파일이거나
+        # (manifest 에 있음) 퍼징 타깃 전용 BUILD 일 때만 다시 쓴다.
+        if build_path.is_file() and "BUILD.bazel" not in self._manifest(pkg):
+            if "cc_fuzz_test(" not in build_path.read_text(encoding="utf-8", errors="replace"):
+                raise FileExistsError(
+                    f"생성기가 만들지 않은 BUILD 파일이 이미 있다: {build_path} "
+                    f"(다른 package 를 지정하라)"
+                )
+
+        pkg.mkdir(parents=True, exist_ok=True)
+        src_path.write_text(harness_source, encoding="utf-8")
         build_path.write_text(render_build_file(spec), encoding="utf-8")
+        files = sorted({*self._manifest(pkg), src_path.name, build_path.name})
+        (pkg / MANIFEST_NAME).write_text(json.dumps({"files": files}), encoding="utf-8")
         return build_path
 
     def remove(self, spec: FuzzTargetSpec) -> None:
+        """생성한 파일만 지운다. 패키지 디렉터리를 통째로 지우지 않는다.
+
+        예전에는 ``shutil.rmtree(pkg)`` 였는데, package 값이 잘못되면 워크스페이스의
+        원래 소스 디렉터리를 지울 수 있었다. manifest 에 기록된 파일만 지우고, 비어
+        있으면 디렉터리를 정리한다.
+        """
         pkg = self.package_dir(spec)
-        if pkg.exists():
-            shutil.rmtree(pkg)
+        if not pkg.is_dir():
+            return
+        for name in self._manifest(pkg):
+            try:
+                safe_join(pkg, name).unlink()
+            except (FileNotFoundError, UnsafePathError):
+                pass
+        try:
+            (pkg / MANIFEST_NAME).unlink()
+        except FileNotFoundError:
+            pass
+        try:
+            pkg.rmdir()                     # 비어 있을 때만 지워진다
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------ #
     # 빌드
@@ -93,12 +148,15 @@ class BazelAdapter:
         경로 목록에 진행 표시가 섞인다.
         """
         started = time.monotonic()
+        # Bazel 은 외부 저장소를 받아야 하므로 프록시 변수까지만 넘기고, API 키 같은
+        # 비밀값은 넘기지 않는다(빌드 규칙은 대상 저장소가 정한 비신뢰 코드다).
         proc = subprocess.run(
             list(args),
             cwd=self.workspace_root,
             capture_output=True,
             text=True,
             timeout=self.timeout_s,
+            env=minimal_env(network=True),
         )
         return proc.returncode, proc.stdout or "", proc.stderr or "", time.monotonic() - started
 

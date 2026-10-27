@@ -38,6 +38,8 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from typing import Callable, Optional
 
+from logosfuzz.common.security import minimal_env
+
 from logosfuzz.generate.contracts import HarnessArtifact
 from logosfuzz.generate.llm_review import MockStaticReviewer, StaticReviewer, StaticReviewResult
 
@@ -70,7 +72,9 @@ Runner = Callable[[list, float], RunResult]
 def _default_runner(argv: list, timeout: float) -> RunResult:
     """subprocess 기반 기본 실행기. stdout+stderr를 합쳐 반환한다."""
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        # 생성 하네스는 비신뢰 코드다. 부모 환경(API 키 등)을 물려주지 않는다.
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
+                              env=minimal_env(), stdin=subprocess.DEVNULL)
         return RunResult(
             exit_code=proc.returncode,
             timed_out=False,

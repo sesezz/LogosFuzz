@@ -478,9 +478,12 @@ def _default_llm(model: str, max_tokens: int):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
     def complete(prompt: str) -> str:
+        # 비밀값 마스킹·크기 상한을 거쳐 외부로 보낸다(llm.prepare_outbound).
+        from logosfuzz.generate.llm import prepare_outbound
+
         response = client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": prepare_outbound(prompt)}],
             max_tokens=max_tokens,
             temperature=0.2,
         )

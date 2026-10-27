@@ -18,6 +18,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Callable, List, Optional
 
+from logosfuzz.common.security import UnsafePathError, minimal_env, safe_join
+
 from .models import CompileResult, HarnessDraft
 
 # link_fuzzer(하네스가 libFuzzer 링크까지 요구하는지)를 받아 "-fsanitize=..."
@@ -153,15 +155,22 @@ class SubprocessCompiler(Compiler):
             )
         base = Path(self.workdir) if self.workdir else Path(tempfile.mkdtemp(prefix="logosfuzz_gen_"))
         base.mkdir(parents=True, exist_ok=True)
-        src_path = base / f"{draft.logic_group}{suffix}"
-        out_path = base / f"{draft.logic_group}.out"
+        # logic_group 은 파일 이름이 된다. '../x' 나 절대경로가 섞이면 작업 디렉터리 밖에
+        # 파일을 쓰므로 거부한다(경로 조작, CWE-22).
+        stem = draft.logic_group or "harness"
+        try:
+            src_path = safe_join(base, f"{stem}{suffix}", what="로직 그룹 이름")
+            out_path = safe_join(base, f"{stem}.out", what="로직 그룹 이름")
+        except UnsafePathError as e:
+            return CompileResult(ok=False, returncode=2, stderr=f"ERROR: {e}")
         src_path.write_text(code, encoding="utf-8")
         argv = self._build_argv(src_path, out_path, draft.language)
 
         start = time.monotonic()
         try:
             proc = subprocess.run(
-                argv, capture_output=True, text=True, timeout=self.timeout_sec
+                argv, capture_output=True, text=True, timeout=self.timeout_sec,
+                env=minimal_env(),
             )
             dur = time.monotonic() - start
             return CompileResult(
@@ -208,7 +217,7 @@ class FakeCompiler(Compiler):
         code = source if source is not None else draft.source
         if self.success_marker in code:
             return CompileResult(ok=True, returncode=0, stdout="", duration_sec=0.001,
-                                 artifact_path=f"/tmp/{draft.logic_group}.o")
+                                 artifact_path=f"/tmp/{draft.logic_group}.o")  # nosec B108 - 가짜 경로 문자열(파일을 만들지 않음)
         log = self.error_template.format(
             group=draft.logic_group, line=self.error_line, msg=self.error_message
         )
