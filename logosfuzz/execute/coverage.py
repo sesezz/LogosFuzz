@@ -413,10 +413,10 @@ class CoverageCollector:
         return self.cfg.coverage_dir / safe_component(group.name, what="로직 그룹 이름")
 
     def profdata_path(self, group: LogicGroup) -> Path:
-        return self.cfg.coverage_dir / f"{safe_component(group.name, what="로직 그룹 이름")}.profdata"
+        return self.cfg.coverage_dir / f"{safe_component(group.name, what='로직 그룹 이름')}.profdata"
 
     def export_path(self, group: LogicGroup) -> Path:
-        return self.cfg.coverage_dir / f"{safe_component(group.name, what="로직 그룹 이름")}.coverage.json"
+        return self.cfg.coverage_dir / f"{safe_component(group.name, what='로직 그룹 이름')}.coverage.json"
 
     def has_profraw(self, group: LogicGroup) -> bool:
         return bool(glob.glob(str(self.profraw_dir(group) / "*.profraw")))
