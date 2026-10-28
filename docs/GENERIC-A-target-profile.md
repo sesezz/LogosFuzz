@@ -91,10 +91,19 @@ profile.is_bazel, profile.is_automotive   # (False, False)
 ```bash
 git clone https://github.com/libsndfile/libsndfile third_party/libsndfile
 git -C third_party/libsndfile checkout 72f6af15e8f85157bd622ed45b979025828b7001
-cmake -S third_party/libsndfile -B third_party/libsndfile/build-fuzz \
-  -DBUILD_SHARED_LIBS=OFF -DBUILD_PROGRAMS=OFF -DBUILD_EXAMPLES=OFF \
-  -DBUILD_TESTING=OFF -DENABLE_EXTERNAL_LIBS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+# configure 는 손으로 하지 않는다. 빌드 어댑터가 계측 플래그까지 얹어서
+# configure 하고, 그 과정에서 compile_commands.json 도 만든다.
+python -m logosfuzz.generate.build --profile targets/libsndfile.json --prepare-only
 ```
+
+**수동 `cmake configure` 를 먼저 하면 안 된다.** CMake 는 `CMakeCache.txt` 가 이미
+있으면 어댑터가 넘기는 `CC`/`CFLAGS` 를 무시하고 캐시에 박힌 컴파일러로 빌드한다.
+그러면 `-fsanitize` 없는 라이브러리가 만들어지는데 `prepare()` 는 성공으로 끝나서,
+커버리지도 크래시도 안 나오는 캠페인을 정상으로 착각하게 된다(실측: `nm libsndfile.a`
+의 `__asan_` 심볼이 0개). 지금은 어댑터가 캐시의 컴파일러·플래그를 확인하고 다르면
+빌드 디렉터리를 버리고 다시 configure 한다. 그래도 순서는 `prepare()` 가 먼저다 —
+아래 EXT 단계들이 그 `compile_commands.json` 을 읽는다.
 
 실측 결과 (WSL Ubuntu-24.04, clang 18.1.3, cmake 3.28.3, 2026-10-10):
 

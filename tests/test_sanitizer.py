@@ -153,3 +153,62 @@ def test_ubsan_finding_produces_clean_multiframe_signature():
     assert key == "integer-overflow@json.cc:38|json_fuzzer.cc:10"
     # 같은 지점 중복 없음
     assert key.count("json.cc:38") == 1
+
+
+# --- libFuzzer 자체 크래시 (sanitizer 가 침묵하는 경우) ----------------------
+#
+# 표본은 libsndfile 캠페인에서 실제로 나온 출력 원문이다
+# (tests/fixtures/sanitizer_logs/libfuzzer_deadly_signal.txt). 이 경로가 없으면
+# EXE 가 크래시 1건을 저장해도 ANA 는 0건을 받는다.
+
+def test_libfuzzer_deadly_signal_is_parsed_from_real_output():
+    findings = _parse_fixture("libfuzzer_deadly_signal.txt")
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.sanitizer == "LIBFUZZER"
+    assert finding.category == "deadly-signal"
+    assert finding.error_reason == "deadly signal"
+
+
+def test_libfuzzer_block_stops_at_its_own_summary():
+    """SUMMARY 뒤의 MS:/Base64:/stat:: 줄이 결함 로그에 딸려오면 안 된다."""
+    finding = _parse_fixture("libfuzzer_deadly_signal.txt")[0]
+    assert finding.raw_log[-1].startswith("SUMMARY: libFuzzer:")
+    assert not any(line.startswith("stat::") for line in finding.raw_log)
+    assert not any(line.startswith("Base64:") for line in finding.raw_log)
+
+
+def test_libfuzzer_crash_reaches_ana_as_a_record():
+    """파서 -> ANA 입력까지 실제로 이어지는지 본다(결함이 사라지던 지점)."""
+    from logosfuzz.analyze.models import CrashRecord
+
+    finding = _parse_fixture("libfuzzer_deadly_signal.txt")[0]
+    record = CrashRecord.from_finding(finding.to_dict(), group="sndfile_manual_fuzz")
+    assert record.category == "deadly-signal"
+    assert record.sanitizer == "LIBFUZZER"
+    assert record.group == "sndfile_manual_fuzz"
+    assert record.raw_log[0].endswith("ERROR: libFuzzer: deadly signal")
+
+
+def test_unsymbolized_stack_still_produces_a_finding():
+    """심볼라이저가 없으면 소스 위치가 안 나온다. 그래도 결함은 남아야 한다."""
+    finding = _parse_fixture("libfuzzer_deadly_signal.txt")[0]
+    assert finding.traceback == []
+    assert finding.signature == "deadly-signal_unknown"
+
+
+def test_libfuzzer_oom_and_timeout_are_classified_not_dropped():
+    assert classify_sanitizer_error("LIBFUZZER", "out-of-memory (malloc(1048576000))") == "oom"
+    assert classify_sanitizer_error("LIBFUZZER", "timeout after 60 seconds") == "timeout"
+    assert classify_sanitizer_error("LIBFUZZER", "fuzz target exited") == "unexpected-exit"
+    assert classify_sanitizer_error("LIBFUZZER", "something new") == "unknown"
+
+
+def test_sanitizer_report_wins_over_libfuzzer_summary_line():
+    """ASan 이 잡은 크래시는 ASan 결함 1건이어야 한다.
+
+    libFuzzer 는 이때 'SUMMARY: AddressSanitizer: ...' 를 찍지 'ERROR: libFuzzer:'
+    를 찍지 않는다. 새 규칙이 기존 ASan 블록을 쪼개지 않는지 확인한다.
+    """
+    findings = _parse_fixture("asan_heap_overflow.txt")
+    assert [f.sanitizer for f in findings] == ["ASAN"]

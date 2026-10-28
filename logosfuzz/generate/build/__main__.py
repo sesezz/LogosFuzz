@@ -70,6 +70,11 @@ def main(argv: Optional[Sequence[str]] = None, *, runner: Optional[Runner] = Non
 
     prepared = adapter.prepare(force=args.force)
     print(f"[PREPARE] {'OK' if prepared.ok else 'FAIL'} {prepared.target} ({prepared.duration_s:.1f}s)")
+    # 캐시를 버리고 다시 configure 했다는 사실은 성공했을 때도 보여야 한다.
+    # 조용히 지나가면 "왜 2분이나 걸렸지" 로만 남는다.
+    for line in prepared.log.splitlines():
+        if line.startswith("INFO: "):
+            print("  " + line)
     if not prepared.ok:
         print(prepared.short_log or prepared.log[-800:], file=sys.stderr)
         return 1

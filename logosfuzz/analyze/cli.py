@@ -32,7 +32,7 @@ from pathlib import Path
 
 from logosfuzz.analyze.dedup import CrashDeduplicator
 from logosfuzz.analyze.error_contract import KnowledgeBaseContractProvider
-from logosfuzz.analyze.loader import load_records
+from logosfuzz.analyze.loader import AnalyzeInputError, load_records
 from logosfuzz.analyze.models import CrashCluster
 from logosfuzz.analyze.reachability import SourceReachabilityProvider
 from logosfuzz.analyze.triage import (
@@ -330,6 +330,11 @@ def _run_analyze(args: argparse.Namespace) -> int:
     """dedup → triage 일괄 실행"""
     dedup = CrashDeduplicator(depth=args.depth)
     dedup.extend(load_records(args.inputs))
+    if dedup.stats().total_records == 0:
+        # 경로는 맞았는데 결함이 없는 경우다. 크래시 없는 캠페인에서는 정상이라
+        # 실패로 다루지 않되, 입력을 잘못 가리킨 것과 구분되게 알려 준다.
+        print(f"[ANA 경고] 입력에서 결함을 한 건도 읽지 못했습니다: "
+              f"{', '.join(str(i) for i in args.inputs)}", file=sys.stderr)
     clusters = dedup.clusters()
     triager, provider = _triager_for_args(args)
     results = triage_clusters(clusters, triager)
@@ -428,7 +433,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except AnalyzeInputError as e:
+        print(f"[ANA 오류] {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

@@ -33,7 +33,17 @@ class CrashCollector:
         return h.hexdigest()
 
     def collect(self, group: str, search_dirs: list[Path]) -> list[Path]:
-        """search_dirs의 새 크래시 입력 보존 및 경로 목록 반환 (sha1 기준 세션 내 1회 저장)"""
+        """search_dirs에서 새 크래시 입력을 찾아 보존하고 경로 목록 반환.
+
+        동일 내용(sha1) 파일은 세션 내에서 한 번만 저장한다.
+
+        libFuzzer 는 ``artifact_prefix`` 로 받은 ``crashes/`` **바로 아래**에
+        크래시 입력을 떨군다. 그걸 복사만 하면 같은 입력이 ``crashes/crash-<해시>``
+        와 ``crashes/<group>/crash-<해시>`` 두 곳에 남아, 디렉터리를 세어
+        크래시 수를 집계하는 쪽에서 한 건이 두 건으로 보인다. 그래서 수집
+        루트에 직접 떨어진 산출물은 복사가 아니라 **이동**한다. AFL++ 의
+        ``out/afl/**`` 처럼 엔진이 계속 쓰는 상태 디렉터리는 건드리지 않는다.
+        """
         dest_root = self.crashes_dir / group
         saved: list[Path] = []
         for d in search_dirs:
@@ -53,6 +63,9 @@ class CrashCollector:
                 dest = dest_root / f"{f.name}"
                 if dest.exists():
                     dest = dest_root / f"{digest[:12]}-{f.name}"
-                shutil.copy2(f, dest)
+                if f.parent == self.crashes_dir:
+                    shutil.move(str(f), str(dest))
+                else:
+                    shutil.copy2(f, dest)
                 saved.append(dest)
         return saved

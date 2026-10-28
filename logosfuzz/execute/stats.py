@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from dataclasses import dataclass
 
 
@@ -63,9 +64,23 @@ class LiveStats:
 
         return changed
 
-    def render(self) -> str:
+    def rate(self, elapsed_sec: float) -> float:
+        """실행 속도. 엔진이 알려준 값이 0이면 실행 수/경과 시간으로 보정한다.
+
+        libFuzzer 는 1초가 안 되는 구간에서 ``exec/s: 0`` 을 찍고, 종료 요약도
+        ``stat::average_exec_per_sec: 0`` 으로 남긴다. 그대로 쓰면 수만 번
+        실행한 그룹의 속도가 0으로 보고돼(실측: execs=12302 · exec_per_sec=0.0)
+        리포트에서 "하네스가 안 돌았다" 와 구분되지 않는다.
+        """
+        if self.exec_per_sec > 0:
+            return self.exec_per_sec
+        if elapsed_sec > 0 and self.execs:
+            return round(self.execs / elapsed_sec, 1)
+        return 0.0
+
+    def render(self, elapsed_sec: float = 0.0) -> str:
         return (
-            f"[{self.group}] exec/s={self.exec_per_sec:>8.0f} "
+            f"[{self.group}] exec/s={self.rate(elapsed_sec):>8.0f} "
             f"cov={self.coverage:>6d} crashes={self.crashes:>3d} "
             f"execs={self.execs}"
         )
@@ -74,17 +89,24 @@ class LiveStats:
 class StatsMonitor:
     """실시간 통계 한 줄 갱신 출력 모니터 (stream 주입 가능)"""
 
-    def __init__(self, stats: LiveStats, stream=sys.stdout, live: bool = True):
+    def __init__(self, stats: LiveStats, stream=sys.stdout, live: bool = True,
+                 clock=time.monotonic):
         self.stats = stats
         self.stream = stream
         self.live = live
+        # 엔진이 exec/s 를 0으로 찍는 구간에서도 속도를 보여주기 위한 기준 시각.
+        self.clock = clock
+        self.started_at = clock()
+
+    def _elapsed(self) -> float:
+        return max(0.0, self.clock() - self.started_at)
 
     def feed(self, line: str) -> None:
         if self.stats.update_from_line(line) and self.live:
-            self.stream.write("\r" + self.stats.render())
+            self.stream.write("\r" + self.stats.render(self._elapsed()))
             self.stream.flush()
 
     def finish(self) -> None:
         if self.live:
-            self.stream.write("\r" + self.stats.render() + "\n")
+            self.stream.write("\r" + self.stats.render(self._elapsed()) + "\n")
             self.stream.flush()

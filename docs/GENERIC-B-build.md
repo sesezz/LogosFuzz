@@ -23,7 +23,12 @@ result = adapter.build(spec)                   # result.binary -> LogicGroup.har
 ```
 
 - `prepare()` 는 `build()` 가 필요하면 알아서 부르므로 **EXT 전에 한 번 불러 두면** 시간이 겹친다.
-- 라이브러리가 이미 있고 `CMakeCache.txt` 도 있으면 다시 만들지 않는다. 강제로 다시: `prepare(force=True)`.
+  대상 소스만 받아 두고 `cmake configure` 는 손으로 하지 않는다 — `prepare()` 가 한다.
+- 라이브러리가 이미 있고 `CMakeCache.txt` 의 컴파일러·계측 플래그가 이 어댑터의 것과 같으면 다시 만들지 않는다.
+  강제로 다시: `prepare(force=True)`.
+- 캐시가 **다른 컴파일러나 계측 없는 플래그**로 만들어져 있으면 빌드 디렉터리를 버리고 다시 configure 한다.
+  CMake 가 기존 캐시 앞에서 `CC`/`CFLAGS` 를 무시하기 때문이다. 판정은 보수적이라 캐시에 해당 키가 아예
+  없으면 일치로 본다(추측으로 지우지 않는다). `build_dir` 이 `source_root` 와 같으면 지우지 않고 실패한다.
 - 실패 시 `result.log` 는 원문, `result.short_log` 는 오류 줄만 추려 준다 (자가치유 분류기 입력).
 
 ## 명령줄로 확인하기 (어댑터만)

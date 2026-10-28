@@ -27,5 +27,24 @@
     "BuildId -> <BUILDID>",
     "실행 소요 ms -> <T>",
     "Bazel config 해시 -> <CONFIG>"
-  ]
+  ],
+  "additional_samples": {
+    "libfuzzer_deadly_signal.txt": {
+      "purpose": "sanitizer 가 아무것도 보고하지 않고 시그널로 죽는 크래시. EXE 는 크래시로 세는데 파서가 0건을 넘기던 경로의 표본이다.",
+      "collected_at": "2026-10-28T06:12:00Z",
+      "target": "libsndfile 1.2.2 (targets/libsndfile.json, GENERIC-B CMake 어댑터)",
+      "harness": "out/manual/sndfile_manual_fuzz.c (수동 하네스, 자동 생성 아님)",
+      "runner": "logosfuzz fuzz --engine libfuzzer --timeout 60 --docker (logosfuzz-exec:latest, ubuntu 24.04)",
+      "clang_version": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+      "note": "컨테이너에 llvm-symbolizer 가 없어 스택이 심볼화되지 않았다. 소스 위치가 없는 상태 그대로가 표본이다.",
+      "normalization": [
+        "진행률(#NNN ...) 줄 삭제",
+        "PID -> <PID>",
+        "16진 주소 -> <ADDR>",
+        "BuildId -> <BUILDID>",
+        "Seed -> <SEED>",
+        "SHA1 -> <SHA1>"
+      ]
+    }
+  }
 }
