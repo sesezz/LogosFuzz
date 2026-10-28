@@ -185,7 +185,12 @@ def main(argv: list | None = None) -> int:
     if args.command == "analyze":
         # ANA 파트로 위임(설계서 기능 흐름도의 analyze 명령)
         from logosfuzz.analyze.cli import _run_analyze
-        return _run_analyze(args)
+        from logosfuzz.analyze.loader import AnalyzeInputError
+        try:
+            return _run_analyze(args)
+        except AnalyzeInputError as e:
+            print(f"[ANA 오류] {e}", file=sys.stderr)
+            return 1
 
     if args.command == "regression":
         from logosfuzz.execute.regression import RegressionRunner

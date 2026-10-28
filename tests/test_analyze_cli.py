@@ -95,3 +95,45 @@ def test_top_level_analyze_cli_accepts_source_evidence_options():
 
     assert args.source_root == "/work/source"
     assert args.harness_dir == "/work/harnesses"
+
+
+# ---------------------------------------------------------------------------
+# 입력 경로 오류: 스택 트레이스 대신 한 줄로 알린다
+# ---------------------------------------------------------------------------
+
+def test_missing_input_path_is_reported_as_an_error(tmp_path, capsys):
+    rc = main(["analyze", str(tmp_path / "없는디렉터리")])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "[ANA 오류]" in err and "입력 경로가 없습니다" in err
+
+
+def test_broken_summary_json_is_reported_as_an_error(tmp_path, capsys):
+    broken = tmp_path / "fuzz_summary.json"
+    broken.write_text("{ not json", encoding="utf-8")
+
+    rc = main(["analyze", str(broken)])
+
+    assert rc == 1
+    assert "JSON 이 아닙니다" in capsys.readouterr().err
+
+
+def test_root_cli_reports_the_same_error(tmp_path, capsys):
+    from logosfuzz.cli import main as root_main
+
+    rc = root_main(["analyze", str(tmp_path / "없는디렉터리")])
+
+    assert rc == 1
+    assert "[ANA 오류]" in capsys.readouterr().err
+
+
+def test_empty_input_warns_but_succeeds(tmp_path, capsys):
+    """크래시 없는 캠페인은 정상이다 - 실패로 다루지 않고 경고만 남긴다."""
+    empty = tmp_path / "sanitizer"
+    empty.mkdir()
+
+    rc = main(["analyze", str(empty)])
+
+    assert rc == 0
+    assert "[ANA 경고]" in capsys.readouterr().err

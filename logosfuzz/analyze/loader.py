@@ -19,12 +19,24 @@ from pathlib import Path
 from logosfuzz.analyze.models import CrashRecord
 
 
+class AnalyzeInputError(Exception):
+    """ANA 입력을 읽을 수 없을 때(경로 없음·권한·깨진 JSON 파일 전체).
+
+    파일 "안의" 손상 라인은 건너뛰고 읽을 수 있는 레코드만 모은다(모듈
+    docstring 의 견고성 원칙). 그 전에 입력 자체에 닿지 못하는 것은 사용자가
+    경로를 잘못 준 것이므로, 스택 트레이스 대신 CLI 가 한 줄로 알려 준다.
+    """
+
+
 def load_jsonl_findings(path: str | Path, group: str = "") -> list[CrashRecord]:
     """단일 JSONL 파일에서 레코드 목록을 읽는다."""
     p = Path(path)
     group = group or p.stem
     records: list[CrashRecord] = []
-    text = p.read_text(encoding="utf-8")
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise AnalyzeInputError(f"결함 스트림을 읽을 수 없습니다: {p} ({exc.strerror})") from exc
     for line in text.splitlines():
         line = line.strip()
         if not line:
@@ -65,7 +77,13 @@ def load_fuzz_summary(path: str | Path) -> list[CrashRecord]:
     요약 JSON의 정확한 스키마는 그룹 목록을 담은 dict거나 list일 수 있으므로,
     ``sanitizer_findings`` 키를 재귀적으로 탐색해 최대한 견고하게 수집한다.
     """
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    p = Path(path)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise AnalyzeInputError(f"세션 요약을 읽을 수 없습니다: {p} ({exc.strerror})") from exc
+    except json.JSONDecodeError as exc:
+        raise AnalyzeInputError(f"세션 요약이 JSON 이 아닙니다: {p} ({exc})") from exc
     records: list[CrashRecord] = []
 
     def visit(node, group_hint: str = "") -> None:
@@ -93,10 +111,16 @@ def load_records(inputs: list[str | Path]) -> list[CrashRecord]:
     - 디렉터리          → ``load_sanitizer_dir``
     - ``*.jsonl`` 파일   → ``load_jsonl_findings``
     - 그 외 ``*.json``   → ``load_fuzz_summary``
+
+    존재하지 않는 경로는 :class:`AnalyzeInputError` 로 알린다. 조용히 빈
+    목록을 돌려주면 "결함 0건" 과 구분되지 않아, 오타 하나로 크래시를 잃고도
+    분석이 성공한 것처럼 보인다.
     """
     records: list[CrashRecord] = []
     for item in inputs:
         p = Path(item)
+        if not p.exists():
+            raise AnalyzeInputError(f"입력 경로가 없습니다: {p}")
         if p.is_dir():
             records.extend(load_sanitizer_dir(p))
         elif p.suffix == ".jsonl":

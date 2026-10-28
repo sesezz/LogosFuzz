@@ -60,7 +60,9 @@ class SessionSummary:
                     "failed_to_start": g.failed_to_start,
                     "duration_sec": round(g.duration_sec, 2),
                     "execs": g.stats.execs,
-                    "exec_per_sec": g.stats.exec_per_sec,
+                    # 엔진이 0을 찍은 구간은 실행 수/실행 시간으로 보정한다
+                    # (LiveStats.rate 참조).
+                    "exec_per_sec": g.stats.rate(g.duration_sec),
                     "coverage": g.stats.coverage,
                     "crashes": [str(p) for p in g.crashes],
                     "sanitizer_findings": [f.to_dict() for f in g.sanitizer_findings],
