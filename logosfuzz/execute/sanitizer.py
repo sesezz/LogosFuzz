@@ -20,6 +20,29 @@ UBSan 은 형식이 완전히 다르다.
 즉 종료코드만 보면 "정상 종료 · 크래시 없음" 으로 보이지만 실제로는 UB 가
 여러 건 터진 상태일 수 있다. **UBSan 결함은 반드시 출력 파싱으로 잡아야 한다.**
 
+libFuzzer 가 직접 잡는 크래시
+-----------------------------
+sanitizer 가 아무 말도 하지 않고 프로세스가 시그널로 죽는 경우가 있다.
+assert 실패(SIGABRT)나, ASan 이 설명할 수 없는 스택 오버플로가 그렇다.
+이때 출력은 sanitizer 헤더가 아니라 libFuzzer 자신의 것이다.
+
+    ==1== ERROR: libFuzzer: deadly signal
+        #0 ... (/harness/sndfile_manual_fuzz+0x3bfc35) (BuildId: ...)
+        ...
+    SUMMARY: libFuzzer: deadly signal
+
+``ERROR: (Address|Leak)Sanitizer:`` 도 ``runtime error:`` 도 아니므로 위의 두
+규칙으로는 **한 건도 잡히지 않는다.** 그런데 libFuzzer 는 크래시 입력을
+``artifact_prefix`` 에 저장하고 종료코드도 0 이 아니다. 즉 EXE 는 "크래시 1건"
+으로 세는데 파서는 결함을 0건으로 넘겨서, ANA 가 트리아지할 것이 없어지고
+리포트에는 ``crash_count: 1`` 과 ``findings: []`` 가 나란히 남는다.
+**크래시를 찾고도 잃어버리는 유일한 경로라 반드시 파싱한다.**
+
+libFuzzer 는 같은 ``ERROR: libFuzzer: <사유>`` 형식으로 out-of-memory 와
+timeout 도 알린다. 사유 문자열만 보고 분류하므로 세 가지가 같은 경로를 탄다.
+표본으로 가진 것은 deadly signal 뿐이고(``libfuzzer_deadly_signal.txt``),
+나머지는 분류만 두고 ``unknown`` 으로 떨어지게 했다.
+
 이 모듈의 파서는 GEN 파트가 실제 Bazel 빌드에서 수집해 둔 출력 원문
 (``tests/fixtures/sanitizer_logs/``, clang 18.1.3)을 정답지로 삼아 작성했다.
 포맷을 추측하지 않았다.
@@ -43,6 +66,13 @@ _UBSAN_RUNTIME_ERROR = re.compile(
 # UBSan 블록의 끝. 여기서 끊어야 뒤따르는 libFuzzer 요약줄이 결함에 섞이지 않고,
 # 복구 가능 모드에서 연속으로 터지는 UB 여러 건이 한 덩어리로 합쳐지지 않는다.
 _UBSAN_SUMMARY = re.compile(r"^SUMMARY:\s*UndefinedBehaviorSanitizer:", re.IGNORECASE)
+
+# libFuzzer 자신이 내는 오류 헤더. ``==<PID>==`` 접두사가 붙을 때도, 붙지 않을
+# 때도 있어서 줄 전체를 앵커로 쓰지 않는다.
+_LIBFUZZER_ERROR = re.compile(r"ERROR: libFuzzer:\s*(.+)", re.IGNORECASE)
+# UBSan 과 같은 이유로 SUMMARY 에서 끊는다. 여기서 닫지 않으면 뒤따르는
+# ``MS:``/``Base64:``/``stat::`` 줄까지 결함 로그에 붙는다.
+_LIBFUZZER_SUMMARY = re.compile(r"^SUMMARY:\s*libFuzzer:", re.IGNORECASE)
 
 _SOURCE_LOCATION = re.compile(r"(?P<file>(?:[A-Za-z]:)?[^\s():]+\.(?:c|cc|cpp|cxx|h|hh|hpp)):(?P<line>\d+)(?::\d+)?")
 
@@ -105,6 +135,26 @@ def classify_ubsan_error(message: str) -> str:
     return "undefined-behavior"
 
 
+def classify_libfuzzer_error(reason: str) -> str:
+    """libFuzzer 자체 오류 사유를 결함 분류로 매핑한다.
+
+    sanitizer 가 설명을 남기지 않은 크래시다. ``deadly-signal`` 은 "시그널로
+    죽었다"는 사실만 말할 뿐 원인(assert 실패인지 스택 오버플로인지)은 말하지
+    않는다. 그래서 ANA 트리아지에서는 메모리 오류만큼의 사전확률을 받지 못하고
+    검토 대상으로 남는데, 그게 맞는 취급이다 — 잃어버리지만 않으면 된다.
+    """
+    text = reason.lower()
+    if "deadly signal" in text:
+        return "deadly-signal"
+    if "out-of-memory" in text or "out of memory" in text:
+        return "oom"
+    if "timeout" in text:
+        return "timeout"
+    if "fuzz target exited" in text:
+        return "unexpected-exit"
+    return "unknown"
+
+
 def classify_sanitizer_error(sanitizer: str, reason: str) -> str:
     """Sanitizer 별 결함 분류 규칙.
 
@@ -114,6 +164,8 @@ def classify_sanitizer_error(sanitizer: str, reason: str) -> str:
     """
     if sanitizer.upper() == "UBSAN":
         return classify_ubsan_error(reason)
+    if sanitizer.upper() == "LIBFUZZER":
+        return classify_libfuzzer_error(reason)
 
     text = reason.lower()
     if "double-free" in text:
@@ -165,6 +217,16 @@ class SanitizerMonitor:
             self._lines = [line]
             return
 
+        libfuzzer = _LIBFUZZER_ERROR.search(line)
+        if libfuzzer:
+            # sanitizer 블록 한가운데에서 나오지는 않는다(sanitizer 가 먼저
+            # 죽인다). 그래도 앞 건을 닫고 시작해야 로그가 섞이지 않는다.
+            self._flush()
+            self._sanitizer = "LIBFUZZER"
+            self._reason = libfuzzer.group(1).strip()
+            self._lines = [line]
+            return
+
         ubsan = _UBSAN_RUNTIME_ERROR.match(line.strip())
         if ubsan:
             # 복구 가능 모드에서는 UB 가 연속으로 여러 건 터진다. 앞 건을 먼저
@@ -180,6 +242,8 @@ class SanitizerMonitor:
             # UBSan 은 SUMMARY 로 블록이 끝난다. 여기서 닫지 않으면 뒤따르는
             # libFuzzer 실행 요약("Executed ... in N ms")까지 결함 로그에 붙는다.
             if self._sanitizer == "UBSAN" and _UBSAN_SUMMARY.match(line.strip()):
+                self._flush()
+            elif self._sanitizer == "LIBFUZZER" and _LIBFUZZER_SUMMARY.match(line.strip()):
                 self._flush()
 
     def finish(self) -> list[SanitizerFinding]:
