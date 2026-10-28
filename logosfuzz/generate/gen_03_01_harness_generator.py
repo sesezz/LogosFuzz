@@ -83,6 +83,11 @@ MAX_CONTEXT_APIS = 8
 # 프롬프트에 넣는 선언 발췌: API 하나당 / 그룹 전체 상한(문자 수).
 MAX_EXCERPT_CHARS = 900
 MAX_HEADER_CONTENT_CHARS = 6000
+# 타입 정의 발췌 상한(문자 수)과 구조체·열거형 하나의 최대 줄 수
+MAX_TYPE_DEFS_CHARS = 3000
+MAX_DEFINITION_LINES = 40
+# 열거형 중 이 개수 이하의 멤버를 가진 것은 이름이 맞지 않아도 포함(모드·문자열 종류 같은 짧은 상수 묶음)
+SMALL_ENUM_MEMBERS = 16
 
 
 # ---------------------------------------------------------------------
@@ -544,6 +549,153 @@ def header_declaration_excerpt(
     return f"// {include_path_for(header_file, workspace_root)}:{found['line']}{where}\n{body}"
 
 
+_IDENT_RE = re.compile(r"[A-Za-z_]\w*")
+# 타입 정의를 찾을 필요가 없는 C 예약어·표준 스칼라 이름
+_NON_TYPE_WORDS = frozenset({
+    "const", "volatile", "struct", "union", "enum", "unsigned", "signed", "int", "char", "short",
+    "long", "float", "double", "void", "size_t", "ssize_t", "bool", "restrict", "static", "extern",
+    "uint8_t", "uint16_t", "uint32_t", "uint64_t", "int8_t", "int16_t", "int32_t", "int64_t",
+})
+# 매개변수 이름에서 열거형을 찾을 때 단서가 되지 않는 흔한 단어
+_GENERIC_PARAM_WORDS = frozenset({
+    "type", "mode", "val", "value", "data", "buf", "buffer", "len", "length", "size", "ptr", "count",
+    "flags", "info", "ctx", "handle", "user", "out", "in", "offset", "whence",
+})
+
+
+def _balanced_block(lines: Sequence[str], start: int) -> List[str]:
+    """``start`` 줄에서 시작해 중괄호가 닫힐 때까지(그리고 ``;`` 가 나올 때까지) 줄을 모은다."""
+    depth = 0
+    seen_open = False
+    block: List[str] = []
+    for text in lines[start:start + MAX_DEFINITION_LINES * 4]:
+        block.append(text.rstrip())
+        depth += text.count("{") - text.count("}")
+        seen_open = seen_open or "{" in text
+        if seen_open and depth <= 0 and ";" in text:
+            break
+    if len(block) > MAX_DEFINITION_LINES:
+        block = block[:MAX_DEFINITION_LINES] + ["/* ... (truncated) */"]
+    return block
+
+
+def _typedef_lines(text: str, name: str) -> List[str]:
+    """``typedef ... NAME ;`` 와 함수 포인터 ``typedef ... (*NAME)(...) ;`` 정의(한 문장)를 찾는다."""
+    pattern = re.compile(
+        rf"typedef\b[^;{{}}]*?(?:\(\s*\*\s*{re.escape(name)}\s*\)[^;{{}}]*|\b{re.escape(name)})\s*;")
+    match = pattern.search(text)
+    return [" ".join(match.group(0).split())] if match else []
+
+
+def _struct_block(lines: Sequence[str], name: str) -> List[str]:
+    """``struct NAME { ... } ;`` 정의 블록. ``struct NAME`` 다음 줄에 ``{`` 가 와도 찾는다."""
+    head = re.compile(rf"\bstruct\s+{re.escape(name)}\b")
+    for index, text in enumerate(lines):
+        if not head.search(text) or text.lstrip().startswith(_COMMENT_PREFIXES):
+            continue
+        window = " ".join(lines[index:index + 3])
+        if "{" in window and ";" not in text.split("{")[0]:
+            return _balanced_block(lines, index)
+    return []
+
+
+def _enum_blocks(lines: Sequence[str]) -> List[Tuple[List[str], List[str]]]:
+    """헤더의 익명·기명 ``enum`` 블록과 그 멤버 이름 목록."""
+    blocks = []
+    index = 0
+    while index < len(lines):
+        if re.match(r"\s*(?:typedef\s+)?enum\b", lines[index]):
+            block = _balanced_block(lines, index)
+            body = " ".join(block)
+            members = re.findall(r"\b([A-Z][A-Z0-9_]{2,})\b\s*(?:=|,|\})", body)
+            blocks.append((block, members))
+            index += max(len(block), 1)
+        else:
+            index += 1
+    return blocks
+
+
+def type_definitions_excerpt(
+    documents: Sequence[Mapping[str, Any]],
+    workspace_root: Path | str | None = None,
+    *,
+    max_chars: int = MAX_TYPE_DEFS_CHARS,
+) -> str:
+    """API 매개변수가 쓰는 **구조체·콜백 typedef·상수 열거형의 정의**를 헤더에서 발췌한다.
+
+    선언 한 줄만 보여 주면 모델이 구조체 필드와 콜백 시그니처, 유효한 상수 값을 추측한다
+    (실측: ``SF_VIRTUAL_IO`` 필드를 틀려 빌드 실패, ``sf_get_string`` 의 ``str_type`` 에
+    정의되지 않은 값 0 을 넘겨 UBSan 경고). 이 발췌가 그 추측을 없앤다.
+
+    - 구조체: 매개변수 타입에 나오는 ``struct`` / typedef 이름의 정의 블록
+    - 콜백: 그 구조체 필드가 쓰는 함수 포인터 typedef 한 단계
+    - 열거형: 짧은 것(멤버 ``SMALL_ENUM_MEMBERS`` 개 이하)은 모두, 긴 것은 매개변수 이름의
+      단서(``str_type`` -> ``STR``)가 멤버 이름에 들어 있을 때만
+
+    C 소스(``.c``)의 문서에만 적용한다(C++ 클래스는 ``header_declaration_excerpt`` 가 맡는다).
+    못 찾으면 빈 문자열.
+    """
+    by_header: Dict[str, List[Mapping[str, Any]]] = {}
+    for document in documents:
+        if Path(str(document.get("file") or "")).suffix.lower() != ".c":
+            continue
+        header = _header_file_for_document(document)
+        if header:
+            by_header.setdefault(header, []).append(document)
+
+    parts: List[str] = []
+    for header, docs in by_header.items():
+        try:
+            text = Path(header).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        lines = text.splitlines()
+
+        wanted: List[str] = []
+        clues: set = set()
+        for document in docs:
+            for param in document.get("params") or []:
+                for word in _IDENT_RE.findall(str(param.get("type") or "")):
+                    if word not in _NON_TYPE_WORDS and word not in wanted:
+                        wanted.append(word)
+                for token in re.split(r"[_\W]+", str(param.get("name") or "").lower()):
+                    if len(token) >= 3 and token not in _GENERIC_PARAM_WORDS:
+                        clues.add(token.upper())
+
+        found: List[str] = []
+        taken: set = set()
+
+        def add(block: List[str]) -> None:
+            key = "\n".join(block)
+            if block and key not in taken:
+                taken.add(key)
+                found.append(key)
+
+        for name in wanted:
+            struct = _struct_block(lines, name)
+            if struct:
+                # 구조체 필드가 쓰는 함수 포인터 typedef 를 먼저 보여 준다(한 단계).
+                for word in dict.fromkeys(_IDENT_RE.findall(" ".join(struct))):
+                    if word != name and word not in _NON_TYPE_WORDS:
+                        add(_typedef_lines(text, word) if re.search(rf"\(\s*\*\s*{re.escape(word)}\s*\)", text) else [])
+                add(struct)
+            add(_typedef_lines(text, name))
+
+        for block, members in _enum_blocks(lines):
+            small = 0 < len(members) <= SMALL_ENUM_MEMBERS
+            matched = any(clue in member for clue in clues for member in members)
+            if small or matched:
+                add(block)
+
+        if found:
+            parts.append(f"// {include_path_for(header, workspace_root)}: type definitions\n" + "\n\n".join(found))
+
+    body = "\n\n".join(parts)
+    if len(body) > max_chars:
+        body = body[:max_chars].rstrip() + "\n// ... (truncated)"
+    return body
+
+
 # 단어 경계를 본다: file_path / filePath / path / dirname 은 잡고, profile·pathology 는 놓친다.
 _FILE_PARAM_RE = re.compile(r"(?:^|_)(?:file|path|dir)")
 _FILE_FUNCTION_RE = re.compile(r"File|_file(?:_|$)")      # FromFile, ReadFile, from_file
@@ -804,6 +956,9 @@ def group_meta_from_kb(
             if excerpt:
                 excerpts.append(excerpt)
         excerpts = list(dict.fromkeys(excerpts))
+        definitions = type_definitions_excerpt(documents, workspace_root)
+        if definitions:
+            excerpts.append(definitions)
 
         meta[group.group_id] = {
             "build_target": label,

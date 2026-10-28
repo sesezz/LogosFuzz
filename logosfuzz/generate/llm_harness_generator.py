@@ -162,7 +162,8 @@ def build_prompt(group_name: str, contexts: list[ApiContext],
     if language == LANG_C:
         return _build_c_prompt(group_name, contexts,
                                header_content=header_content,
-                               header_filenames=header_filenames)
+                               header_filenames=header_filenames,
+                               domain=domain)
     if language != LANG_CPP:
         raise ValueError(f"지원하지 않는 언어: {language!r} (지원: {SUPPORTED_LANGUAGES})")
     return build_cpp_prompt(
@@ -340,9 +341,54 @@ STRICT RULES:
 """
 
 
+# 자동차 외 도메인(generic / embedded)의 C 프롬프트에 덧붙이는 규칙.
+# 실측(libsndfile): 핸들을 열지 않고 NULL 로 API 를 부르거나, 콜백(함수 포인터) 구조체를
+# 입력 바이트로 채워 첫 실행에서 SEGV 가 나는 하네스가 만들어졌음
+_C_GENERIC_RULE_8 = (
+    "8. Do NOT invent functions. You MAY call any function that is declared in the\n"
+    "   included headers and is needed to create, open, initialise or release the\n"
+    "   objects the listed APIs work on (for example open/create/init/close).\n"
+)
+_C_GENERIC_EXTRA_RULES = """\
+13. NEVER pass a NULL or uninitialised handle to an API. Obtain every handle by
+    calling the library's own open/create/init function, check the result, and
+    `return 0;` when it failed. Never write "assume it is initialised elsewhere".
+14. NEVER fill a struct that holds function pointers or callbacks (virtual I/O
+    tables, ops/vtable structs) from the fuzzer input. Use that struct type
+    EXACTLY as declared in the included headers (never redeclare or retype it)
+    and give every callback the exact parameter and return types the header
+    declares for that field. Define static callbacks that work on a small
+    context struct {const uint8_t *data; size_t size; size_t pos;} passed as
+    the user-data pointer, and never read, seek or tell outside [0, size].
+15. Prefer an in-memory or callback-based open function. If the library only
+    opens files by path, write the input to a fixed temporary path with
+    fopen/fwrite, open that path, and remove it before returning.
+16. Zero-initialise every info/config struct with memset() before use, and
+    release or close every handle that was opened on every return path.
+17. Feed the fuzzer input to the library as DATA (file contents, packet bytes,
+    stream) so that the real parsing code runs; do not spend the input only on
+    scalar arguments of calls that fail immediately.
+18. When an API takes a command code, mode or option, choose it from the input
+    (for example data[0] % N over the valid values declared in the headers)
+    instead of a fixed placeholder such as 0.
+19. NEVER pass the fuzzer input (or a pointer into it) as a `char *` string:
+    it has no NUL terminator, so strlen() reads past the end of the buffer. If an
+    API needs a path or a C string, build a NUL-terminated copy yourself, and for
+    a path write the input to a temporary file and pass that file's path.
+20. A mkstemp() template must end with exactly XXXXXX. If the path needs a
+    suffix such as ".wav", use mkstemps(template, suffix_length) instead, and
+    never ignore a failure silently in a way that skips all library calls.
+21. Size every output buffer you pass to the library from the values the
+    library itself reports (for example an info struct filled by the open call:
+    channels, frames, sample size), following the API documentation. A call that
+    reads N "frames" writes N x channels items, so allocate that many items.
+"""
+
+
 def _build_c_prompt(group_name: str, contexts: list[ApiContext],
                     header_content: str = "",
-                    header_filenames: list[str] | None = None) -> str:
+                    header_filenames: list[str] | None = None,
+                    domain: str = "automotive") -> str:
 
     api_block = ""
     extern_decls = ""
@@ -415,6 +461,10 @@ STRICT RULES:
     Direct const-cast causes libFuzzer to abort with
     "fuzz target overwrites its const input".
 """
+    if domain != "automotive":
+        old_rule_8 = ("8. Do NOT invent or call any function not explicitly listed above.\n")
+        assert old_rule_8 in prompt
+        prompt = prompt.replace(old_rule_8, _C_GENERIC_RULE_8) + _C_GENERIC_EXTRA_RULES
     return prompt
 
 

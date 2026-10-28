@@ -88,3 +88,51 @@ python -m pytest -q
 
 `common/models.py` 의 `SIGNAL_*` 상수는 그대로 두었다(자동차 전용 주석만 갱신).
 `sch_02_02` / `sch_02_03` / `llm_harness_generator` 의 데모 데이터는 UDS·CAN 대신 일반 예시(`sf_open` 핸들 확인 후 `sf_read_*` 호출)로 바꿨다.
+
+## C 하네스 프롬프트 보강 (E2E 실측 반영)
+
+libsndfile E2E(`logosfuzz run`)에서 자동 생성된 C 하네스 2개에 결함이 있었음.
+
+| 하네스 | 실측 | 원인 |
+|---|---|---|
+| `lg_sndfile` | cov 19, 9,562만 회 실행, 크래시 0 | `SNDFILE *sndfile = NULL` 로 두고 열지 않은 채 API 호출 |
+| `lg_sf_info` | 입력 10회째 SEGV (`file_io.c:221`), cov 0 | 함수 포인터 구조체 `SF_VIRTUAL_IO` 를 입력 바이트로 채움 |
+
+두 결과 모두 라이브러리 결함이 아니라 **하네스 결함**이며, 정탐으로 집계하지 않음(크래시는 `needs_review`, 사람이 `reject`).
+
+`domain` 이 `automotive` 가 아닐 때만 C 프롬프트에 다음을 적용함(automotive 프롬프트는 변경 없음).
+
+* 규칙 8 완화: 목록에 없어도 헤더에 선언된 열기·생성·초기화·해제 함수는 호출 허용
+* 규칙 13~17 추가: NULL/미초기화 핸들 금지, 콜백 구조체를 입력으로 채우기 금지(메모리 버퍼 기반 콜백 사용), 메모리·콜백 기반 열기 우선, 구조체 0 초기화와 모든 경로에서 닫기, 입력을 데이터로 라이브러리에 전달
+
+개선 여부는 재실행해 봐야 알 수 있음. 위 표의 수치는 **개선 전 기록**이며 개요서에 사용하지 않음.
+
+### 2차 실측 (프롬프트 규칙 13~18 적용 후)
+
+| 하네스 | 결과 | 판정 |
+|---|---|---|
+| `lg_sndfile` | `sf_open((const char *)data, ...)` 로 입력을 경로 문자열로 전달, `strlen` 이 버퍼 끝을 넘어 읽음 (`common.c:174`) | **하네스 결함.** 분류기가 `true_positive`(0.95)로 자동 승인했으나 오탐이며, 개요서의 정탐으로 쓰지 않음 |
+| `lg_sf_info` | 빌드 실패 | 프롬프트에 `SF_VIRTUAL_IO` 구조체와 `sf_vio_*` 콜백 타입이 없어 필드·시그니처를 추측함 |
+
+대응: 규칙 19 추가(입력을 NUL 종료 없는 `char *` 로 넘기지 않음). 구조체 정의 발췌는 별도 과제로 남김.
+
+### 3차 보강 (2차 실측 반영)
+
+| 문제 | 수정 |
+|---|---|
+| `lg_sf_info` 가 `SF_VIRTUAL_IO` 필드·콜백 시그니처를 추측해 빌드 실패 | `type_definitions_excerpt()` (`gen_03_01_harness_generator.py`): API 매개변수의 구조체·콜백 typedef·상수 열거형 정의를 헤더에서 발췌해 프롬프트에 포함. `.c` 소스 문서에만 적용 |
+| `sf_get_string(sndfile, 0)` 처럼 정의되지 않은 상수 사용 | 같은 발췌에 `SF_STR_*`, `SFM_*` 등 짧은 열거형을 포함 |
+| 입력을 NUL 없는 `char *` 로 넘긴 크래시가 `true_positive`(0.95) 로 자동 승인 | `c_return_code.py`: 스택(strlen 계열 → API → 하네스)과 하네스 소스 줄(`(const char *)data`)이 모두 맞을 때 하네스 결함으로 판정 (`c-string-unterminated-by-harness`, 오탐) |
+| `applying zero offset to null pointer` 가 `null-dereference` 로 분류 | `sanitizer.py`: `null-pointer-arithmetic` 으로 분리 (실제 역참조 아님) |
+
+### 4차 보강: UB 한 번에 세션이 끝나던 문제 (EXE)
+
+실측: UBSan 경고 1건으로 그룹 퍼징이 5~11초 만에 끝남(`docker/Dockerfile.generic` 의 `UBSAN_OPTIONS=halt_on_error=1`). 커버리지·실행 횟수가 보고할 수 있는 수준에 못 미침.
+
+| 설정 | 위치 | 효과 |
+|---|---|---|
+| `FuzzConfig.ubsan_options` | `config.py`, `docker_runner.py` | 비어 있지 않으면 `-e UBSAN_OPTIONS=` 로 이미지 기본값을 덮어씀. `generic_run` 은 `halt_on_error=0` 으로 설정 → UB 경고는 stderr 로 기록되고 퍼징은 계속됨(재현용 입력 파일은 만들어지지 않음) |
+| `FuzzConfig.resume_after_crash` | `fuzz_session.py` | 크래시(예: ASan)가 나면 입력을 저장하고 같은 그룹을 남은 시간 동안 다시 실행. 코퍼스는 이어서 사용. `max_resumes`(5), `min_resume_sec`(10)로 제한. 시도별 로그는 `run.stderr.<N>.log` 로 보존 |
+
+자동차 모드는 두 설정이 기본값(꺼짐/빈 값)이라 동작이 변하지 않음. `logosfuzz run`(generic)만 켬.
+

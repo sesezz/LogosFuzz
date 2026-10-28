@@ -125,6 +125,16 @@ class FuzzConfig:
     # 복원해야 한다 - ANA 단계의 후속 작업으로 남겨둔다.
     asan_options: str = "abort_on_error=1:detect_leaks=1:symbolize=0"
     tsan_options: str = "halt_on_error=1:second_deadlock_stack=1"
+    # UBSan 환경. 빈 문자열이면 이미지에 박힌 기본값(ENV UBSAN_OPTIONS)을 그대로 쓴다.
+    # halt_on_error=0 이면 UB 경고 한 번에 세션이 끝나지 않고 계속 퍼징한다(경고는 stderr 로 남아
+    # SanitizerMonitor 가 결함으로 기록하지만 재현용 입력 파일은 만들어지지 않는다)
+    ubsan_options: str = ""
+
+    # 크래시가 나면 그 입력을 저장하고, 같은 그룹을 남은 시간 동안 다시 실행한다(코퍼스는 이어서 사용).
+    # 꺼 두면(기본) 첫 크래시에서 그룹 실행이 끝난다 - 자동차 모드의 기존 동작
+    resume_after_crash: bool = False
+    max_resumes: int = 5            # 그룹당 재실행 상한 (같은 결함을 반복 발견해 시간을 다 쓰는 것 방지)
+    min_resume_sec: int = 10        # 남은 시간이 이보다 짧으면 재실행하지 않음
 
     # 커버리지 계측 (EXE-04-04, 기본 NONE)
     coverage: CoverageMode = CoverageMode.NONE

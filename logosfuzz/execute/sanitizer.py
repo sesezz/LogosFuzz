@@ -78,6 +78,11 @@ def classify_ubsan_error(message: str) -> str:
         return "integer-overflow"
     if "division by zero" in text or "divide by zero" in text:
         return "divide-by-zero"
+    if re.search(r"applying (?:zero|non-zero)? ?offset\b.*\bto null pointer", text):
+        # "applying zero offset to null pointer", "applying non-zero offset 8 to null pointer":
+        # NULL 에 값을 더한 포인터 연산이다. 역참조 자체가 아니라서 null-dereference 와 구분한다
+        # (libsndfile psf_get_string 실측)
+        return "null-pointer-arithmetic"
     if "null pointer" in text:
         # "member access within null pointer of type 'Header'" 등
         return "null-dereference"

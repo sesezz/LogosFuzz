@@ -22,6 +22,12 @@
       "harness": "examples/embedded/harness/fuzz_proto.c (NULL 확인 후 정상 호출)",
       "run": "libFuzzer -max_total_time=120, 빈 코퍼스",
       "expected": "heap-buffer-overflow proto_parser.c:64 → true_positive, 계약 신호 없음"
+    },
+    "harness_undersized_buffer.txt": {
+      "harness": "libsndfile lg_sndfile.c (sf_readf_float 에 frames 개 float 만 할당, channels 미반영)",
+      "run": "logosfuzz run --profile targets/libsndfile.json (GENERIC-B 6차 실측, 2026-10-28), 경로는 저장소 상대로 정리",
+      "findings": "ASan heap-buffer-overflow WRITE 4 in les2f_array <- pcm_read_les2f <- sf_readf_float <- LLVMFuzzerTestOneInput, 148바이트(37 float) 버퍼 직후",
+      "expected": "c-harness-buffer-overflow-suspect → needs_review (자동 정탐 승인 제외)"
     }
   }
 }

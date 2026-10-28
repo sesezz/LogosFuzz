@@ -311,6 +311,8 @@ class DockerIsolationRunner:
             "-e", f"ASAN_OPTIONS={c.asan_options}",
             "-e", f"TSAN_OPTIONS={c.tsan_options}",
         ]
+        if c.ubsan_options:
+            argv += ["-e", f"UBSAN_OPTIONS={c.ubsan_options}"]
         # EXE-04-04: 커버리지 계측 시 profraw 출력 경로 환경변수 주입
         for k, v in self._coverage_env_pairs(group, in_docker=True).items():
             argv += ["-e", f"{k}={v}"]
@@ -347,6 +349,7 @@ class DockerIsolationRunner:
         pairs = {
             "ASAN_OPTIONS": self.config.asan_options,
             "TSAN_OPTIONS": self.config.tsan_options,
+            **({"UBSAN_OPTIONS": self.config.ubsan_options} if self.config.ubsan_options else {}),
             **self._coverage_env_pairs(group, in_docker=False),
         }
         argv = ["env", *[f"{k}={v}" for k, v in pairs.items()], *argv]

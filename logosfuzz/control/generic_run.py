@@ -342,6 +342,10 @@ class GenericRun:
                 image=self.opts.image or default_exec_image(system),
                 dockerfile=default_exec_dockerfile(system),
                 coverage=CoverageMode.NONE,   # 커버리지는 종료 후 최종 코퍼스 재생으로 측정
+                # 범용 대상: UB 경고 한 번에 세션이 끝나지 않게 하고(실측: 11초 만에 종료),
+                # 메모리 오류로 크래시가 나도 남은 시간 동안 같은 그룹을 다시 퍼징한다
+                ubsan_options="print_stacktrace=1:halt_on_error=0",
+                resume_after_crash=True,
             )
             groups = [LogicGroup(name=e["slug"], harness_path=Path(e["binary"])) for e, _, _ in built]
             seeds = profile_seed_paths(self.profile)

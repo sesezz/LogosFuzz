@@ -97,6 +97,79 @@ class FuzzSession:
         # libFuzzer artifact_prefix(/out/crashes/)
         return [self.config.crashes_dir]
 
+    def _run_with_resume(self, group: LogicGroup, total_sec: int) -> GroupResult:
+        """그룹 1개 실행. ``resume_after_crash`` 이면 크래시 뒤 남은 시간 동안 다시 실행해 결과를 합친다.
+
+        - 시도마다 새 통계·sanitizer 모니터를 쓰고, 마지막에 실행 횟수는 합산, 커버리지 수는 최댓값으로 합친다.
+        - 시도별 로그는 ``run.stdout.<N>.log`` / ``run.stderr.<N>.log`` 로 보존한다(마지막 시도가 기본 이름).
+        - 재실행은 ``max_resumes`` 와 ``min_resume_sec`` 로 제한한다. 코퍼스는 이어서 사용된다.
+        """
+        cfg = self.config
+        left = float(total_sec)
+        attempt = 0
+        findings: list = []
+        saved_all: list = []
+        duration = 0.0
+        execs = 0
+        cov_edges = 0
+        result: Optional[GroupResult] = None
+        stats: Optional[LiveStats] = None
+
+        while True:
+            attempt += 1
+            stats = LiveStats(group=group.name)
+            monitor = StatsMonitor(stats, stream=self.stream, live=True)
+            sanitizer_monitor = SanitizerMonitor(
+                on_finding=lambda finding: self._log(
+                    f"  >>> [SANITIZER:{finding.sanitizer}] "
+                    f"{finding.category} ({finding.signature})"
+                )
+            )
+            cfg.timeout_sec = max(1, int(left))
+            try:
+                result = self.runner.run_group(
+                    group, monitor=monitor, sanitizer_monitor=sanitizer_monitor
+                )
+            finally:
+                cfg.timeout_sec = total_sec
+
+            findings.extend(result.sanitizer_findings)
+            duration += result.duration_sec
+            execs += stats.execs
+            cov_edges = max(cov_edges, stats.coverage)
+            left -= result.duration_sec
+            saved = self.collector.collect(group.name, self._crash_search_dirs(group))
+            saved_all.extend(saved)
+
+            can_resume = (
+                cfg.resume_after_crash and bool(saved) and not result.failed_to_start
+                and (attempt - 1) < cfg.max_resumes and left >= cfg.min_resume_sec
+            )
+            if not can_resume:
+                break
+            self._log(f"  - 크래시 {len(saved)}건 저장, 남은 {int(left)}초 동안 '{group.name}' 재실행 "
+                      f"({attempt}/{cfg.max_resumes + 1})")
+            self._keep_attempt_logs(group, attempt)
+
+        merged_stats = LiveStats(group=group.name, execs=execs, exec_per_sec=stats.exec_per_sec,
+                                 coverage=cov_edges, crashes=len(saved_all))
+        result.stats = merged_stats
+        result.sanitizer_findings = findings
+        result.crashes = saved_all
+        result.duration_sec = duration
+        return result
+
+    def _keep_attempt_logs(self, group: LogicGroup, attempt: int) -> None:
+        """다음 시도가 덮어쓰기 전에 이번 시도의 로그를 ``.<N>`` 이름으로 옮긴다."""
+        log_dir = self.config.logs_dir / group.name
+        for stem in ("run.stdout", "run.stderr"):
+            source = log_dir / f"{stem}.log"
+            try:
+                if source.is_file():
+                    source.replace(log_dir / f"{stem}.{attempt}.log")
+            except OSError:
+                pass
+
     def run(self, groups: list, ensure_image: bool = True,
             timeouts: Optional[dict] = None) -> SessionSummary:
         """그룹 순차 퍼징
@@ -118,14 +191,6 @@ class FuzzSession:
 
         for i, group in enumerate(groups, 1):
             self._log(f"\n[{i}/{len(groups)}] 로직 그룹 '{group.name}' 격리 퍼징 시작")
-            stats = LiveStats(group=group.name)
-            monitor = StatsMonitor(stats, stream=self.stream, live=True)
-            sanitizer_monitor = SanitizerMonitor(
-                on_finding=lambda finding: self._log(
-                    f"  >>> [SANITIZER:{finding.sanitizer}] "
-                    f"{finding.category} ({finding.signature})"
-                )
-            )
 
             # EXE-04-04: 계측 시 실행 전 그룹별 profraw 디렉토리 준비
             if self.config.coverage is not CoverageMode.NONE:
@@ -134,16 +199,10 @@ class FuzzSession:
             # 그룹 실행 전 크래시 baseline
             before = set(self.config.crashes_dir.rglob("*"))
             group_timeout = (timeouts or {}).get(group.name)
-            self.config.timeout_sec = group_timeout or default_timeout
-            try:
-                result: GroupResult = self.runner.run_group(
-                    group, monitor=monitor, sanitizer_monitor=sanitizer_monitor
-                )
-            finally:
-                self.config.timeout_sec = default_timeout
-            result.stats = stats
+            result = self._run_with_resume(group, group_timeout or default_timeout)
             if group_timeout:
                 result.timeout_sec = group_timeout
+            self.config.timeout_sec = default_timeout
             if result.sanitizer_findings:
                 write_findings(
                     self.config.logs_dir / "sanitizer" / f"{group.name}.jsonl",
@@ -167,9 +226,8 @@ class FuzzSession:
                 else:
                     self._log("  - 커버리지 산출물 없음(계측 미빌드 또는 도구 실패), 건너뜀")
 
-            # 크래시 수집 및 강조
-            saved = self.collector.collect(group.name, self._crash_search_dirs(group))
-            result.crashes = saved
+            # 크래시 수집 및 강조 (재실행 중 이미 저장된 것은 result.crashes 에 들어 있다)
+            saved = result.crashes
             if saved:
                 self._log(f"  >>> [CRASH] '{group.name}'에서 새 크래시 {len(saved)}건 저장: "
                           f"{self.config.crashes_dir / group.name}")

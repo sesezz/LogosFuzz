@@ -136,3 +136,92 @@ def test_reporting_marks_start_failure_as_failed_not_crashed(tmp_path):
 
     _, saved, _ = _run_one(tmp_path, executor)
     assert _status(saved["groups"][0]) == "failed"
+
+
+# --- 크래시 뒤 재실행 / UBSan 환경 (GENERIC-B, libsndfile 실측: UB 한 번에 11초 만에 세션 종료) ---------
+def _resume_cfg(tmp_path, **extra):
+    cfg = _cfg(tmp_path)
+    cfg.timeout_sec = 60
+    cfg.min_resume_sec = 0
+    for key, value in extra.items():
+        setattr(cfg, key, value)
+    return cfg
+
+
+def _crashing_executor(cfg, calls, crash_until):
+    """crash_until 번째 호출까지는 새 크래시 파일을 만들고 비정상 종료, 이후는 정상 종료."""
+    def fake_executor(argv, timeout, on_line):
+        calls.append(timeout)
+        on_line(f"#{len(calls)}00 pulse cov: {len(calls)}0 exec/s: 50")
+        if len(calls) <= crash_until:
+            cfg.crashes_dir.mkdir(parents=True, exist_ok=True)
+            (cfg.crashes_dir / f"crash-{len(calls):040d}").write_bytes(b"boom%d" % len(calls))
+            return ProcResult(exit_code=77, timed_out=False, stderr=f"attempt {len(calls)} stderr\n")
+        return ProcResult(exit_code=0, timed_out=False, stderr=f"attempt {len(calls)} stderr\n")
+    return fake_executor
+
+
+def test_resume_after_crash_keeps_fuzzing_and_merges_results(tmp_path):
+    cfg = _resume_cfg(tmp_path, resume_after_crash=True)
+    group = _harness(cfg, "grp")
+    calls = []
+    runner = DockerIsolationRunner(cfg, executor=_crashing_executor(cfg, calls, crash_until=2))
+    session = FuzzSession(cfg, runner=runner, stream=io.StringIO())
+
+    summary = session.run([group], ensure_image=False)
+
+    result = summary.groups[0]
+    assert len(calls) == 3                                    # 크래시 2번 + 정상 종료 1번
+    assert len(result.crashes) == 2 and summary.total_crashes == 2
+    assert result.stats.crashes == 2
+    logs = cfg.logs_dir / "grp"                               # 시도별 로그 보존
+    assert (logs / "run.stderr.1.log").read_text() == "attempt 1 stderr\n"
+    assert (logs / "run.stderr.2.log").read_text() == "attempt 2 stderr\n"
+    assert (logs / "run.stderr.log").read_text() == "attempt 3 stderr\n"
+
+
+def test_resume_is_off_by_default(tmp_path):
+    cfg = _resume_cfg(tmp_path)                               # resume_after_crash 기본 False
+    group = _harness(cfg, "grp")
+    calls = []
+    runner = DockerIsolationRunner(cfg, executor=_crashing_executor(cfg, calls, crash_until=5))
+
+    summary = FuzzSession(cfg, runner=runner, stream=io.StringIO()).run([group], ensure_image=False)
+
+    assert len(calls) == 1 and summary.total_crashes == 1
+
+
+def test_resume_is_capped_by_max_resumes(tmp_path):
+    cfg = _resume_cfg(tmp_path, resume_after_crash=True, max_resumes=2)
+    group = _harness(cfg, "grp")
+    calls = []
+    runner = DockerIsolationRunner(cfg, executor=_crashing_executor(cfg, calls, crash_until=99))
+
+    FuzzSession(cfg, runner=runner, stream=io.StringIO()).run([group], ensure_image=False)
+
+    assert len(calls) == 3                                    # 첫 실행 + 재실행 2회
+
+
+def test_resume_needs_enough_time_left(tmp_path):
+    cfg = _resume_cfg(tmp_path, resume_after_crash=True, min_resume_sec=1000)
+    group = _harness(cfg, "grp")
+    calls = []
+    runner = DockerIsolationRunner(cfg, executor=_crashing_executor(cfg, calls, crash_until=99))
+
+    FuzzSession(cfg, runner=runner, stream=io.StringIO()).run([group], ensure_image=False)
+
+    assert len(calls) == 1
+
+
+def test_ubsan_options_are_passed_only_when_configured(tmp_path):
+    cfg = _cfg(tmp_path)
+    group = _harness(cfg, "grp")
+    runner = DockerIsolationRunner(cfg, executor=lambda *a: ProcResult(0, False))
+
+    assert not any(str(a).startswith("UBSAN_OPTIONS=") for a in runner.build_run_argv(group))
+
+    cfg.ubsan_options = "print_stacktrace=1:halt_on_error=0"
+    argv = runner.build_run_argv(group)
+    assert "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0" in argv
+    local = runner._local_argv(group)
+    assert "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0" in local

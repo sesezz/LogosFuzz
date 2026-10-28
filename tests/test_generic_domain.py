@@ -63,3 +63,30 @@ def test_profile_metadata_carries_target_and_domain():
     assert profile_metadata(profile, commit="72f6af1", environment=None) == {
         "project": "libsndfile", "target": "libsndfile", "domain": "generic", "commit": "72f6af1",
     }
+
+
+def test_c_prompt_generic_adds_handle_and_callback_rules():
+    """실측 결함 방지: 핸들을 열지 않고 NULL 로 부르는 하네스, 콜백 구조체를 입력으로 채우는 하네스."""
+    automotive = build_prompt("g", [CTX], language="c")
+    generic = build_prompt("g", [CTX], language="c", domain="generic")
+
+    assert build_prompt("g", [CTX], language="c", domain="automotive") == automotive   # 기본값 = 기존 프롬프트
+    assert "NEVER pass a NULL or uninitialised handle" not in automotive
+    assert "Do NOT invent or call any function not explicitly listed above." in automotive
+
+    assert "NEVER pass a NULL or uninitialised handle" in generic
+    assert "function pointers or callbacks" in generic
+    assert "EXACTLY as declared in the included headers" in generic          # 헤더의 구조체를 재정의하지 않음
+    assert "never read, seek or tell outside [0, size]" in generic           # 콜백의 범위 검사
+    assert "choose it from the input" in generic                              # 명령 코드를 고정값으로 두지 않음
+    assert "NEVER pass the fuzzer input (or a pointer into it) as a `char *` string" in generic   # NUL 없는 문자열 전달 금지
+    assert "NEVER pass the fuzzer input" not in automotive
+    assert "mkstemps(template, suffix_length)" in generic                       # 접미사가 있는 임시 파일 템플릿
+    assert "Do NOT invent or call any function not explicitly listed above." not in generic
+    assert "needed to create, open, initialise or release" in generic        # 열기·닫기 함수 허용
+    assert "STRICT RULES:" in generic and generic.index("STRICT RULES:") < generic.index("13. NEVER")
+
+
+def test_c_prompt_embedded_uses_the_same_generic_rules():
+    assert build_prompt("g", [CTX], language="c", domain="embedded") == \
+        build_prompt("g", [CTX], language="c", domain="generic")
