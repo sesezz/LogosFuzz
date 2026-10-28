@@ -123,3 +123,18 @@ def test_buffer_rule_needs_the_api_in_the_profile(profile):
     record = _fixture_record()
     record.raw_log = [line.replace("sf_readf_float", "not_an_api") for line in record.raw_log]
     assert get_contract("c_return_code").analyze(record, profile=profile).violation == ""
+
+
+def test_buffer_suspect_stays_needs_review_even_when_reproduced_many_times(profile):
+    """재현성 보너스(+0.10)로 점수가 올라가도 정탐으로 넘어가지 않음 (x6 클러스터가 정탐 0.70 이 된 실측)."""
+    import copy
+
+    records = [copy.deepcopy(_fixture_record()) for _ in range(6)]
+    clusters, _ = deduplicate(records)
+    assert clusters[0].count == 6
+
+    result = rule_triage(clusters[0], profile=profile)
+
+    assert result.verdict is Verdict.NEEDS_REVIEW
+    assert "highly-reproducible" in result.signals
+    assert "c-harness-buffer-overflow-suspect" in result.signals

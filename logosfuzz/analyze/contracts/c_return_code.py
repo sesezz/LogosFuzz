@@ -289,8 +289,9 @@ _HARNESS_VIOLATION_DELTA = -0.45
 # 하네스 소스 줄까지 읽어서 증명한 문자열 오용은 스택만으로 보는 NULL 미검사보다 증거가 강하다.
 # ASan 메모리 오류의 기본 점수(0.95)를 오탐 기준(0.35) 아래로 내리려면 -0.60 이상이 필요
 _HARNESS_STRING_DELTA = -0.65
-# 의심 단계: 0.95 에서 -0.35 하면 0.60 으로 자동 정탐(0.65 이상)에서 빠져 사람 검토로 간다
-_HARNESS_BUFFER_DELTA = -0.35
+# 의심 단계: 재현성 보너스(+0.10)까지 받은 점수 1.05 에서도 정탐 기준(0.65) 아래로 내려 사람 검토로 보내야 한다.
+# -0.35 는 같은 입력군이 3번 이상 재현되면 0.70 으로 정탐이 되었다(libsndfile 8차 실측) -> -0.45 (1.05 -> 0.60)
+_HARNESS_BUFFER_DELTA = -0.45
 
 
 def derive_signals(evidence: CReturnCodeEvidence, bug_type: str = "") -> tuple[float, list[str]]:
