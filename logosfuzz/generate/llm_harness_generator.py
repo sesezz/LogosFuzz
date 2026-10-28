@@ -389,6 +389,14 @@ _C_GENERIC_EXTRA_RULES = """\
     in the headers (close/free/destroy), on every return path. That function is
     available even when it is not in the API list above; never leave the call
     commented out.
+24. Do not "test boundary values" by passing 0 as the number of items or frames
+    to read: that makes every read call a no-op. After a successful open, read
+    real data with a count derived from the input and capped by what the library
+    reported (for example data[1] % 64 + 1 frames, never more than the info
+    struct's frame count), and read until the call returns 0 at most a few times.
+25. When an API takes a command or option code, pick it from the valid values
+    listed in the header excerpt (for example an array of those constants indexed
+    by data[0] % N), never from a raw byte range such as data[0] % 256.
 """
 
 

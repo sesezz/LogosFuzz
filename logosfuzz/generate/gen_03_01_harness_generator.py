@@ -84,7 +84,7 @@ MAX_CONTEXT_APIS = 8
 MAX_EXCERPT_CHARS = 900
 MAX_HEADER_CONTENT_CHARS = 6000
 # 타입 정의 발췌 상한(문자 수)과 구조체·열거형 하나의 최대 줄 수
-MAX_TYPE_DEFS_CHARS = 3000
+MAX_TYPE_DEFS_CHARS = 4500
 MAX_DEFINITION_LINES = 40
 # 열거형 중 이 개수 이하의 멤버를 가진 것은 이름이 맞지 않아도 포함(모드·문자열 종류 같은 짧은 상수 묶음)
 SMALL_ENUM_MEMBERS = 16
@@ -555,6 +555,8 @@ _RELEASE_DECL_RE = re.compile(
     r"^[ \t]*[A-Za-z_][\w \t\*]*\b\w*(?:close|free|destroy|release|cleanup|dispose|delete)\w*[ \t]*\([^;{}]*\)[ \t]*;",
     re.IGNORECASE | re.MULTILINE)
 MAX_RELEASE_DECLS = 6
+# 이 이름의 매개변수가 있으면 명령 코드를 받는 API 로 보고, 가장 큰 열거형(명령 코드 목록)을 보여 준다
+_COMMAND_PARAM_NAMES = frozenset({"command", "cmd", "request", "opcode", "ioctl", "op"})
 # 타입 정의를 찾을 필요가 없는 C 예약어·표준 스칼라 이름
 _NON_TYPE_WORDS = frozenset({
     "const", "volatile", "struct", "union", "enum", "unsigned", "signed", "int", "char", "short",
@@ -568,18 +570,22 @@ _GENERIC_PARAM_WORDS = frozenset({
 })
 
 
-def _balanced_block(lines: Sequence[str], start: int) -> List[str]:
-    """``start`` 줄에서 시작해 중괄호가 닫힐 때까지(그리고 ``;`` 가 나올 때까지) 줄을 모은다."""
+def _balanced_block(lines: Sequence[str], start: int, *, truncate: bool = True) -> List[str]:
+    """``start`` 줄에서 시작해 중괄호가 닫힐 때까지(그리고 ``;`` 가 나올 때까지) 줄을 모은다.
+
+    ``truncate=False`` 면 ``MAX_DEFINITION_LINES`` 로 자르지 않는다(멤버 수를 세는 용도).
+    """
     depth = 0
     seen_open = False
     block: List[str] = []
-    for text in lines[start:start + MAX_DEFINITION_LINES * 4]:
+    limit = MAX_DEFINITION_LINES * 4 if truncate else 10_000
+    for text in lines[start:start + limit]:
         block.append(text.rstrip())
         depth += text.count("{") - text.count("}")
         seen_open = seen_open or "{" in text
         if seen_open and depth <= 0 and ";" in text:
             break
-    if len(block) > MAX_DEFINITION_LINES:
+    if truncate and len(block) > MAX_DEFINITION_LINES:
         block = block[:MAX_DEFINITION_LINES] + ["/* ... (truncated) */"]
     return block
 
@@ -611,10 +617,10 @@ def _enum_blocks(lines: Sequence[str]) -> List[Tuple[List[str], List[str]]]:
     while index < len(lines):
         if re.match(r"\s*(?:typedef\s+)?enum\b", lines[index]):
             block = _balanced_block(lines, index)
-            body = " ".join(block)
-            members = re.findall(r"\b([A-Z][A-Z0-9_]{2,})\b\s*(?:=|,|\})", body)
+            full = _balanced_block(lines, index, truncate=False)      # 멤버 수는 잘리기 전 전체로 센다
+            members = re.findall(r"\b([A-Z][A-Z0-9_]{2,})\b\s*(?:=|,|\})", " ".join(full))
             blocks.append((block, members))
-            index += max(len(block), 1)
+            index += max(len(full), 1)
         else:
             index += 1
     return blocks
@@ -686,11 +692,24 @@ def type_definitions_excerpt(
                 add(struct)
             add(_typedef_lines(text, name))
 
-        for block, members in _enum_blocks(lines):
+        enums = _enum_blocks(lines)
+        for block, members in enums:
             small = 0 < len(members) <= SMALL_ENUM_MEMBERS
             matched = any(clue in member for clue in clues for member in members)
             if small or matched:
                 add(block)
+        command_prefixes = {
+            f"{str(document.get('function') or '').split('_')[0]}{str(param.get('name'))[0]}".upper() + "_"
+            for document in docs for param in document.get("params") or []
+            if str(param.get("name") or "").lower() in _COMMAND_PARAM_NAMES and document.get("function")
+        }
+        if command_prefixes and enums:
+            # 실측: sf_command 의 명령 코드를 data[0] % 256 으로 골라 유효한 코드(SFC_*)를 한 번도 못 맞춤.
+            # 함수 접두사 + 매개변수 첫 글자(sf_command(command) -> "SFC_")로 시작하는 열거형을 우선하고,
+            # 없으면 멤버가 가장 많은 열거형을 쓴다. 크기만 보면 SF_FORMAT_*(67) 이 SFC_*(64) 를 이긴다.
+            matching = [item for item in enums
+                        if any(member.startswith(tuple(command_prefixes)) for member in item[1])]
+            add(max(matching or enums, key=lambda item: len(item[1]))[0])
 
         releases = [" ".join(m.group(0).split()) for m in _RELEASE_DECL_RE.finditer(text)]
         if releases:
