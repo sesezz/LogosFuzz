@@ -203,6 +203,104 @@ def test_prepare_fails_when_the_declared_library_is_not_produced(tmp_path):
     assert not result.ok and "libx.a" in result.log
 
 
+# --- 남이 만들어 둔 캐시 (GENERIC-A 문서의 수동 configure 등) ----------------
+#
+# CMake 는 캐시가 있으면 CC/CFLAGS 환경변수를 무시한다. 그래서 캐시 판정이
+# 컴파일러·플래그까지 보지 않으면 계측 없는 라이브러리가 "(캐시) OK" 로
+# 통과하거나, 재빌드돼도 계측 없이 다시 만들어진다. libsndfile 실측에서
+# `nm libsndfile.a | grep -c __asan_` 이 0 인 채로 prepare 가 성공했다.
+
+def _write_cache(adapter, *, compiler="/usr/bin/clang", flags=None, language="C"):
+    flags = " ".join(adapter.compile_flags()) if flags is None else flags
+    adapter.build_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# This is the CMakeCache file.",
+        "//  컴파일러 경로",
+        "CMAKE_{}_COMPILER:FILEPATH={}".format(language, compiler),
+        "CMAKE_{}_FLAGS:STRING={}".format(language, flags),
+    ]
+    (adapter.build_dir / "CMakeCache.txt").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_prepare_discards_a_cache_built_by_another_compiler(tmp_path):
+    profile = make_profile(tmp_path)
+    runner = FakeRunner(libraries=[profile.abs("build-fuzz/libx.a")])
+    adapter, _ = make_adapter(tmp_path, profile=profile, runner=runner)
+    _write_cache(adapter, compiler="/usr/bin/cc", flags="")
+    profile.abs("build-fuzz/libx.a").write_text("", encoding="utf-8")   # 라이브러리도 이미 있다
+
+    result = adapter.prepare()
+
+    assert result.ok
+    assert "다시 configure" in result.log and "컴파일러가 다르다" in result.log
+    assert [c.argv[0] for c in runner.calls] == ["cmake", "cmake"]      # 캐시로 때우지 않았다
+
+
+def test_prepare_discards_a_cache_without_instrumentation_flags(tmp_path):
+    profile = make_profile(tmp_path)
+    runner = FakeRunner(libraries=[profile.abs("build-fuzz/libx.a")])
+    adapter, _ = make_adapter(tmp_path, profile=profile, runner=runner)
+    _write_cache(adapter, flags="-g -O1")          # 컴파일러는 같은데 -fsanitize 가 없다
+    profile.abs("build-fuzz/libx.a").write_text("", encoding="utf-8")
+
+    result = adapter.prepare()
+
+    assert result.ok and "계측 플래그가 빠져 있다" in result.log
+    assert "-fsanitize=address,undefined,fuzzer-no-link" in result.log
+    assert (adapter.build_dir / "CMakeCache.txt").read_text(encoding="utf-8") == ""
+
+
+def test_prepare_keeps_a_cache_that_already_matches(tmp_path):
+    profile = make_profile(tmp_path)
+    runner = FakeRunner(libraries=[profile.abs("build-fuzz/libx.a")])
+    adapter, _ = make_adapter(tmp_path, profile=profile, runner=runner)
+    _write_cache(adapter)                          # 컴파일러·플래그가 모두 일치
+    profile.abs("build-fuzz/libx.a").write_text("", encoding="utf-8")
+
+    result = adapter.prepare()
+
+    assert result.ok and "캐시" in result.log
+    assert runner.calls == []                      # 아무것도 다시 돌리지 않는다
+
+
+def test_cache_without_the_keys_is_not_treated_as_a_mismatch(tmp_path):
+    """판정은 보수적이어야 한다 — 모르면 지우지 않는다."""
+    adapter, _ = make_adapter(tmp_path)
+    adapter.build_dir.mkdir(parents=True, exist_ok=True)
+    (adapter.build_dir / "CMakeCache.txt").write_text("# 비어 있다", encoding="utf-8")
+
+    assert adapter._cache_mismatch() == ""
+
+
+def test_cpp_profile_checks_the_cxx_cache_entries(tmp_path):
+    profile = make_profile(tmp_path, language="cpp")
+    adapter, _ = make_adapter(tmp_path, profile=profile)
+    _write_cache(adapter, compiler="/usr/bin/g++", flags="", language="CXX")
+
+    assert "g++" in adapter._cache_mismatch()
+
+    same = make_adapter(tmp_path, profile=profile)[0]
+    _write_cache(same, compiler="/usr/bin/cc", flags="", language="C")   # C 쪽은 봐도 의미 없다
+    assert same._cache_mismatch() == ""
+
+
+def test_cache_is_not_removed_when_it_is_the_source_tree(tmp_path):
+    """in-source 빌드를 지우면 대상 소스가 날아간다. 지우지 말고 실패해야 한다."""
+    data = profile_data(tmp_path)
+    data["build"]["build_dir"] = "."            # in-source 빌드
+    data["build"]["libraries"] = ["libx.a"]
+    profile = parse_profile(data, base_dir=tmp_path)
+    adapter, _ = make_adapter(tmp_path, profile=profile)
+    _write_cache(adapter, compiler="/usr/bin/cc", flags="")
+
+    result = adapter.prepare()
+
+    assert not result.ok
+    assert "source_root 와 같다" in result.log
+    assert (profile.root / "CMakeLists.txt").is_file()      # 소스는 그대로다
+
+
 def test_coverage_variant_uses_a_separate_instrumented_build_dir(tmp_path):
     profile = make_profile(tmp_path)
     runner = FakeRunner(libraries=[profile.abs("build-fuzz-cov/libx.a")])
@@ -385,6 +483,25 @@ def test_cli_prepare_only_does_not_need_a_harness(tmp_path, capsys):
                  "--prepare-only", "--work-dir", str(tmp_path / "work")], runner=runner)
 
     assert code == 0 and "[PREPARE] OK" in capsys.readouterr().out
+
+
+def test_cli_says_when_it_threw_away_a_stale_cache(tmp_path, capsys):
+    """조용히 지나가면 2분이 더 걸린 이유를 아무도 모른다."""
+    profile = make_profile(tmp_path)
+    runner = FakeRunner(libraries=[profile.abs("build-fuzz/libx.a")])
+    build_dir = profile.abs("build-fuzz")
+    build_dir.mkdir(parents=True, exist_ok=True)
+    (build_dir / "CMakeCache.txt").write_text(      # 남이 gcc 로 만들어 둔 캐시
+        "CMAKE_C_COMPILER:FILEPATH=/usr/bin/cc", encoding="utf-8")
+
+    code = main(["--profile", str(_write_profile(tmp_path)), "--base-dir", str(tmp_path),
+                 "--prepare-only", "--work-dir", str(tmp_path / "work")], runner=runner)
+
+    assert code == 0
+
+    out = capsys.readouterr().out
+    assert "[PREPARE] OK" in out
+    assert "기존 캐시를 버리고 다시 configure" in out
 
 
 def test_cli_reports_a_failed_build_and_returns_nonzero(tmp_path, capsys):

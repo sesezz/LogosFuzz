@@ -214,8 +214,79 @@ class CMakeAdapter:
     # ------------------------------------------------------------------ #
     # prepare: 라이브러리 계측 빌드 (캐시)
     # ------------------------------------------------------------------ #
+    def _cache_entries(self) -> Dict[str, str]:
+        """``CMakeCache.txt`` 를 ``{KEY: VALUE}`` 로 읽는다. 못 읽으면 빈 dict."""
+        try:
+            text = (self.build_dir / "CMakeCache.txt").read_text(
+                encoding="utf-8", errors="replace")
+        except OSError:
+            return {}
+        entries: Dict[str, str] = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith(("#", "//")):
+                continue
+            key, sep, value = line.partition("=")
+            if sep and ":" in key:
+                entries[key.split(":", 1)[0]] = value
+        return entries
+
+    def _same_compiler(self, cached: str) -> bool:
+        """캐시에 박힌 컴파일러가 이 어댑터가 쓰려는 것과 같은가."""
+        wanted = self.compiler
+        if Path(cached).name == Path(wanted).name:
+            return True
+        # ``cc`` 가 clang 을 가리키는 환경도 있다. 실제 경로까지 같으면 같은 것이다.
+        resolved = self._which(wanted)
+        if not resolved:
+            return False
+        try:
+            return Path(cached).resolve() == Path(resolved).resolve()
+        except OSError:
+            return False
+
+    def _cache_mismatch(self) -> str:
+        """캐시가 이 어댑터의 설정과 **다름이 증명되면** 그 이유를, 아니면 빈 문자열.
+
+        CMake 는 캐시가 이미 있으면 ``CC``/``CFLAGS`` 환경변수를 무시하고 캐시에
+        박힌 값을 그대로 쓴다. 그래서 남이(또는 문서의 수동 ``cmake configure`` 가)
+        만들어 둔 캐시 위에서 ``prepare()`` 를 돌리면 **계측 없는 라이브러리가
+        조용히 다시 빌드되고 prepare 는 성공으로 끝난다.** 커버리지도 크래시도
+        나오지 않는데 수치는 그럴듯해서 알아차릴 방법이 없다.
+
+        판정은 보수적으로 한다 — 키가 아예 없으면(= 증명 불가) 일치로 본다.
+        캐시를 지우는 쪽이 비싼 쪽이라, 추측으로 지우지 않는다.
+        """
+        entries = self._cache_entries()
+        prefix = "CMAKE_CXX" if self.profile.language == "cpp" else "CMAKE_C"
+
+        cached_compiler = entries.get(prefix + "_COMPILER", "")
+        if cached_compiler and not self._same_compiler(cached_compiler):
+            return f"컴파일러가 다르다({cached_compiler} != {self.compiler})"
+
+        if prefix + "_FLAGS" in entries:
+            cached_flags = entries[prefix + "_FLAGS"].split()
+            missing = [f for f in self.compile_flags() if f not in cached_flags]
+            if missing:
+                return "계측 플래그가 빠져 있다(" + " ".join(missing) + ")"
+        return ""
+
+    def _discard_build_dir(self) -> Optional[str]:
+        """다시 configure 하려고 빌드 디렉터리를 지운다. 못 지우면 그 이유를 돌려준다."""
+        if not (self.build_dir / "CMakeCache.txt").is_file():
+            return "CMake 빌드 디렉터리가 아니다"
+        try:
+            if self.build_dir.resolve() == self.source_dir.resolve():
+                return "build_dir 이 source_root 와 같다"
+            shutil.rmtree(self.build_dir)
+        except OSError as exc:
+            return f"{exc}"
+        return None
+
     def _is_built(self) -> bool:
         if not (self.build_dir / "CMakeCache.txt").is_file():
+            return False
+        if self._cache_mismatch():
             return False
         return all(lib.is_file() for lib in self.libraries)
 
@@ -237,6 +308,22 @@ class CMakeAdapter:
                     f"(대상 소스를 source_root 위치에 받아 두었는가?)",
             )
 
+        logs: List[str] = []
+
+        # 남이 만들어 둔 캐시 위에서는 CC/CFLAGS 가 먹지 않는다. 지우고 새로
+        # configure 하지 않으면 계측 없는 라이브러리를 성공으로 넘기게 된다.
+        mismatch = self._cache_mismatch()
+        if mismatch:
+            failure = self._discard_build_dir()
+            if failure is not None:
+                return BuildResult(
+                    ok=False, target=target,
+                    log=f"ERROR: 기존 캐시가 이 어댑터의 설정과 다른데({mismatch}) "
+                        f"{self.build_dir} 를 지울 수 없다: {failure}. "
+                        f"직접 지우고 다시 실행하라.",
+                    duration_s=time.monotonic() - started)
+            logs.append(f"INFO: 기존 캐시를 버리고 다시 configure 한다 — {mismatch}")
+
         configure = [
             "cmake", "-S", str(self.source_dir), "-B", str(self.build_dir),
         ]
@@ -247,7 +334,6 @@ class CMakeAdapter:
         build = ["cmake", "--build", str(self.build_dir), "--parallel", str(self.jobs)]
 
         env = self._env()
-        logs: List[str] = []
         for command in (configure, build):
             result = self.runner(command, None, env, self.timeout_s)
             logs.append(result.stdout + result.stderr)
