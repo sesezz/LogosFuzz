@@ -59,9 +59,10 @@ from typing import Callable
 _ERROR_START = re.compile(r"(?:ERROR: (?:Address|Leak)Sanitizer:|WARNING: ThreadSanitizer:)\s*(.+)", re.IGNORECASE)
 
 # UBSan 진단의 시작 줄. "<파일>:<행>:<열>: runtime error: <내용>" 형태다.
-# 파일 경로에 공백이 없다는 전제는 _SOURCE_LOCATION 과 동일하다.
+# 경로에 공백이 있을 수 있어 ``\S`` 대신 콜론을 경계로 쓴다("runtime error:"가
+# 뒤를 못 박아 주므로 프레임 줄과 섞이지 않는다).
 _UBSAN_RUNTIME_ERROR = re.compile(
-    r"^(?P<file>\S+):(?P<line>\d+):(?P<col>\d+):\s*runtime error:\s*(?P<message>.+)$"
+    r"^(?P<file>(?:[A-Za-z]:)?[^:]+):(?P<line>\d+):(?P<col>\d+):\s*runtime error:\s*(?P<message>.+)$"
 )
 # UBSan 블록의 끝. 여기서 끊어야 뒤따르는 libFuzzer 요약줄이 결함에 섞이지 않고,
 # 복구 가능 모드에서 연속으로 터지는 UB 여러 건이 한 덩어리로 합쳐지지 않는다.
@@ -75,6 +76,32 @@ _LIBFUZZER_ERROR = re.compile(r"ERROR: libFuzzer:\s*(.+)", re.IGNORECASE)
 _LIBFUZZER_SUMMARY = re.compile(r"^SUMMARY:\s*libFuzzer:", re.IGNORECASE)
 
 _SOURCE_LOCATION = re.compile(r"(?P<file>(?:[A-Za-z]:)?[^\s():]+\.(?:c|cc|cpp|cxx|h|hh|hpp)):(?P<line>\d+)(?::\d+)?")
+
+# 경로에 공백이 있는 경우(실측: 저장소가 "C:/Users/.../바탕 화면/LogosFuzz" 에
+# 있으면 크래시 위치가 "화면/LogosFuzz/..." 로 잘려 들어갔다. ANA 의
+# --source-root 조회와 리포트의 crash_location 이 같이 틀어진다).
+#
+# 위의 _SOURCE_LOCATION 은 "경로에 공백은 없다"를 전제로 ``\S`` 를 쓴다. 그걸
+# 느슨하게 풀면 한 줄 안의 엉뚱한 토큰까지 경로로 빨아들이므로, 공백을 허용하는
+# 대신 **줄의 끝/시작을 앵커로** 쓰는 패턴을 따로 둔다. 콜론은 경로에 못 들어
+# 온다고 보고 경계로 쓴다(Windows 드라이브 문자만 예외).
+_PATH_EXT = r"(?:c|cc|cpp|cxx|h|hh|hpp)"
+# 심볼라이즈된 sanitizer 프레임은 줄 끝이 "<파일>:<행>[:<열>]" 이다.
+#     #1 0x57a665aa3726 in vulnerable /mnt/c/바탕 화면/x/fuzz_target.c:16:13
+#
+# 절대 경로만 받는다. 경로의 시작을 줄머리/공백 뒤로 못 박아야(앞의 함수 이름을
+# 빨아들이지 않도록) 하고, 그러면 ``score/json.cc`` 같은 상대 경로는 중간의
+# ``/`` 부터 잘려 ``/json.cc`` 가 된다. 상대 경로는 공백을 품지 않으니 기존
+# _SOURCE_LOCATION 이 제대로 읽는다 — 거기로 떨어뜨린다.
+_FRAME_LOCATION = re.compile(
+    r"(?:^|(?<=\s))(?P<file>(?:[A-Za-z]:)?[/\\][^:]*?\." + _PATH_EXT
+    + r"):(?P<line>\d+)(?::\d+)?\s*$"
+)
+# UBSan 진단 줄은 반대로 경로로 시작한다. "runtime error:" 로 끝을 못 박아
+# 프레임 줄과 섞이지 않게 한다.
+_UBSAN_LOCATION = re.compile(
+    r"^(?P<file>(?:[A-Za-z]:)?[^:]+\." + _PATH_EXT + r"):(?P<line>\d+):\d+:\s*runtime error:"
+)
 
 
 @dataclass(frozen=True)
@@ -116,7 +143,11 @@ def source_locations(lines: list[str]) -> list[SourceLocation]:
     """
     locations: list[SourceLocation] = []
     for line in lines:
-        match = _SOURCE_LOCATION.search(line)
+        # 공백을 허용하는 앵커 패턴을 먼저 본다. 둘 다 아니면 기존 규칙으로
+        # 떨어진다(상대 경로가 줄 가운데 오는 UBSan SUMMARY 등).
+        match = (_UBSAN_LOCATION.match(line.strip())
+                 or _FRAME_LOCATION.search(line)
+                 or _SOURCE_LOCATION.search(line))
         if match:
             location = SourceLocation(match.group("file"), int(match.group("line")))
             if location not in locations:
