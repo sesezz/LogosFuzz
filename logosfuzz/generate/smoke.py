@@ -66,6 +66,9 @@ def run_seed_smoke(binary: Path, seeds: Sequence[Path], *, timeout_s: int = SMOK
     from logosfuzz.execute.sanitizer import SanitizerMonitor
     from logosfuzz.execute.seeds import copy_seeds
 
+    # 작업 디렉터리를 임시 폴더로 바꿔 실행하므로 상대경로 하네스는 찾지 못한다(실측: 13차에서 SMOKE 가 skipped).
+    binary = Path(binary).resolve()
+    seeds = [Path(seed).resolve() for seed in seeds]
     work = Path(tempfile.mkdtemp(prefix="logosfuzz-smoke-"))
     try:
         corpus = work / "corpus"

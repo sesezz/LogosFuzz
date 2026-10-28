@@ -79,6 +79,18 @@ def test_run_seed_smoke_does_not_touch_the_original_seed_folder(tmp_path):
     assert sorted(p.name for p in seeds.iterdir()) == ["a.bin"]
 
 
+def test_run_seed_smoke_accepts_relative_paths(tmp_path, monkeypatch):
+    """실측: 상대경로 하네스를 임시 폴더에서 실행하다 127 로 실패해 SMOKE 가 skipped 되었다."""
+    (tmp_path / "seeds").mkdir()
+    (tmp_path / "seeds" / "a.bin").write_bytes(b"a")
+    _script(tmp_path, f"cat '{FIXTURE}' >&2\nexit 77\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = run_seed_smoke(Path("fake_harness"), [Path("seeds")])
+
+    assert result.returncode == 77 and len(result.records) == 1       # 실행되었고 크래시를 파싱함
+
+
 def test_run_seed_smoke_reports_a_missing_binary(tmp_path):
     result = run_seed_smoke(tmp_path / "nope", [tmp_path])
     assert not result.ok and result.returncode == 127
