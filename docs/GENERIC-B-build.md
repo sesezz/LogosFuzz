@@ -157,7 +157,22 @@ libsndfile E2E(`logosfuzz run`)에서 자동 생성된 C 하네스 2개에 결�
 
 해석할 때 주의할 점
 * 두 실행의 하네스 소스가 다름(LLM이 매번 새로 생성). 커버리지 차이가 시드만의 효과라고 단정할 수 없음.
-* `lg_sndfile` 의 exec/s 가 약 20배 낮아짐. 하네스 차이 또는 더 깊은 코드 경로 실행 때문으로 추정되며 원인은 확인하지 않음.
+* `lg_sndfile` 의 exec/s 가 약 20배 낮아짐(13,674 -> 653). 호스트에서 같은 `run10` 하네스로 측정한 결과:
+  시드 9개는 5,000 exec/s 이상(1초 미만), 퍼징이 만든 최종 코퍼스(367개)는 465 exec/s.
+  하네스·환경은 같고 입력만 달라서 하락은 **진화한 코퍼스 입력** 때문으로 판단함(Docker 실행 653 exec/s 와 비슷한 값).
+  Docker 안(`logosfuzz-exec:generic`, `UBSAN_OPTIONS=halt_on_error=0`)에서 `run10` 하네스를 시드 9개로 5만 회 실행하면 7,142 exec/s 라서
+  환경(Docker)이 원인은 아님. 어떤 입력이 느린지는 확인하지 않음.
+* 두 실행 모두 `lg_sndfile` 하네스가 `sf_read_short(..., 0)`, `sf_readf_float(..., 0)` 처럼 **0개를 읽음**. 읽기 API 는 호출은 되지만
+  샘플 디코딩 코드는 거의 실행되지 않으므로 "8개 API 포함"을 읽기 깊이로 해석하면 안 됨.
 * 새로 나온 군집: `au.c:324/326/327` 정수 오버플로(AU 시드로 파서에 도달). 나머지는 `mat4.c`(5곳), `pcm.c:130`, `strings.c:176`(NULL 포인터 연산)로 이전 실행과 같음.
 * 결함은 모두 UBSan 의 정의되지 않은 동작 경고이고 사람 검토 전에는 정탐이 아님. 메모리 오류(ASan)는 0건.
+
+### 재현 사례: `au.c` 부호 있는 정수 오버플로 (UB, 취약점으로 확정하지 않음)
+
+* 입력: 20바이트 AU 헤더 변형. Base64 `LnNuZFIA6QhhiYmJ5ImJYAAAJQA=` (`echo '<위 값>' | base64 -d > au_ub.bin`)
+* 실행: `UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=1 <lg_sndfile 바이너리> au_ub.bin`
+* 결과: `au.c:324:54`, `au.c:326:29`, `au.c:327:40` 에서 `signed integer overflow: 1375791368 + 1636403593 cannot be represented in type 'int'`.
+  호출 경로 `sf_open -> psf_open_file -> au_open -> au_read_header`. 헤더의 `dataoffset` 과 `datasize` 두 값을 `int` 로 더하는 식임.
+* 확인하지 않은 것: 합이 이후 메모리 할당·인덱스로 쓰여 실제 메모리 오류가 되는지(ASan 오류는 0건), 업스트림의 기존 이슈 여부.
+* 같은 군집 계열: `mat4.c`(107, 318, 320, 322, 323), `pcm.c:130`, `strings.c:176` 은 재현 입력을 아직 정리하지 않음.
 
