@@ -68,6 +68,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="로직 그룹 정의 JSON(미지정 시 harness-dir 자동 탐색)")
     f.add_argument("--image", default="logosfuzz-exec:latest", help="격리 이미지 태그")
     f.add_argument("--no-build", action="store_true", help="이미지 자동 빌드 생략")
+    f.add_argument("--no-symbolize", dest="symbolize", action="store_false", default=True,
+                   help="크래시 후처리 심볼라이즈(EXE-04-02) 생략. 기본은 실행 후 "
+                        "llvm-symbolizer로 스택의 파일:줄을 복원한다.")
     f.add_argument("--coverage", default="none",
                    help="커버리지 계측(EXE-04-04): none | llvm-cov | sancov (기본 none). "
                         "하네스가 해당 계측 플래그로 빌드돼 있어야 수집된다.")
@@ -213,6 +216,7 @@ def main(argv: list | None = None) -> int:
             output_dir=args.output,
             image=args.image,
             coverage=CoverageMode.parse(args.coverage),
+            symbolize_crashes=args.symbolize,
         )
         groups = discover_groups(args.harness_dir, args.groups)
         if not groups:

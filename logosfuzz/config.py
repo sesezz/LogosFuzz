@@ -125,10 +125,19 @@ class FuzzConfig:
     # SIGABRT로 종료되고 크래시 산출물도 정상 저장된다(실측 확인).
     #
     # 대신 파일:줄 정보를 잃는다. 이건 크래시 발생 "이후" 별도 프로세스로
-    # (ASAN 시그널 핸들러 밖에서) `asan_symbolize`/`llvm-symbolizer`를 돌려
-    # 복원해야 한다 - ANA 단계의 후속 작업으로 남겨둔다.
+    # (ASAN 시그널 핸들러 밖에서) `llvm-symbolizer`를 돌려 복원한다 -
+    # `execute/symbolize.py` 가 그 일을 하고, 아래 세 설정으로 제어한다.
     asan_options: str = "abort_on_error=1:detect_leaks=1:symbolize=0"
     tsan_options: str = "halt_on_error=1:second_deadlock_stack=1"
+
+    # 크래시 후처리 심볼라이즈 (EXE-04-02). 끄면 sanitizer 결함의 traceback 이
+    # 비어 ANA 의 시그니처/정오탐 판별이 근거를 잃는다(모듈 docstring 참조).
+    symbolize_crashes: bool = True
+    # 심볼라이저는 호스트에서 돌리는 것이 기본이다 - 퍼징 이미지는 clang/llvm 을
+    # apt 로 깔지 않아(Bazel @llvm_toolchain 이 가져온다) llvm-symbolizer 가 없다.
+    # 한쪽에 도구가 없으면 다른 쪽으로 한 번 넘어간다(symbolize.py 참조).
+    symbolize_in_docker: bool = False
+    llvm_symbolizer: str = "llvm-symbolizer"   # 심볼라이저 경로/이름
 
     # 커버리지 계측 (EXE-04-04). 기본 NONE → 기존 동작 불변, 옵트인 시에만 활성.
     coverage: CoverageMode = CoverageMode.NONE

@@ -22,6 +22,7 @@ from logosfuzz.execute.docker_runner import DockerIsolationRunner, GroupResult
 from logosfuzz.execute.stats import LiveStats, StatsMonitor
 from logosfuzz.execute.sanitizer import SanitizerMonitor, write_findings
 from logosfuzz.execute.coverage import CoverageCollector, write_coverage
+from logosfuzz.execute.symbolize import CrashSymbolizer
 
 
 @dataclass
@@ -76,13 +77,16 @@ class SessionSummary:
 class FuzzSession:
     def __init__(self, config: FuzzConfig, runner: Optional[DockerIsolationRunner] = None,
                  stream=sys.stdout,
-                 coverage_collector: Optional[CoverageCollector] = None):
+                 coverage_collector: Optional[CoverageCollector] = None,
+                 symbolizer: Optional[CrashSymbolizer] = None):
         self.config = config
         self.runner = runner or DockerIsolationRunner(config)
         self.stream = stream
         self.collector = CrashCollector(config.crashes_dir)
         # EXE-04-04: 커버리지 수집기(테스트에서 주입 가능). NONE이면 사용되지 않음.
         self.coverage_collector = coverage_collector or CoverageCollector(config)
+        # EXE-04-02: 크래시 후처리 심볼라이저. symbolize_crashes=False 면 쓰이지 않음.
+        self.symbolizer = symbolizer or CrashSymbolizer(config)
 
     def _log(self, msg: str) -> None:
         self.stream.write(msg + "\n")
@@ -130,6 +134,11 @@ class FuzzSession:
                 group, monitor=monitor, sanitizer_monitor=sanitizer_monitor
             )
             result.stats = stats
+            # EXE-04-02: 실행 중에는 symbolize=0 이라 프레임에 파일:줄이 없다.
+            # 결함을 ANA 로 내보내기 "전에" 복원한다 - traceback 이 비면 크래시
+            # 시그니처가 뭉개지고 정/오탐 판별이 근거를 잃는다.
+            if result.sanitizer_findings and self.config.symbolize_crashes:
+                self._symbolize(result.sanitizer_findings)
             if result.sanitizer_findings:
                 write_findings(
                     self.config.logs_dir / "sanitizer" / f"{group.name}.jsonl",
@@ -177,6 +186,26 @@ class FuzzSession:
             self._log(f"\n=== 완료: 그룹 {len(summary.groups)}개, "
                       f"총 크래시 {summary.total_crashes}건 → analyze 단계로 전달 ===")
         return summary
+
+    def _symbolize(self, findings: list) -> None:
+        """크래시 프레임의 파일:줄을 복원하고 결과를 한 줄로 보고한다.
+
+        심볼라이즈가 실패해도 캠페인을 깨뜨리지 않는다 — 복원 못 한 결함은
+        복원 전과 똑같이 남고, 사람이 알아챌 수 있도록 이유만 남긴다.
+        """
+        try:
+            report = self.symbolizer.symbolize(findings)
+        except Exception as exc:  # 도구 출력 형식 변화 등 예상 못한 실패
+            self._log(f"  - 심볼라이즈 실패({exc.__class__.__name__}), 원문 그대로 둠")
+            return
+        if not report.attempted:
+            return
+        if not report.tool_available:
+            self._log(f"  - 심볼라이저('{self.config.llvm_symbolizer}') 없음 → "
+                      f"프레임 {report.unresolved}개의 파일:줄 복원 건너뜀")
+            return
+        self._log(f"  >>> [SYMBOLIZE] 프레임 {report.resolved}/{report.attempted}개 "
+                  f"파일:줄 복원")
 
     def _write_summary(self, summary: SessionSummary) -> Path:
         path = self.config.output_dir / "fuzz_summary.json"

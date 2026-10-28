@@ -106,6 +106,24 @@ class SanitizerFinding:
         return data
 
 
+def source_locations(lines: list[str]) -> list[SourceLocation]:
+    """로그 줄들에서 등장 순서대로 중복 없이 소스 위치를 뽑는다.
+
+    결함 수집(:meth:`SanitizerMonitor._flush`)과 후처리 심볼라이즈
+    (:mod:`logosfuzz.execute.symbolize`)가 같은 규칙으로 traceback 을 만들어야
+    한다 — 복원 뒤 다시 계산한 traceback 이 처음 수집한 것과 다른 규칙으로
+    뽑히면 시그니처가 흔들린다.
+    """
+    locations: list[SourceLocation] = []
+    for line in lines:
+        match = _SOURCE_LOCATION.search(line)
+        if match:
+            location = SourceLocation(match.group("file"), int(match.group("line")))
+            if location not in locations:
+                locations.append(location)
+    return locations
+
+
 def classify_ubsan_error(message: str) -> str:
     """UBSan 진단 메시지를 결함 분류로 매핑한다.
 
@@ -253,13 +271,7 @@ class SanitizerMonitor:
     def _flush(self) -> None:
         if self._sanitizer is None:
             return
-        traceback: list[SourceLocation] = []
-        for line in self._lines:
-            match = _SOURCE_LOCATION.search(line)
-            if match:
-                location = SourceLocation(match.group("file"), int(match.group("line")))
-                if location not in traceback:
-                    traceback.append(location)
+        traceback = source_locations(self._lines)
         finding = SanitizerFinding(self._sanitizer, classify_sanitizer_error(self._sanitizer, self._reason), self._reason, traceback, list(self._lines))
         self.findings.append(finding)
         if self.on_finding:
