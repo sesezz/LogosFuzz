@@ -1,34 +1,34 @@
-"""GEN-03-04: Harness Validation — EXE-04(본 퍼징) 투입 전 게이트키퍼.
+"""GEN-03-04: Harness Validation — EXE-04(본 퍼징) 투입 전 게이트키퍼
 
 GEN-03-01~03을 통과한(=컴파일 성공한) 하네스가, ECU/네트워크 인터페이스
 미가상화 등 "환경적 결함"으로 즉시 종료되는 오탐 하네스인지를 본 퍼징 캠페인
-투입 전 짧게(수 초~수십 초) 걸러낸다. 검증은 아래 순서로 실행하고, 하나라도
-실패하면 그 시점에서 중단하고 "검증 실패"로 분류한다:
+투입 전 짧게(수 초~수십 초) 선별. 검증은 아래 순서로 실행하고, 하나라도
+실패하면 그 시점에서 중단하고 "검증 실패"로 분류:
 
   1. dry-run 스모크 테스트  — libFuzzer `-runs=N` 으로 즉시 crash/abort/
-     segfault/timeout이 발생하는지 확인.
+     segfault/timeout 발생 여부 확인
   2. 커버리지 임계치 검사   — 1번 실행 동안 수집된 edge coverage가 0이거나
-     임계치 미만이면 "타겟 API 미도달"로 실패 처리.
-  3. 입력 소비 검증        — 하네스가 퍼즈 입력을 실제로 쓰는지 확인.
+     임계치 미만이면 "타겟 API 미도달"로 실패 처리
+  3. 입력 소비 검증        — 하네스가 퍼즈 입력을 실제로 쓰는지 확인
      `LLVMFuzzerTestOneInput` 본문이 제 인자(`data`/`size`)를 한 번도
-     참조하지 않으면 무엇을 넣든 같은 경로만 돌므로 퍼징이 성립하지 않는다.
+     참조하지 않으면 무엇을 넣든 같은 경로만 돌아 퍼징 불성립
   4. Mocking 호출 트레이싱  — 1번 실행 로그에서 GEN-03-03이 삽입한 CAN/UDS
-     mock 함수 심볼이 실제로 호출되었는지 확인.
+     mock 함수 심볼의 실제 호출 여부 확인
   5. (선택) 정적 리뷰       — `llm_review.py` 참고. `ValidationConfig.
      enable_static_review=True` 이고 `HarnessArtifact.source_path`가
-     있을 때만 실행된다.
+     있을 때만 실행
 
-1·2·4번은 같은 dry-run 실행 로그 하나를 재사용한다(실행을 여러 번 하지 않음) —
-"수 초~수십 초 내 완료"라는 성능 제약을 지키기 위함이다. 3번은 소스를 읽어
-정적으로 판정하므로 추가 실행이 아예 없다.
+1·2·4번은 같은 dry-run 실행 로그 하나를 재사용(실행을 여러 번 하지 않음) —
+"수 초~수십 초 내 완료"라는 성능 제약 준수 목적. 3번은 소스를 읽어
+정적으로 판정하므로 추가 실행 없음
 
 3번을 왜 커버리지 검사와 따로 두나
 -----------------------------------
-둘은 서로 다른 실패를 잡는다. 커버리지가 0이면 "타겟에 못 닿았다"이고, 커버리지는
-나오는데 입력을 안 쓰면 "닿긴 했는데 항상 같은 값으로 닿는다"이다. 후자는 커버리지
+둘은 서로 다른 실패를 검출. 커버리지가 0이면 "타겟 미도달", 커버리지는
+나오는데 입력을 안 쓰면 "도달은 하지만 항상 같은 값으로 도달". 후자는 커버리지
 임계치를 통과하므로 2번으로는 절대 걸리지 않는데, 퍼징 캠페인을 몇 시간 돌려도
-새 경로가 하나도 안 나온다. LLM이 만든 하네스에서 흔한 실패다 - 대상 API를 부르긴
-하지만 인자를 하드코딩해 버린다.
+새 경로가 하나도 안 나옴. LLM이 만든 하네스의 흔한 실패 - 대상 API를 호출은
+하지만 인자를 하드코딩
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ from logosfuzz.generate.contracts import HarnessArtifact
 from logosfuzz.generate.llm_review import MockStaticReviewer, StaticReviewer, StaticReviewResult
 
 # 검증 결과 JSON에 저장할 dry-run 로그 최대 길이(전체 로그는 파싱에 사용하고,
-# 직렬화 시점에만 뒤쪽 N자로 잘라 요약 파일이 과도하게 커지는 것을 막는다).
+# 직렬화 시점에만 뒤쪽 N자로 잘라 요약 파일의 과도한 증가 방지)
 _MAX_LOG_CHARS = 20_000
 
 STEP_SMOKE = "smoke_test"
@@ -68,7 +68,7 @@ Runner = Callable[[list, float], RunResult]
 
 
 def _default_runner(argv: list, timeout: float) -> RunResult:
-    """subprocess 기반 기본 실행기. stdout+stderr를 합쳐 반환한다."""
+    """subprocess 기반 기본 실행기. stdout+stderr를 합쳐 반환"""
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
         return RunResult(
@@ -83,10 +83,10 @@ def _default_runner(argv: list, timeout: float) -> RunResult:
 
 
 def parse_libfuzzer_coverage(log: str) -> int:
-    """libFuzzer 출력에서 최대 edge coverage(`cov:`)를 뽑아낸다.
+    """libFuzzer 출력에서 최대 edge coverage(`cov:`) 추출
 
     커버리지는 실행이 진행될수록 단조 증가하므로, 등장한 값 중 최댓값을
-    최종 커버리지로 취급한다.
+    최종 커버리지로 취급
     """
     matches = _COV_RE.findall(log)
     return max((int(m) for m in matches), default=0)
@@ -186,8 +186,8 @@ def check_coverage(coverage_edges: int, threshold: int) -> CoverageCheckResult:
 
 ENTRY_POINT = "LLVMFuzzerTestOneInput"
 
-# 인자를 '쓰지 않겠다'고 명시적으로 버리는 관용구. 이걸 참조로 세면 안 된다 -
-# 오히려 안 쓴다는 증거다.
+# 인자를 '쓰지 않겠다'고 명시적으로 버리는 관용구. 참조로 세면 안 됨 -
+# 오히려 미사용의 증거
 _DISCARD_RES = [
     re.compile(r"\(\s*void\s*\)\s*\(?\s*(?P<name>[A-Za-z_]\w*)\s*\)?\s*;"),
     re.compile(r"std\s*::\s*ignore\s*=\s*(?P<name>[A-Za-z_]\w*)"),
@@ -200,10 +200,10 @@ _STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', re.DOTALL)
 
 
 def strip_comments_and_strings(source: str) -> str:
-    """주석과 문자열 리터럴을 같은 길이의 공백으로 바꾼다.
+    """주석과 문자열 리터럴을 같은 길이의 공백으로 치환
 
-    주석에 적힌 `data` 를 '입력을 쓴다'는 증거로 세면 안 된다. 길이를 보존해
-    이후 오프셋 계산이 어긋나지 않게 한다.
+    주석에 적힌 `data` 를 '입력 사용'의 증거로 세지 않기 위함. 길이를 보존해
+    이후 오프셋 계산 어긋남 방지
     """
     def blank(match: re.Match) -> str:
         return "".join(" " if ch != "\n" else "\n" for ch in match.group(0))
@@ -214,7 +214,7 @@ def strip_comments_and_strings(source: str) -> str:
 
 
 def _match_brace_block(text: str, open_index: int) -> Optional[str]:
-    """`text[open_index]` 가 `{` 일 때 짝이 맞는 `}` 까지의 내용을 돌려준다."""
+    """`text[open_index]` 가 `{` 일 때 짝이 맞는 `}` 까지의 내용 반환"""
     depth = 0
     for i in range(open_index, len(text)):
         if text[i] == "{":
@@ -227,7 +227,7 @@ def _match_brace_block(text: str, open_index: int) -> Optional[str]:
 
 
 def _split_top_level(params: str) -> list:
-    """괄호/꺾쇠 안의 쉼표를 무시하고 인자 목록을 나눈다(`std::pair<a,b>` 대비)."""
+    """괄호/꺾쇠 안의 쉼표를 무시하고 인자 목록 분리(`std::pair<a,b>` 대비)"""
     out, depth, current = [], 0, []
     for ch in params:
         if ch in "([<":
@@ -248,7 +248,7 @@ _IDENT_RE = re.compile(r"[A-Za-z_]\w*")
 
 
 def parse_entry_point(source: str):
-    """`LLVMFuzzerTestOneInput` 의 인자 이름과 본문을 뽑는다.
+    """`LLVMFuzzerTestOneInput` 의 인자 이름과 본문 추출
 
     Returns:
         ``(param_names, body)``. 진입점을 못 찾거나 본문을 못 닫으면 ``None``.
@@ -272,7 +272,7 @@ def parse_entry_point(source: str):
         brace_offset = rest.find("{")
         if brace_offset < 0:
             continue
-        # 선언만 있고 정의가 없으면(`...);`) 건너뛴다.
+        # 선언만 있고 정의가 없으면(`...);`) 건너뜀
         if ";" in rest[:brace_offset]:
             continue
         body = _match_brace_block(rest, brace_offset)
@@ -308,15 +308,15 @@ class InputConsumptionResult:
 
 
 def check_input_consumption(source: Optional[str], log: str = "") -> InputConsumptionResult:
-    """하네스가 퍼즈 입력을 쓰는지 판정한다.
+    """하네스가 퍼즈 입력을 쓰는지 판정
 
-    **증명 가능한 경우에만 실패**시킨다. 진입점을 파싱하지 못했다면 그건 하네스가
+    **증명 가능한 경우에만 실패** 처리. 진입점을 파싱하지 못했다면 그건 하네스가
     잘못됐다는 뜻이 아니라 이 검사기의 한계일 수 있으므로 통과시키고 그 사실을
-    남긴다 - 게이트가 자기 파서의 빈틈 때문에 멀쩡한 하네스를 막으면 안 된다.
+    남김 - 게이트가 자기 파서의 빈틈 때문에 멀쩡한 하네스를 막으면 안 됨
 
     Args:
-        source: 하네스 소스. None 이면 검사하지 않고 통과.
-        log: dry-run 로그. `stat::new_units_added` 를 보조 근거로 읽는다.
+        source: 하네스 소스. None 이면 검사 없이 통과
+        log: dry-run 로그. `stat::new_units_added` 를 보조 근거로 사용
     """
     new_units = parse_new_units_added(log)
 
@@ -334,7 +334,7 @@ def check_input_consumption(source: Optional[str], log: str = "") -> InputConsum
         )
 
     params, body = parsed
-    # 인자를 명시적으로 버리는 구문은 참조에서 제외한다.
+    # 인자를 명시적으로 버리는 구문은 참조에서 제외
     for discard in _DISCARD_RES:
         body = discard.sub(" ", body)
 
@@ -357,7 +357,7 @@ def check_input_consumption(source: Optional[str], log: str = "") -> InputConsum
         )
 
     warning = ""
-    # 첫 인자(관례상 data 버퍼)를 안 쓰고 길이만 쓰면 입력의 '내용'은 무시하는 것이다.
+    # 첫 인자(관례상 data 버퍼)를 안 쓰고 길이만 쓰면 입력의 '내용'은 무시하는 것
     if params and params[0] not in used:
         warning = (
             f"길이 인자만 쓰고 버퍼({params[0]})는 쓰지 않는다 - 입력의 내용이 아니라 "
@@ -425,7 +425,7 @@ class ValidationReport:
 
     @property
     def warnings(self) -> list:
-        """실패는 아니지만 사람이 봐야 할 신호."""
+        """실패는 아니지만 사람이 확인해야 할 신호"""
         out = []
         if self.input_consumption and self.input_consumption.warning:
             out.append(f"{STEP_INPUT_CONSUMPTION}: {self.input_consumption.warning}")
@@ -475,7 +475,7 @@ def validate_harness(
         return ValidationReport(artifact.group_id, False, list(steps_run), STEP_COVERAGE,
                                  smoke=smoke, coverage=coverage, reason=coverage.reason)
 
-    # 소스는 3번(입력 소비)과 5번(정적 리뷰)이 함께 쓰므로 한 번만 읽는다.
+    # 소스는 3번(입력 소비)과 5번(정적 리뷰)이 함께 쓰므로 한 번만 읽음
     source_code = None
     if artifact.source_path is not None:
         source_code = artifact.source_path.read_text(encoding="utf-8", errors="replace")

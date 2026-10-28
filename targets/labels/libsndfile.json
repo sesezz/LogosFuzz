@@ -1,0 +1,13 @@
+{
+  "_comment": "libsndfile 1.2.2 (72f6af15) 퍼징 대상 8개 API 정답셋. third_party/libsndfile/src/sndfile.c 의 함수 정의를 그대로 옮겼다(인자 이름은 정의부 기준). kb_eval --profile targets/libsndfile.json --labels 로 쓴다.",
+  "apis": [
+    {"name": "sf_open",         "file": "src/sndfile.c", "line": 348,  "return_type": "SNDFILE*",    "params": ["path", "mode", "sfinfo"]},
+    {"name": "sf_open_virtual", "file": "src/sndfile.c", "line": 472,  "return_type": "SNDFILE*",    "params": ["sfvirtual", "mode", "sfinfo", "user_data"]},
+    {"name": "sf_close",        "file": "src/sndfile.c", "line": 517,  "return_type": "int",         "params": ["sndfile"]},
+    {"name": "sf_command",      "file": "src/sndfile.c", "line": 995,  "return_type": "int",         "params": ["sndfile", "command", "data", "datasize"]},
+    {"name": "sf_seek",         "file": "src/sndfile.c", "line": 1501, "return_type": "sf_count_t",  "params": ["sndfile", "offset", "whence"]},
+    {"name": "sf_get_string",   "file": "src/sndfile.c", "line": 1619, "return_type": "const char*", "params": ["sndfile", "str_type"]},
+    {"name": "sf_read_short",   "file": "src/sndfile.c", "line": 1748, "return_type": "sf_count_t",  "params": ["sndfile", "ptr", "len"]},
+    {"name": "sf_readf_float",  "file": "src/sndfile.c", "line": 2019, "return_type": "sf_count_t",  "params": ["sndfile", "ptr", "frames"]}
+  ]
+}

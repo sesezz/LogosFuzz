@@ -1,0 +1,3 @@
+/usr/bin/ld: /tmp/dup2-91e098.o: in function `HAL_GetTick':
+dup2.c:(.text.HAL_GetTick[HAL_GetTick]+0x0): multiple definition of `HAL_GetTick'; /tmp/dup1-1652cf.o:dup1.c:(.text.HAL_GetTick[HAL_GetTick]+0x0): first defined here
+clang: error: linker command failed with exit code 1 (use -v to see invocation)

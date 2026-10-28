@@ -1,0 +1,32 @@
+# *******************************************************************************
+# Copyright (c) 2025 Contributors to the Eclipse Foundation
+#
+# See the NOTICE file(s) distributed with this work for additional
+# information regarding copyright ownership.
+#
+# This program and the accompanying materials are made available under the
+# terms of the Apache License Version 2.0 which is available at
+# https://www.apache.org/licenses/LICENSE-2.0
+#
+# SPDX-License-Identifier: Apache-2.0
+# *******************************************************************************
+load("@rules_fuzzing//fuzzing:cc_defs.bzl", "cc_fuzz_test")
+
+# LogosFuzz GEN-03-01 자동 생성 - Logic Group ar_probe
+
+# 빌드 단위: //score/json:json
+
+
+# tags = ["manual"] : //... 전체 빌드에 딸려 들어가면
+
+# --config=bl-x86_64-linux(GCC) 회귀 빌드가 libFuzzer 링크에서 깨진다.
+
+cc_fuzz_test(
+    name = "ar_probe_fuzz_test",
+    srcs = ["ar_probe_fuzz.cc"],
+    tags = ["manual"],
+    deps = [
+        "@score_baselibs//score/json",
+        "@score_baselibs//score/json:parser_interface",
+    ],
+)

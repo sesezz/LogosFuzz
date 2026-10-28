@@ -1,24 +1,24 @@
-"""EXE-04-03 타임아웃 임계치 조정.
+"""EXE-04-03 타임아웃 임계치 조정
 
 EXE-04-00(Docker 격리 퍼징 실행)의 하위 기능. 자동차 오픈소스의 실시간성
-특성을 고려하여 Logic Group별 타임아웃 임계치를 산정/조정한다.
+특성을 고려하여 Logic Group별 타임아웃 임계치를 산정/조정
 
-타임아웃은 성격이 다른 두 축으로 분리한다.
+타임아웃은 성격이 다른 두 축으로 분리
 
 1. 캠페인 시간 (``campaign_timeout_sec``)
    - EXE-04-00의 ``--timeout <sec>``에 대응. 그룹 퍼징의 총 실행(wall-clock)
-     예산이며, 도달 시 해당 그룹을 종료하고 다음 그룹으로 이행하는 트리거.
-   - CLI로 지정하면 그 값을, 미지정 시 안전 기본값(기본 300초)을 사용한다.
+     예산이며, 도달 시 해당 그룹을 종료하고 다음 그룹으로 이행하는 트리거
+   - CLI로 지정하면 그 값을, 미지정 시 안전 기본값(기본 300초)을 사용
 
 2. 입력별 실시간 데드라인 (``per_input_timeout_ms``)
    - 워치독 주기·실시간 제어 루프 주기 등에서 동적 산정. 퍼징 엔진의 입력 1건
      실행 제한(libFuzzer ``-timeout`` / AFL++ ``-t``)으로 전달되며, 이 시간을
      넘는 입력은 실시간성 위반(hang)으로 잡혀 ANA 단계의 "워치독 시간 초과 /
-     주기 지연" 분류로 연결된다.
-   - 그룹에 결합된 실시간 신호가 없으면 안전 기본값으로 폴백한다.
+     주기 지연" 분류로 연결
+   - 그룹에 결합된 실시간 신호가 없으면 안전 기본값으로 폴백
 
-본 모듈은 값 산정만 담당하며 프로세스를 직접 종료하지 않는다(관심사 분리).
-실제 종료/이행은 산정 결과(:class:`TimeoutPlan`)를 받은 EXE-04-01 runner가 수행한다.
+본 모듈은 값 산정만 담당하며 프로세스를 직접 종료하지 않음(관심사 분리)
+실제 종료/이행은 산정 결과(:class:`TimeoutPlan`)를 받은 EXE-04-01 runner가 수행
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ DEFAULT_CEIL_MS = 60_000        # 입력별 데드라인 상한(ms)
 
 
 class TimeoutSource(str, Enum):
-    """타임아웃 값의 산정 출처."""
+    """타임아웃 값의 산정 출처"""
 
     CLI_OVERRIDE = "cli_override"  # 사용자가 --timeout으로 직접 지정
     DYNAMIC = "dynamic"            # 실시간 신호 기반 동적 산정
@@ -52,15 +52,15 @@ class TimeoutSource(str, Enum):
 
 @dataclass(frozen=True)
 class TimeoutPlan:
-    """Logic Group 1개에 대한 타임아웃 산정 결과.
+    """Logic Group 1개에 대한 타임아웃 산정 결과
 
     Attributes:
-        group_id: 대상 그룹 식별자.
-        campaign_timeout_sec: 그룹 캠페인 총 예산(초). 도달 시 그룹 종료.
-        per_input_timeout_ms: 입력별 실시간 데드라인(ms).
-        campaign_source: 캠페인 시간의 산정 출처.
-        per_input_source: 입력별 데드라인의 산정 출처.
-        rationale: 로그로 남길 사람이 읽는 산정 근거 문자열.
+        group_id: 대상 그룹 식별자
+        campaign_timeout_sec: 그룹 캠페인 총 예산(초). 도달 시 그룹 종료
+        per_input_timeout_ms: 입력별 실시간 데드라인(ms)
+        campaign_source: 캠페인 시간의 산정 출처
+        per_input_source: 입력별 데드라인의 산정 출처
+        rationale: 로그로 남길 사람이 읽는 산정 근거 문자열
     """
 
     group_id: str
@@ -72,20 +72,20 @@ class TimeoutPlan:
 
     @property
     def libfuzzer_timeout_sec(self) -> int:
-        """libFuzzer ``-timeout=<sec>`` 값(초, 올림, 최소 1초)."""
+        """libFuzzer ``-timeout=<sec>`` 값(초, 올림, 최소 1초)"""
         return max(1, math.ceil(self.per_input_timeout_ms / 1000))
 
     @property
     def afl_timeout_ms(self) -> int:
-        """AFL++ ``-t <msec>`` 값(ms)."""
+        """AFL++ ``-t <msec>`` 값(ms)"""
         return self.per_input_timeout_ms
 
 
 class TimeoutManager:
-    """EXE-04-03 타임아웃 임계치 산정기.
+    """EXE-04-03 타임아웃 임계치 산정기
 
     ``fuzz`` 루프가 그룹을 순회하며 :meth:`resolve`로 그룹별 :class:`TimeoutPlan`을
-    얻고, 이를 EXE-04-01 runner / EXE-04-02 sanitizer monitor에 전달한다.
+    얻고, 이를 EXE-04-01 runner / EXE-04-02 sanitizer monitor에 전달
     """
 
     def __init__(
@@ -119,12 +119,12 @@ class TimeoutManager:
     def resolve(
         self, group: LogicGroup, cli_timeout_sec: int | None = None
     ) -> TimeoutPlan:
-        """그룹 1개의 타임아웃을 산정하고 근거를 로깅한 뒤 반환한다.
+        """그룹 1개의 타임아웃을 산정하고 근거를 로깅한 뒤 반환
 
         Args:
             group: 대상 Logic Group.
             cli_timeout_sec: 사용자가 ``--timeout``으로 지정한 값(초). None이면
-                캠페인 시간은 기본값을 사용한다. 0 이하이면 ValueError.
+                캠페인 시간은 기본값 사용. 0 이하이면 ValueError
 
         Returns:
             산정된 :class:`TimeoutPlan`.
@@ -148,14 +148,14 @@ class TimeoutManager:
             per_input_source=per_input_src,
             rationale=rationale,
         )
-        # 요구사항: 타임아웃 값 산정 근거를 로그로 남긴다.
+        # 요구사항: 타임아웃 값 산정 근거 로깅
         self._logger.info(rationale)
         return plan
 
     def resolve_all(
         self, groups: Iterable[LogicGroup], cli_timeout_sec: int | None = None
     ) -> dict[str, TimeoutPlan]:
-        """여러 그룹에 대해 산정 결과를 그룹 ID로 매핑하여 반환한다."""
+        """여러 그룹에 대해 산정 결과를 그룹 ID로 매핑하여 반환"""
         return {
             group.group_id: self.resolve(group, cli_timeout_sec) for group in groups
         }
@@ -165,7 +165,7 @@ class TimeoutManager:
     def _resolve_campaign(
         self, cli_timeout_sec: int | None
     ) -> tuple[int, TimeoutSource, str]:
-        """캠페인 시간(초)을 산정한다. CLI 지정값이 있으면 우선한다."""
+        """캠페인 시간(초)을 산정한다. CLI 지정값이 있으면 우선"""
         if cli_timeout_sec is not None:
             if cli_timeout_sec <= 0:
                 raise ValueError(
@@ -181,10 +181,10 @@ class TimeoutManager:
     def _resolve_per_input(
         self, group: LogicGroup
     ) -> tuple[int, TimeoutSource, str]:
-        """입력별 실시간 데드라인(ms)을 동적 산정한다.
+        """입력별 실시간 데드라인(ms)을 동적 산정
 
         가장 빡빡한(주기가 가장 짧은) 실시간 신호를 데드라인의 기준으로 삼고,
-        안전계수를 곱한 뒤 [floor, ceil]로 클램프한다. 신호가 없으면 기본값 폴백.
+        안전계수를 곱한 뒤 [floor, ceil]로 클램프. 신호가 없으면 기본값 폴백
         """
         signals = [s for s in group.realtime_signals if s.period_ms > 0]
         if not signals:

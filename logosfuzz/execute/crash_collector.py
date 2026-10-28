@@ -1,9 +1,7 @@
-"""크래시 산출물 수집.
+"""크래시 산출물 수집
 
-설계서 EXE-04-00: 새 크래시 발생 시 crashes/ 폴더에 저장.
-컨테이너의 출력 디렉토리에서 크래시 파일을 찾아 그룹별로 crashes/ 아래에
-복사한다. 여기서는 '수집/보존'까지만 담당하며, 크래시 시그니처화 및
-중복 제거(ANA-05-04)와 정/오탐 판별(ANA-05-01)은 ANA 파트가 담당한다.
+설계서 EXE-04-00: 새 크래시 발생 시 crashes/ 폴더에 저장
+컨테이너 출력 디렉토리의 크래시 파일을 그룹별 crashes/ 아래로 복사 (수집/보존만 담당)
 """
 
 from __future__ import annotations
@@ -24,7 +22,7 @@ def looks_like_crash(name: str) -> bool:
 
 @dataclass
 class CrashCollector:
-    """그룹별 크래시 파일을 crashes/<group>/ 로 보존."""
+    """그룹별 크래시 파일의 crashes/<group>/ 보존"""
 
     crashes_dir: Path
     _seen: set[str] = field(default_factory=set)

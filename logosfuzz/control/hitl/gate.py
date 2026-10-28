@@ -2,26 +2,26 @@
 CTR-06-02 HITL 인터페이스 - 게이트/매니저
 =========================================
 
-HITLManager는 파이프라인 각 단계가 호출하는 진입점이다.
+HITLManager는 파이프라인 각 단계가 호출하는 진입점
 
 핵심 메서드
 -----------
-- request(...)  : 체크포인트에 리뷰를 요청한다.
+- request(...)  : 체크포인트에 리뷰를 요청
                   정책이 AUTO면 즉시 자동 결정을 반환하고,
                   MANUAL(또는 조건 충족)이면 PENDING 항목을 저장한 뒤
                   * interactive=True  -> 콘솔에서 즉시 사람에게 질의(블로킹)
                   * interactive=False -> DEFER 결정 반환(비동기 검토 대기)
-- decide(...)   : 저장된 PENDING 항목에 사람이 결정을 기록(CLI가 사용).
-- pending()/get()/stats() : 조회.
+- decide(...)   : 저장된 PENDING 항목에 사람이 결정을 기록(CLI가 사용)
+- pending()/get()/stats() : 조회
 
-이 게이트는 "골격"이다: request() 이후 각 단계가 Decision을 받아 어떻게 흐를지
-(예: REJECT -> 하네스 재생성)는 hooks.py의 예시 및 각 단계 구현에서 연결한다.
+이 게이트는 "골격": request() 이후 각 단계가 Decision을 받아 어떻게 흐를지
+(예: REJECT -> 하네스 재생성)는 hooks.py의 예시 및 각 단계 구현에서 연결
 
 활성화된 게이트
 ---------------
 - CrashApprovalGate (CRASH_TRIAGE, 4주차): ANA-05-01 판정을 받은 고유 크래시는
-  이 게이트를 통과해야만 "검증된 고유 크래시"가 된다. ``logosfuzz analyze`` 가
-  기본으로 태운다(아래 클래스 docstring 참조).
+  이 게이트를 통과해야만 "검증된 고유 크래시"로 인정. ``logosfuzz analyze`` 가
+  기본 적용(아래 클래스 docstring 참조)
 """
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ class HITLManager:
         project: str = "",
     ) -> Decision:
         """
-        체크포인트에 리뷰를 요청하고 Decision을 반환한다.
+        체크포인트에 리뷰를 요청하고 Decision을 반환
 
         반환된 Decision.type이:
           APPROVE/EDIT -> 다음 단계 진행(EDIT면 effective payload 사용)
@@ -166,7 +166,7 @@ class HITLManager:
                 self.store.add(item)
 
     def _console_prompt(self, item: ReviewItem) -> Decision:
-        """기본 콘솔 프롬프트(블로킹 모드). 실제 TUI/웹 UI로 교체 가능."""
+        """기본 콘솔 프롬프트(블로킹 모드). 실제 TUI/웹 UI로 교체 가능"""
         print()
         print("=" * 68)
         print(f"[HITL] 검토 요청  #{item.id}  ({item.checkpoint.value} / {item.stage.value})")
@@ -196,24 +196,24 @@ class HITLManager:
 # --------------------------------------------------------------------------- #
 # CRASH_TRIAGE: 크래시 승인 게이트 (4주차 활성화)
 # --------------------------------------------------------------------------- #
-# 판정 문자열은 ANA 의 Verdict 값과 같다. ANA 를 import 하지 않고 문자열 계약으로만
-# 연결한다(analyze.models 와 같은 순환 의존 차단 원칙).
+# 판정 문자열은 ANA 의 Verdict 값과 동일. ANA 를 import 하지 않고 문자열 계약으로만
+# 연결(analyze.models 와 같은 순환 의존 차단 원칙)
 TRUE_POSITIVE = "true_positive"
 FALSE_POSITIVE = "false_positive"
 
 
 @dataclass
 class CrashApproval:
-    """크래시 1건의 승인 게이트 결과.
+    """크래시 1건의 승인 게이트 결과
 
     Attributes:
-        crash_id: 게이트 대상(ANA-05-04 cluster_id).
-        auto_verdict: ANA-05-01 자동 판정.
-        final_verdict: 승인으로 확정된 판정. 아직 확정 전(검토 대기/건너뜀)이면 None.
-        status: 리뷰 항목 상태(approved/edited/rejected/skipped/pending).
+        crash_id: 게이트 대상(ANA-05-04 cluster_id)
+        auto_verdict: ANA-05-01 자동 판정
+        final_verdict: 승인으로 확정된 판정. 아직 확정 전(검토 대기/건너뜀)이면 None
+        status: 리뷰 항목 상태(approved/edited/rejected/skipped/pending)
         reviewer: 결정한 사람 또는 ``auto:<mode>``.
-        item_id: 리뷰 저장소 항목 id (``logosfuzz review show <id>``).
-        reused: 이전 실행에서 이미 내려진 결정을 재사용했는가.
+        item_id: 리뷰 저장소 항목 id (``logosfuzz review show <id>``)
+        reused: 이전 실행에서 이미 내려진 결정의 재사용 여부
     """
 
     crash_id: str
@@ -227,7 +227,7 @@ class CrashApproval:
 
     @property
     def verified(self) -> bool:
-        """승인 게이트를 통과한 정탐 = 검증된 고유 크래시."""
+        """승인 게이트를 통과한 정탐 = 검증된 고유 크래시"""
         return self.final_verdict == TRUE_POSITIVE
 
     @property
@@ -250,7 +250,7 @@ class CrashApproval:
 
 
 def final_verdict_for(item: ReviewItem, auto_verdict: str) -> Optional[str]:
-    """리뷰 결정 → 확정 판정.
+    """리뷰 결정 → 확정 판정
 
     - APPROVE : 자동 판정을 그대로 확정
     - EDIT    : 사람이 고친 ``llm_verdict``(정/오탐 뒤집기)
@@ -271,19 +271,19 @@ def final_verdict_for(item: ReviewItem, auto_verdict: str) -> Optional[str]:
 
 
 class CrashApprovalGate:
-    """CRASH_TRIAGE 체크포인트를 실제 분석 흐름에 연결한 승인 게이트.
+    """CRASH_TRIAGE 체크포인트를 실제 분석 흐름에 연결한 승인 게이트
 
-    판정마다 :meth:`HITLManager.request` 를 부르고, 정책(기본: needs_review 이거나
-    신뢰도 0.8 미만이면 사람)에 따라 자동 승인되거나 검토 큐에 쌓인다. 사람이
+    판정마다 :meth:`HITLManager.request` 를 호출, 정책(기본: needs_review 이거나
+    신뢰도 0.8 미만이면 사람)에 따라 자동 승인 또는 검토 큐 적재. 사람이
     ``logosfuzz review approve|edit|reject <id>`` 로 결정한 뒤 ``analyze`` 를 다시
-    돌리면 그 결정이 반영된다.
+    돌리면 그 결정 반영
 
-    **재실행에 안전하다.** 같은 프로젝트·같은 크래시(cluster_id)에 이미 항목이
-    있으면 새로 쌓지 않는다.
-    - 사람이 결정한 항목: 그대로 재사용한다(사람의 판단이 자동 판정보다 우선).
-    - 검토 대기 항목: 대기 상태를 그대로 돌려준다(중복 항목을 만들지 않음).
+    **재실행에 안전.** 같은 프로젝트·같은 크래시(cluster_id)에 이미 항목이
+    있으면 새로 적재하지 않음
+    - 사람이 결정한 항목: 그대로 재사용(사람의 판단이 자동 판정보다 우선)
+    - 검토 대기 항목: 대기 상태를 그대로 반환(중복 항목을 만들지 않음)
     - 자동 결정 항목: 자동 판정이 그때와 같으면 재사용, 달라졌으면(판별기·KB가
-      바뀐 경우) 새로 요청한다.
+      바뀐 경우) 새로 요청
     """
 
     def __init__(self, hitl: HITLManager, project: str = "") -> None:
@@ -321,7 +321,7 @@ class CrashApprovalGate:
         summary: str = "",
         payload: Optional[Dict[str, Any]] = None,
     ) -> CrashApproval:
-        """크래시 1건을 게이트에 태운다."""
+        """크래시 1건의 게이트 처리"""
         existing = self._existing(crash_id)
         if existing is not None:
             decided_by_auto = (existing.decision is not None

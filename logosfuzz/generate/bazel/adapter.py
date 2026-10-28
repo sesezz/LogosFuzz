@@ -42,6 +42,9 @@ _COMPILER_DIAGNOSTIC_RE = _DIAGNOSTIC_RE
 class BazelAdapter:
     """S-CORE(baselibs) 같은 Bazel 워크스페이스용 어댑터."""
 
+    #: BuildAdapter Protocol 의 build_system (컨트롤러가 build_summary.json 에 기록)
+    build_system = "bazel"
+
     def __init__(
         self,
         workspace_root: Path | str,
@@ -56,6 +59,17 @@ class BazelAdapter:
         self.bazel = bazel
         self.extra_args = tuple(extra_args)
         self.timeout_s = timeout_s
+
+    def classify_build_error(self, log: str, bin_label: str):
+        """빌드 로그의 Bazel 에러 처방 분류 (``bazel_errors.classify``, 실패 시 None)"""
+        try:
+            from logosfuzz.generate.bazel_errors import classify
+        except ImportError:
+            return None
+        try:
+            return classify(log or "", requested_target=bin_label)
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------ #
     # 생성

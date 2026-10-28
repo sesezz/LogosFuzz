@@ -103,7 +103,7 @@ class CompatibilityChecker:
         )
 
         # Required tools
-        # bear 는 제외했다 — 빌드를 Bazel 이 소유하므로 컴파일 명령을 가로챌 일이 없다.
+        # bear 제외 (빌드를 Bazel 이 소유하므로 컴파일 명령 가로채기 불필요)
         for tool in ["clang", "clang++"]:
             found = shutil.which(tool) is not None
             self._check(f"Tool: {tool}", found, f"{tool} found", f"{tool} not found in PATH")
@@ -268,6 +268,8 @@ class BuildStageResult:
     config: str
     started_at: str
     finished_at: str = ""
+    # 빌드 시스템 이름 (BuildStage 가 adapter.build_system 에서 설정)
+    build_system: str = "bazel"
     units: list[dict] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     regression: list[dict] = field(default_factory=list)
@@ -328,7 +330,7 @@ class BuildStageResult:
     def to_dict(self) -> dict:
         return {
             "schema_version": BUILD_SUMMARY_SCHEMA_VERSION,
-            "build_system": "bazel",
+            "build_system": self.build_system,
             "workspace": self.workspace,
             "config": self.config,
             "started_at": self.started_at,
@@ -361,29 +363,21 @@ _SOURCE_ERROR_RE = re.compile(
     r"ld(?:\.lld)?: error")
 
 
-def _d_classify(log: str, bin_label: str):
-    """D 의 ``bazel_errors.classify``. 없거나 실패하면 None."""
-    try:
-        from logosfuzz.generate.bazel_errors import classify
-    except ImportError:
-        return None
-    try:
-        return classify(log, requested_target=bin_label)
-    except Exception:
-        return None
-
-
 def is_source_error(log: str, bin_label: str, classify=None) -> bool:
     """빌드 실패 원인이 하네스 **소스(.cc)** 에러인가.
 
     BUILD 파일(deps·load·visibility)을 고쳐야 풀리는 실패는 소스를 아무리 다시
     써도 같은 에러가 반복되므로 자가치유(LLM) 대상이 아니다. 판별은
 
-    1. D 분류기가 있으면 그 처방으로: BUILD 수정/사람 판단 -> False, 심볼 해결 -> True
-    2. 분류 못 했거나 D 가 없으면 로그로: BUILD 원인 문구가 있으면 False,
+    1. 분류기가 주어지면(어댑터의 ``classify_build_error`` 등) 그 처방으로:
+       BUILD 수정/사람 판단 -> False, 심볼 해결 -> True
+    2. 분류기가 없거나 못 분류하면 로그로: BUILD 원인 문구가 있으면 False,
        소스 컴파일 에러·링크 에러 문구가 있으면 True
+
+    ``classify`` 는 호출 측에서 빌드 시스템별 분류기 주입
+    (컨트롤러는 ``BuildStage.classify_errors`` = ``adapter.classify_build_error``)
     """
-    report = (classify or _d_classify)(log or "", bin_label)
+    report = classify(log or "", bin_label) if callable(classify) else None
     primary = getattr(report, "primary", None)
     if primary is not None:
         action = str(getattr(getattr(primary, "action", ""), "value",
@@ -428,6 +422,25 @@ class HealUnavailable(RuntimeError):
     """소스 자가치유에 필요한 모듈(D, dev 병합 후)이 없을 때."""
 
 
+def _default_build_adapter(build_system, workspace_root, *, config, bazel, timeout_s):
+    """어댑터 미주입 시 ``build_system`` 별 기본 어댑터 생성"""
+    name = (build_system or "bazel").lower()
+    if name == "bazel":
+        from logosfuzz.generate.bazel.adapter import BazelAdapter
+        return BazelAdapter(
+            workspace_root, config=config, bazel=bazel, timeout_s=timeout_s)
+    # 범용 어댑터 (미제공 시 adapter= 주입 필요)
+    try:
+        from logosfuzz.generate.base import make_build_adapter  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError(
+            f"build_system={name!r} 기본 어댑터는 GENERIC-A-profile(base.py) "
+            f"병합 후 활성화된다. 그 전에는 adapter= 로 직접 주입하라."
+        ) from exc
+    return make_build_adapter(
+        name, workspace_root, config=config, bazel=bazel, timeout_s=timeout_s)
+
+
 class BuildStage:
     """GEN-03-01 의 HarnessPair 들을 빌드한다.
 
@@ -461,9 +474,8 @@ class BuildStage:
         group_meta: dict | None = None,
         heal_loop_factory=None,
         classify_errors=None,
+        build_system: str = "bazel",
     ) -> None:
-        from logosfuzz.generate.bazel.adapter import BazelAdapter
-
         self.workspace_root = Path(workspace_root).expanduser().resolve()
         self.config = config
         self.bazel = bazel
@@ -476,11 +488,15 @@ class BuildStage:
         self.plans = plans or {}
         self.group_meta = group_meta or {}
         self.heal_loop_factory = heal_loop_factory
-        self.classify_errors = classify_errors
         self.stream = stream or sys.stdout
-        self.adapter = adapter or BazelAdapter(
-            self.workspace_root, config=config, bazel=bazel, timeout_s=timeout_s,
+        self.adapter = adapter or _default_build_adapter(
+            build_system, self.workspace_root, config=config, bazel=bazel,
+            timeout_s=timeout_s,
         )
+        # 빌드 시스템 이름과 에러 분류기는 어댑터에서 수신
+        self.build_system = getattr(self.adapter, "build_system", build_system)
+        self.classify_errors = classify_errors or getattr(
+            self.adapter, "classify_build_error", None)
 
     def _log(self, msg: str) -> None:
         self.stream.write(msg + "\n")
@@ -599,6 +615,7 @@ class BuildStage:
             workspace=str(self.workspace_root),
             config=self.config,
             started_at=datetime.now().isoformat(),
+            build_system=self.build_system,
             skipped=list(skipped or []),
         )
         generator = BuildFileGenerator(
@@ -615,7 +632,7 @@ class BuildStage:
             base = {
                 "group": pair.group_name,
                 "build_target": pair.target_label,
-                "build_system": "bazel",
+                "build_system": self.build_system,
                 "fuzz_target": pair.spec.label,
                 "bin_target": pair.spec.bin_label,
                 "source": pair.source_relpath,
@@ -956,8 +973,11 @@ class RegressionTester:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="CTR-06-01 Controller")
-    parser.add_argument("--mode", choices=("pipeline", "bazel"), default="pipeline",
-                        help="pipeline: 기존 C 파이프라인 / bazel: .cc+BUILD 쌍 빌드 단계")
+    parser.add_argument("--mode", choices=("pipeline", "bazel", "generic"),
+                        default="pipeline",
+                        help="pipeline: 기존 C 파이프라인 / bazel: .cc+BUILD 쌍 빌드 단계 / "
+                             "generic: 비-Bazel(cmake 등) 대상 빌드 단계 "
+                             "(GENERIC-A-profile 병합 후 활성화)")
     parser.add_argument("--source", default="test_target.c", help="Target C/C++ source file")
     parser.add_argument("--output", default="harness_output.c", help="Output harness file")
     parser.add_argument("--budget", type=int, default=3600, help="Fuzzing budget (seconds)")
@@ -1109,10 +1129,20 @@ def run_pipeline_mode(args) -> int:
     return 0
 
 
+def run_generic_mode(args) -> int:
+    """비-Bazel(cmake/ninja 등) 대상 BUILD 단계 (``logosfuzz run`` 안내 후 종료)"""
+    print("[ERROR] 범용(비-Bazel) 대상은 이 컨트롤러가 아니라 "
+          "`logosfuzz run --profile targets/<name>.json --budget <sec>` 로 돌린다 "
+          "(EXT 부터 ANA 까지 한 줄).", file=sys.stderr)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.mode == "bazel":
         return run_bazel_mode(args)
+    if args.mode == "generic":
+        return run_generic_mode(args)
     return run_pipeline_mode(args)
 
 

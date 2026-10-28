@@ -2,7 +2,7 @@
 CTR-06-02 HITL 인터페이스 - CLI (`logosfuzz review`)
 ====================================================
 
-사람이 대기 중인 리뷰 항목을 처리하는 명령줄 인터페이스.
+사람이 대기 중인 리뷰 항목을 처리하는 명령줄 인터페이스
 
 사용 예:
     logosfuzz review list [--project P] [--all]
@@ -14,7 +14,7 @@ CTR-06-02 HITL 인터페이스 - CLI (`logosfuzz review`)
     logosfuzz review stats
 
 이 모듈은 argparse 서브파서를 조립해 반환하는 build_parser()와,
-상위 logosfuzz CLI에 연결하기 위한 register(subparsers) 진입점을 제공한다.
+상위 logosfuzz CLI에 연결하기 위한 register(subparsers) 진입점을 제공
 """
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ def _decide(args: argparse.Namespace, dtype: DecisionType) -> int:
 
 
 def _cmd_edit(args: argparse.Namespace) -> int:
-    """payload 일부를 고쳐 승인(EDIT). 크래시 게이트에서 정/오탐을 뒤집을 때 쓴다."""
+    """payload 일부를 고쳐 승인(EDIT). 크래시 게이트에서 정/오탐을 뒤집을 때 사용"""
     m = _manager(args)
     it = m.get(args.id)
     if it is None:
@@ -149,7 +149,7 @@ def _cmd_stats(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 def register(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """
-    상위 logosfuzz 파서에 `review` 서브커맨드를 등록한다.
+    상위 logosfuzz 파서에 `review` 서브커맨드를 등록
 
         p = argparse.ArgumentParser(prog="logosfuzz")
         sub = p.add_subparsers(dest="command")
@@ -194,7 +194,7 @@ def register(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """review 서브커맨드만 담은 독립 실행용 파서(테스트/단독 실행)."""
+    """review 서브커맨드만 담은 독립 실행용 파서(테스트/단독 실행)"""
     parser = argparse.ArgumentParser(prog="logosfuzz")
     sub = parser.add_subparsers(dest="command", required=True)
     register(sub)

@@ -1,6 +1,6 @@
-"""ANA-05-03 통합 테스트: 오탐 확정 -> 원인분석 -> KB diff -> HITL 승인/거부 -> 재생성.
+"""ANA-05-03 통합 테스트: 오탐 확정 -> 원인분석 -> KB diff -> HITL 승인/거부 -> 재생성
 
-`crash_id <-> api_id <-> harness_id` 트레이서빌리티(감사 로그)까지 한 번에 검증한다.
+`crash_id <-> api_id <-> harness_id` 트레이서빌리티(감사 로그)까지 한 번에 검증
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def _hitl(interactive: bool = False, prompt_fn=None) -> HITLManager:
 
 
 class TestDeferredWhenNoHumanAvailable(unittest.TestCase):
-    """비동기(interactive=False) 모드에서는 승인 없이 아무것도 반영되지 않는다."""
+    """비동기(interactive=False) 모드에서는 승인 없이 반영 없음"""
 
     def test_kb_and_regeneration_untouched_until_decided(self):
         kb = _kb()
@@ -74,7 +74,7 @@ class TestDeferredWhenNoHumanAvailable(unittest.TestCase):
 
 
 class TestApprovedFlow(unittest.TestCase):
-    """승인 -> KB 커밋 + 재색인 -> GEN-03-01(어댑터)/GEN-03-02 재생성까지 이어진다."""
+    """승인 -> KB 커밋 + 재색인 -> GEN-03-01(어댑터)/GEN-03-02 재생성까지 연결"""
 
     def test_full_approve_flow(self):
         kb = _kb()
@@ -112,7 +112,7 @@ class TestApprovedFlow(unittest.TestCase):
             self.assertEqual(entry["harness_id"], "harness-1")
 
     def test_root_cause_prompt_reused_in_regeneration_prompt(self):
-        """재생성 프롬프트에 오탐 근본원인 노트가 실제로 들어가는지(재발 방지 근거)."""
+        """재생성 프롬프트에 오탐 근본원인 노트가 실제로 들어가는지(재발 방지 근거)"""
         kb = _kb()
         overrides = InMemoryKBOverrideStore()
         audit = InMemoryAuditTrailStore()
@@ -131,7 +131,7 @@ class TestApprovedFlow(unittest.TestCase):
 
 
 class TestRejectedFlow(unittest.TestCase):
-    """거부 -> 아무것도 반영되지 않는다(승인 전 상태이므로 롤백=무동작)."""
+    """거부 -> 반영 없음(승인 전 상태이므로 롤백=무동작)"""
 
     def test_kb_and_overrides_untouched_after_reject(self):
         kb = _kb()

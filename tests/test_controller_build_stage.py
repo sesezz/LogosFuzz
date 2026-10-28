@@ -719,3 +719,46 @@ def test_generation_artifacts_keep_prompt_and_first_draft(tmp_path):
     assert not (tmp_path / "prompts" / "lg_manifest.draft.cc").exists()
     assert save_generation_artifacts([from_manifest], tmp_path / "none") == []
     assert not (tmp_path / "none").exists()              # 쓸 게 없으면 폴더도 만들지 않는다
+
+
+# ---------------------------------------------------------------------
+# CTR-06-01 범용화: build_system/어댑터/분류기 하드코딩 제거 (세은)
+# ---------------------------------------------------------------------
+
+def test_build_system_is_read_from_adapter(tmp_path):
+    """build_system 의 어댑터 수신 확인"""
+    adapter = FakeAdapter(tmp_path)
+    adapter.build_system = "cmake"
+    result = _stage(tmp_path, adapter).run([_pair("g")])
+    assert result.build_system == "cmake"
+    assert result.to_dict()["build_system"] == "cmake"
+    assert result.units[0]["build_system"] == "cmake"
+
+
+def test_build_system_falls_back_to_param_when_adapter_silent(tmp_path):
+    """어댑터 build_system 부재 시 build_system= 파라미터 사용"""
+    result = _stage(tmp_path, FakeAdapter(tmp_path),
+                    build_system="generic").run([_pair("g")])
+    assert result.build_system == "generic"
+    assert result.units[0]["build_system"] == "generic"
+
+
+def test_classify_errors_defaults_to_adapter(tmp_path):
+    """classify_errors 미주입 시 어댑터의 classify_build_error 사용"""
+    adapter = FakeAdapter(tmp_path)
+    adapter.classify_build_error = lambda log, bin_label: None
+    stage = _stage(tmp_path, adapter)
+    assert stage.classify_errors is adapter.classify_build_error
+
+
+def test_default_exec_image_selects_by_build_system():
+    from logosfuzz.cli import default_exec_image
+    assert default_exec_image("bazel") == "logosfuzz-exec:latest"
+    assert default_exec_image("generic") == "logosfuzz-exec:generic"
+    assert default_exec_image("cmake") == "logosfuzz-exec:generic"
+    assert default_exec_image(None) == "logosfuzz-exec:latest"
+
+
+def test_mode_generic_not_available_until_profile_merge():
+    """범용 어댑터 부재 시 --mode generic 의 종료코드 2 거절"""
+    assert main(["--mode", "generic", "--skip-check"]) == 2

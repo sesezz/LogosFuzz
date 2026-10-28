@@ -1,7 +1,4 @@
-"""EXE 파트 실행 설정 모델.
-
-의존성을 최소화하기 위해 표준 라이브러리(dataclass/enum)만 사용한다.
-"""
+"""EXE 파트 실행 설정 모델 (표준 라이브러리만 사용)"""
 
 from __future__ import annotations
 
@@ -11,31 +8,30 @@ from pathlib import Path
 
 
 class Engine(str, enum.Enum):
-    """지원하는 퍼징 엔진."""
+    """지원 퍼징 엔진 (libFuzzer 만 지원, 실행 이미지에 AFL++ 없음)"""
 
     LIBFUZZER = "libfuzzer"
-    AFLPP = "afl++"
 
     @classmethod
     def parse(cls, value: str) -> "Engine":
         from logosfuzz.execute.errors import InvalidEngineError
 
         norm = value.strip().lower()
-        alias = {"aflpp": cls.AFLPP, "afl": cls.AFLPP, "afl++": cls.AFLPP,
-                 "libfuzzer": cls.LIBFUZZER, "libf": cls.LIBFUZZER}
-        if norm not in alias:
+        if norm in ("libfuzzer", "libf"):
+            return cls.LIBFUZZER
+        if norm in ("afl++", "aflpp", "afl"):
             raise InvalidEngineError(
-                f"지원하지 않는 엔진: {value!r} (libfuzzer | afl++)"
+                "AFL++ 는 지원하지 않는다: 실행 이미지에 AFL++ 가 없다 (libfuzzer 를 쓴다)"
             )
-        return alias[norm]
+        raise InvalidEngineError(f"지원하지 않는 엔진: {value!r} (libfuzzer)")
 
 
 class CoverageMode(str, enum.Enum):
-    """EXE-04-04 커버리지 계측 방식.
+    """EXE-04-04 커버리지 계측 방식
 
-    - ``NONE``          : 커버리지 후처리 비활성(기본). 기존 EXE-04-01/02 흐름과 동일.
-    - ``LLVM_COV``      : clang 소스 기반 커버리지(함수/라인/리전/브랜치, llvm-cov).
-    - ``SANITIZER_COV`` : SanitizerCoverage 엣지 계측(제어흐름 단위).
+    - ``NONE``          : 커버리지 후처리 비활성 (기본)
+    - ``LLVM_COV``      : clang 소스 기반 커버리지 (함수/라인/리전/브랜치, llvm-cov)
+    - ``SANITIZER_COV`` : SanitizerCoverage 엣지 계측 (제어흐름 단위)
     """
 
     NONE = "none"
@@ -63,10 +59,10 @@ class CoverageMode(str, enum.Enum):
 
 @dataclass(frozen=True)
 class LogicGroup:
-    """SCH 단계가 만든 로직 그룹 단위의 퍼징 대상.
+    """SCH 단계 로직 그룹 단위 퍼징 대상
 
-    harness_path: GEN 단계가 생성/컴파일한 퍼징 하네스 실행 파일.
-    corpus_dir:   시드 코퍼스 디렉토리(없으면 빈 코퍼스로 시작).
+    harness_path: GEN 단계에서 생성/컴파일한 퍼징 하네스 실행 파일
+    corpus_dir:   시드 코퍼스 디렉토리 (없으면 빈 코퍼스로 시작)
     """
 
     name: str
@@ -81,10 +77,10 @@ class LogicGroup:
 
 @dataclass
 class FuzzConfig:
-    """`logosfuzz fuzz` 한 회 실행의 전체 설정.
+    """`logosfuzz fuzz` 1회 실행 전체 설정
 
-    설계서 EXE-04-00 화면 명세를 반영:
-      logosfuzz fuzz --engine <libfuzzer|afl++> --timeout <sec> --docker
+    설계서 EXE-04-00 화면 명세 반영:
+      logosfuzz fuzz --engine libfuzzer --timeout <sec> --docker
     """
 
     engine: Engine = Engine.LIBFUZZER
@@ -100,7 +96,7 @@ class FuzzConfig:
     image: str = "logosfuzz-exec:latest"
     dockerfile: Path = field(default_factory=lambda: Path("docker/Dockerfile"))
 
-    # 컨테이너 격리/자원 제한 (EXE-04-01 핵심)
+    # 컨테이너 격리/자원 제한
     network: str = "none"          # 크래시 유발 코드의 외부 통신 차단
     memory_limit: str = "4g"
     cpus: str = "1.0"
@@ -114,7 +110,7 @@ class FuzzConfig:
     # crashes/ 가 빈 채로 남고 total_crashes=0 으로 보고된다.
     run_as_host_user: bool = True
 
-    # Sanitizer 환경 (상세 스트림 파싱은 EXE-04-02에서 확장)
+    # Sanitizer 환경
     #
     # symbolize=0: ASAN이 크래시 시그널 핸들러 "안에서" llvm-symbolizer를
     # fork/exec하면 WSL2에서 그 자식 프로세스가 응답 없이 멈춘다(실측 확인 -
@@ -142,9 +138,9 @@ class FuzzConfig:
     # 커버리지 계측 (EXE-04-04). 기본 NONE → 기존 동작 불변, 옵트인 시에만 활성.
     coverage: CoverageMode = CoverageMode.NONE
     coverage_subdir: str = "coverage"          # output_dir 하위 profraw/profdata 위치
-    coverage_in_docker: bool = True            # llvm 도구를 이미지 안에서 실행할지
+    coverage_in_docker: bool = True            # llvm 도구 이미지 내 실행 여부
     coverage_merge_sparse: bool = True         # llvm-profdata merge -sparse
-    coverage_sources: tuple = ()               # llvm-cov export 소스 필터(선택)
+    coverage_sources: tuple = ()               # llvm-cov export 소스 필터 (선택)
     llvm_profdata: str = "llvm-profdata"       # 병합 도구 경로/이름
     llvm_cov: str = "llvm-cov"                 # export 도구 경로/이름
 

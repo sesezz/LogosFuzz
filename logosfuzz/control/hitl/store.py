@@ -2,10 +2,10 @@
 CTR-06-02 HITL 인터페이스 - 리뷰 항목 저장소
 ============================================
 
-리뷰 항목(ReviewItem)의 영속화를 담당한다.
+리뷰 항목(ReviewItem)의 영속화를 담당
 
-- ReviewStore: 추상 인터페이스. 향후 SQLite/Vector DB 백엔드로 교체 가능하도록 분리.
-- JsonReviewStore: 스켈레톤 기본 구현. 프로젝트별 JSON 파일(append-friendly)에 저장.
+- ReviewStore: 추상 인터페이스. 향후 SQLite/Vector DB 백엔드로 교체 가능하도록 분리
+- JsonReviewStore: 스켈레톤 기본 구현. 프로젝트별 JSON 파일(append-friendly)에 저장
 
 기본 저장 경로: <workdir>/.logosfuzz/hitl/reviews.json
 """
@@ -21,7 +21,7 @@ from .models import Checkpoint, ReviewItem, ReviewStatus
 
 
 class ReviewStore(ABC):
-    """리뷰 항목 저장소 인터페이스."""
+    """리뷰 항목 저장소 인터페이스"""
 
     @abstractmethod
     def add(self, item: ReviewItem) -> ReviewItem: ...
@@ -47,9 +47,9 @@ class ReviewStore(ABC):
 
 class JsonReviewStore(ReviewStore):
     """
-    JSON 파일 기반 저장소(스켈레톤 기본값).
+    JSON 파일 기반 저장소(스켈레톤 기본값)
 
-    스레드 락으로 단일 프로세스 내 동시 접근을 보호한다.
+    스레드 락으로 단일 프로세스 내 동시 접근을 보호
     (다중 프로세스/분산 환경에서는 DB 백엔드로 교체할 것 - TODO.)
     """
 
@@ -124,7 +124,7 @@ class JsonReviewStore(ReviewStore):
 
 
 class InMemoryReviewStore(JsonReviewStore):
-    """테스트/데모용 - 디스크에 쓰지 않는 인메모리 저장소."""
+    """테스트/데모용 - 디스크에 쓰지 않는 인메모리 저장소"""
 
     def __init__(self) -> None:
         super().__init__(path=None)

@@ -1,0 +1,4 @@
+/usr/bin/ld: examples/embedded/build-fuzz/libproto.a(proto_parser.c.o): in function `proto_parse':
+/home/user/LogosFuzz/examples/embedded/proto_parser.c:49:(.text.proto_parse[proto_parse]+0x3b): undefined reference to `HAL_GetTick'
+/usr/bin/ld: /home/user/LogosFuzz/examples/embedded/proto_parser.c:73:(.text.proto_parse[proto_parse]+0x453): undefined reference to `HAL_UART_Transmit'
+clang: error: linker command failed with exit code 1 (use -v to see invocation)

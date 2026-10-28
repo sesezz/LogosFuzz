@@ -2,7 +2,7 @@
 CTR-06-02 HITL 골격 - 데모 시나리오
 ===================================
 
-인메모리 저장소로 파이프라인 훅 → 리뷰 큐 → 사람 결정 흐름을 시연한다.
+인메모리 저장소로 파이프라인 훅 → 리뷰 큐 → 사람 결정 흐름을 시연
 실행: python -m logosfuzz.control.hitl.demo
 """
 from __future__ import annotations

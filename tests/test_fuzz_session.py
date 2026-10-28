@@ -49,7 +49,11 @@ def test_session_runs_all_groups_and_collects_crash(tmp_path):
     saved = json.loads((cfg.output_dir / "fuzz_summary.json").read_text())
     assert saved["total_crashes"] == 1
     assert saved["total_groups"] == 2
-    # 크래시가 crashes/grpB 아래로 보존됐는지
+    assert saved["groups"][0]["status"] == "passed"
+    assert saved["groups"][1]["status"] == "crashed"
+    assert "execs" in saved["groups"][0]
+    assert saved["groups"][1]["crash_count"] == 1
+    # crashes/grpB 아래 크래시 보존 여부
     assert (cfg.crashes_dir / "grpB").exists()
 
 
@@ -73,7 +77,7 @@ def test_session_writes_sanitizer_events_for_ana(tmp_path):
     assert event["category"] == "use-after-free"
 
 
-# --- 시작 실패 구분 (5주차 Docker 실측) -------------------------------------
+# --- 시작 실패 구분 ---------------------------------------------------------
 def _run_one(tmp_path, executor):
     cfg = _cfg(tmp_path)
     group = _harness(cfg, "grp")
@@ -85,7 +89,7 @@ def _run_one(tmp_path, executor):
 
 
 def test_harness_that_never_runs_is_reported_as_start_failure(tmp_path):
-    """이미지에 libatomic.so.1 이 없어 rc=127 로 죽던 실제 상황."""
+    """libatomic.so.1 부재로 rc=127 종료하는 상황"""
     def executor(argv, timeout, on_line):
         on_line("/harness/grp: error while loading shared libraries: libatomic.so.1")
         return ProcResult(exit_code=127, timed_out=False)
@@ -93,7 +97,7 @@ def test_harness_that_never_runs_is_reported_as_start_failure(tmp_path):
     summary, saved, log = _run_one(tmp_path, executor)
     group = summary.groups[0]
     assert group.failed_to_start is True
-    assert group.crashed is False          # 크래시로 세면 안 된다
+    assert group.crashed is False          # 크래시로 미집계
     assert saved["failed_groups"] == ["grp"]
     assert saved["groups"][0]["failed_to_start"] is True
     assert "실행 실패" in log
@@ -101,7 +105,7 @@ def test_harness_that_never_runs_is_reported_as_start_failure(tmp_path):
 
 
 def test_summary_records_exec_count(tmp_path):
-    """총 실행 횟수가 fuzz_summary.json 에 남아야 리포트가 읽을 수 있다."""
+    """fuzz_summary.json 의 총 실행 횟수 기록"""
     def executor(argv, timeout, on_line):
         on_line("#4096 pulse  cov: 10 ft: 12 corp: 3/9b exec/s: 2048 rss: 30Mb")
         return ProcResult(exit_code=0, timed_out=False)
@@ -112,7 +116,7 @@ def test_summary_records_exec_count(tmp_path):
 
 
 def test_crash_on_first_input_is_not_a_start_failure(tmp_path):
-    """execs 가 0 이어도 새니타이저 결함이 있으면 크래시다."""
+    """execs 0 이어도 새니타이저 결함 존재 시 크래시 판정"""
     def executor(argv, timeout, on_line):
         on_line("ERROR: AddressSanitizer: heap-buffer-overflow on address 0x1")
         return ProcResult(exit_code=1, timed_out=False)
@@ -124,7 +128,7 @@ def test_crash_on_first_input_is_not_a_start_failure(tmp_path):
 
 
 def test_reporting_marks_start_failure_as_failed_not_crashed(tmp_path):
-    """reporting/summary 가 crashed 플래그를 믿으므로 실행 실패는 failed 여야 한다."""
+    """실행 실패의 failed 상태 보고"""
     from logosfuzz.reporting.summary import _status
 
     def executor(argv, timeout, on_line):

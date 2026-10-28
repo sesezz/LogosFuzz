@@ -1,0 +1,70 @@
+# LogosFuzz 범용(비-Bazel) 격리 퍼징 실행 이미지  ->  logosfuzz-exec:generic
+#
+# Bazel 이미지(docker/Dockerfile = logosfuzz-exec:latest)와의 차이
+#   Bazel 판: 툴체인을 Bazel 이 공급, 이미지는 Bazel 구동 환경 + 캐시만 포함
+#   범용 판 : 비-Bazel 대상(cmake/ninja/make 등)용, clang/llvm 툴체인 직접 포함
+#
+# 격리 정책은 실행 측(logosfuzz/execute/docker_runner.py) 담당
+# Bazel 이미지와 같은 사용자·마운트·CMD 규약 사용
+#
+# 베이스 = ubuntu:24.04 (Bazel 이미지와 동일)
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Asia/Seoul \
+    LANG=C.UTF-8
+
+# 범용 빌드·실행·커버리지용 툴체인
+#   clang / lld            : 하네스 컴파일 및 -fsanitize=fuzzer,address 링크
+#   llvm (profdata/cov/..) : 커버리지 후처리 및 스택 심볼라이즈
+#                            (llvm-profdata / llvm-cov / llvm-symbolizer)
+#   cmake / ninja-build    : 범용 대상의 주 빌드 시스템
+#   pkg-config             : 대상 라이브러리 의존 검색
+#   make                   : autotools/Makefile 기반 대상 대비
+#   libatomic1             : 하네스의 libatomic.so.1 동적 링크용
+#   ca-certificates/git/curl/unzip/xz-utils/patch/file/binutils :
+#                            소스 fetch·아카이브 전개·addr2line 심볼라이즈
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        clang \
+        lld \
+        llvm \
+        cmake \
+        ninja-build \
+        pkg-config \
+        make \
+        libatomic1 \
+        curl \
+        git \
+        unzip \
+        xz-utils \
+        patch \
+        file \
+        binutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---- 새니타이저 기본값 -----------------------------------------------------
+# Bazel 이미지와 동일 (실제 값은 DockerIsolationRunner 가 -e 로 지정)
+# UBSan 스택 출력을 위해 print_stacktrace=1 필수
+ENV ASAN_OPTIONS="abort_on_error=1:detect_leaks=1:symbolize=1" \
+    UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1" \
+    LSAN_OPTIONS="symbolize=1" \
+    TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1"
+
+# ---- 실행 사용자 -----------------------------------------------------------
+# Bazel 이미지와 동일 규약: 소스 /src(ro), 출력 /out(rw)
+# ubuntu:24.04 기본 사용자(uid 1000) 삭제 후 fuzzer 생성
+RUN (userdel -r ubuntu 2>/dev/null || true) \
+    && useradd -m -u 1000 fuzzer \
+    && mkdir -p /out /src \
+    && chown -R fuzzer:fuzzer /out
+
+COPY --chown=fuzzer:fuzzer docker/entrypoint.sh /usr/local/bin/logosfuzz-entrypoint
+RUN chmod +x /usr/local/bin/logosfuzz-entrypoint
+
+WORKDIR /src
+USER fuzzer
+
+# ENTRYPOINT 미선언: docker_runner 가 `docker run ... image bash -lc "<cmd>"` 로 전체 커맨드 전달
+# (선언 시 인자 이중 연결로 미실행·rc=0 위장, Bazel 이미지 주석 참고)
+CMD ["bash", "-lc", "clang --version && cmake --version | head -1 && ninja --version && echo 'LogosFuzz exec image (generic) ready'"]
