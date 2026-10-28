@@ -51,6 +51,7 @@ class RunOptions:
     image: Optional[str] = None
     no_build: bool = False
     coverage: bool = True
+    smoke_rounds: int = 2     # 시드 스모크에서 하네스 결함이 나오면 LLM 으로 고치는 최대 횟수 (0 이면 생략)
 
 
 @dataclass
@@ -309,6 +310,48 @@ class GenericRun:
                 raise StageFailed("빌드에 성공한 하네스가 없다 (gen/ 의 초안과 run_summary 의 outcome 확인)")
             return built, loop.compiler
 
+    def stage_smoke(self, built, compiler):
+        """퍼징 전 시드 스모크: 유효한 시드로 하네스를 한 번씩 돌려 하네스 결함을 고친다 (generate/smoke.py)."""
+        from logosfuzz.execute.seeds import profile_seed_paths
+        from logosfuzz.generate.hygiene import sanitize_harness
+        from logosfuzz.generate.smoke import smoke_repair
+
+        seeds = profile_seed_paths(self.profile)
+        with self._stage("SMOKE") as st:
+            if self.opts.smoke_rounds <= 0 or not seeds:
+                st.detail["skipped"] = "smoke_rounds=0" if self.opts.smoke_rounds <= 0 else "시드 없음"
+                return built
+            adapter = self.make_adapter(compiler.effective_profile)
+            updated, statuses = [], {}
+            for entry, draft, source in built:
+                spec = compiler.spec_for(draft)
+
+                def rebuild(new_source, spec=spec):
+                    adapter.emit_build_definition(spec, new_source)
+                    result = adapter.build(spec)
+                    return Path(result.binary) if result.ok and result.binary else None
+
+                outcome = smoke_repair(
+                    Path(entry["binary"]), source, seeds=seeds, profile=self.profile, kb=self.kb,
+                    complete=lambda prompt, system: self.llm.complete(prompt, system=system),
+                    rebuild=rebuild, rounds=self.opts.smoke_rounds,
+                    sanitize=lambda text, draft=draft: sanitize_harness(text, draft),
+                    log=self._log,
+                )
+                entry["smoke"] = outcome.status
+                entry["smoke_rounds"] = outcome.rounds
+                if outcome.source != source or outcome.rounds:
+                    # 마지막으로 채택한 소스를 디스크에도 남긴다(실패한 수정본이 파일에 남지 않게)
+                    entry["source"] = str(adapter.emit_build_definition(spec, outcome.source))
+                    entry["binary"] = str(outcome.binary)
+                statuses[entry["slug"]] = outcome.status
+                self._log(f"  ▶ {entry['group']}: 시드 스모크 {outcome.status}"
+                          f"{' (LLM 수정 ' + str(outcome.rounds) + '회)' if outcome.rounds else ''}"
+                          f"{' - ' + outcome.detail if outcome.detail else ''}")
+                updated.append((entry, draft, outcome.source))
+            st.detail.update(seeds=len(seeds), groups=statuses)
+            return updated
+
     def stage_coverage_build(self, built, compiler) -> None:
         with self._stage("COVBIN") as st:
             adapter = self.make_adapter(compiler.effective_profile, coverage=True)
@@ -442,6 +485,7 @@ class GenericRun:
             groups, group_map, schedule, timeouts = self.stage_sch()
             drivers = self.stage_gen(groups, group_map, schedule)
             built, compiler = self.stage_heal(drivers, group_map)
+            built = self.stage_smoke(built, compiler)
             if self.opts.coverage:
                 try:
                     self.stage_coverage_build(built, compiler)
@@ -531,6 +575,8 @@ def add_run_parser(sub) -> None:
     r.add_argument("--no-build", action="store_true", help="격리 이미지 자동 빌드 생략")
     r.add_argument("--no-coverage", dest="coverage", action="store_false", default=True,
                    help="커버리지 빌드·재생 생략")
+    r.add_argument("--smoke-rounds", type=int, default=2,
+                   help="시드 스모크에서 하네스 결함이 나오면 LLM 으로 고치는 최대 횟수 (기본 2, 0 이면 생략)")
 
 
 def options_from_args(args) -> RunOptions:
@@ -544,7 +590,7 @@ def options_from_args(args) -> RunOptions:
     return RunOptions(profile=args.profile, budget=args.budget, output=output,
                       max_round=args.max_round, use_docker=args.docker, top=args.top,
                       model=args.model, image=args.image, no_build=args.no_build,
-                      coverage=args.coverage)
+                      coverage=args.coverage, smoke_rounds=getattr(args, "smoke_rounds", 2))
 
 
 def main_run(args) -> int:

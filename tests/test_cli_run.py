@@ -194,7 +194,7 @@ def test_stages_run_in_order_and_summary_is_written(tmp_path):
     assert rc == 0
     summary = json.loads((out / "run_summary.json").read_text())
     assert [s["stage"] for s in summary["stages"]] == \
-        ["BUILD", "EXT", "SCH", "GEN", "HEAL", "COVBIN", "EXE", "COV", "ANA"]
+        ["BUILD", "EXT", "SCH", "GEN", "HEAL", "SMOKE", "COVBIN", "EXE", "COV", "ANA"]
     assert all(s["ok"] and s["automatic"] for s in summary["stages"])
     assert summary["totals"]["harness_built"] == summary["totals"]["groups"] >= 1
     for name in ("kb.json", "fuzz_summary.json", "analysis.json", "validation-summary.json"):
