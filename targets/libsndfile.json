@@ -38,5 +38,5 @@
     "stub_undefined": false,
     "stub_allowlist": []
   },
-  "seeds": []
+  "seeds": ["../../targets/seeds/libsndfile"]
 }

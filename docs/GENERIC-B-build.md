@@ -136,3 +136,28 @@ libsndfile E2E(`logosfuzz run`)에서 자동 생성된 C 하네스 2개에 결�
 
 자동차 모드는 두 설정이 기본값(꺼짐/빈 값)이라 동작이 변하지 않음. `logosfuzz run`(generic)만 켬.
 
+## 실측 기록: libsndfile 1.2.2 자동 실행 (시드 없음 vs 있음)
+
+`logosfuzz run --profile targets/libsndfile.json --budget 600 --max-round 3 --model gpt-4o`
+모든 단계 자동(`automatic: true`). 하네스는 LLM(gpt-4o)이 생성했고 수동 하네스가 아님. 단일 실행 1회씩이며 반복 측정이 아님.
+
+| 항목 | run9 (시드 없음) | run10 (시드 9개) |
+|---|---|---|
+| EXE 소요 | 607.7초 | 610.1초 |
+| `lg_sndfile` 라인 | 1155/25833 (4.47%) | 2324/25833 (9.00%) |
+| `lg_sndfile` 분기 | 663/13140 (5.05%) | 1398/13140 (10.64%) |
+| `lg_sndfile` 함수 | 64/996 (6.43%) | 92/996 (9.24%) |
+| `lg_sf_info` 라인 | 874/25833 (3.38%) | 1224/25833 (4.74%) |
+| `lg_sf_info` 분기 | 505/13140 (3.84%) | 682/13140 (5.19%) |
+| `lg_sndfile` 실행 횟수 / exec/s | 7,808,215 / 13,674 | 372,930 / 653 |
+| 크래시(ASan 등) | 0 | 0 |
+| 결함 군집 (UBSan, 전부 `needs_review`) | 8 | 11 |
+
+시드: `targets/seeds/libsndfile/` 9개(WAV 5, AIFF, AU, CAF, MAT4). `scripts/make_libsndfile_seeds.py` 가 표준 라이브러리만으로 생성하며 libsndfile 로 전부 열림을 확인함.
+
+해석할 때 주의할 점
+* 두 실행의 하네스 소스가 다름(LLM이 매번 새로 생성). 커버리지 차이가 시드만의 효과라고 단정할 수 없음.
+* `lg_sndfile` 의 exec/s 가 약 20배 낮아짐. 하네스 차이 또는 더 깊은 코드 경로 실행 때문으로 추정되며 원인은 확인하지 않음.
+* 새로 나온 군집: `au.c:324/326/327` 정수 오버플로(AU 시드로 파서에 도달). 나머지는 `mat4.c`(5곳), `pcm.c:130`, `strings.c:176`(NULL 포인터 연산)로 이전 실행과 같음.
+* 결함은 모두 UBSan 의 정의되지 않은 동작 경고이고 사람 검토 전에는 정탐이 아님. 메모리 오류(ASan)는 0건.
+
