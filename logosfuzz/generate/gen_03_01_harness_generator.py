@@ -550,6 +550,11 @@ def header_declaration_excerpt(
 
 
 _IDENT_RE = re.compile(r"[A-Za-z_]\w*")
+# 자원을 해제하는 함수 선언(close/free/destroy ...). 그룹 API 목록에 없어도 하네스가 호출해야 한다
+_RELEASE_DECL_RE = re.compile(
+    r"^[ \t]*[A-Za-z_][\w \t\*]*\b\w*(?:close|free|destroy|release|cleanup|dispose|delete)\w*[ \t]*\([^;{}]*\)[ \t]*;",
+    re.IGNORECASE | re.MULTILINE)
+MAX_RELEASE_DECLS = 6
 # 타입 정의를 찾을 필요가 없는 C 예약어·표준 스칼라 이름
 _NON_TYPE_WORDS = frozenset({
     "const", "volatile", "struct", "union", "enum", "unsigned", "signed", "int", "char", "short",
@@ -686,6 +691,11 @@ def type_definitions_excerpt(
             matched = any(clue in member for clue in clues for member in members)
             if small or matched:
                 add(block)
+
+        releases = [" ".join(m.group(0).split()) for m in _RELEASE_DECL_RE.finditer(text)]
+        if releases:
+            found.append("// Release functions declared in this header (call them for every handle you open):\n"
+                         + "\n".join(dict.fromkeys(releases[:MAX_RELEASE_DECLS])))
 
         if found:
             parts.append(f"// {include_path_for(header, workspace_root)}: type definitions\n" + "\n\n".join(found))

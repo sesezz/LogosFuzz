@@ -82,6 +82,8 @@ def test_c_prompt_generic_adds_handle_and_callback_rules():
     assert "NEVER pass the fuzzer input (or a pointer into it) as a `char *` string" in generic   # NUL 없는 문자열 전달 금지
     assert "NEVER pass the fuzzer input" not in automotive
     assert "mkstemps(template, suffix_length)" in generic                       # 접미사가 있는 임시 파일 템플릿
+    assert "as a" in generic and "divisor or modulus" in generic               # 0 으로 나누는 하네스 방지
+    assert "Release every handle you open" in generic and "never leave the call" in generic
     assert "Do NOT invent or call any function not explicitly listed above." not in generic
     assert "needed to create, open, initialise or release" in generic        # 열기·닫기 함수 허용
     assert "STRICT RULES:" in generic and generic.index("STRICT RULES:") < generic.index("13. NEVER")

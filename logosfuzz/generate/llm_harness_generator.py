@@ -382,6 +382,13 @@ _C_GENERIC_EXTRA_RULES = """\
     library itself reports (for example an info struct filled by the open call:
     channels, frames, sample size), following the API documentation. A call that
     reads N "frames" writes N x channels items, so allocate that many items.
+22. NEVER use a value reported by the library or taken from the input as a
+    divisor or modulus (`x % info.frames`) without first checking it is not
+    zero; a zero value crashes the harness itself with a division error.
+23. Release every handle you open with the matching release function declared
+    in the headers (close/free/destroy), on every return path. That function is
+    available even when it is not in the API list above; never leave the call
+    commented out.
 """
 
 

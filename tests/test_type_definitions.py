@@ -32,6 +32,9 @@ enum
 	LIBC_I, LIBC_J, LIBC_K, LIBC_L, LIBC_M, LIBC_N, LIBC_O, LIBC_P, LIBC_Q
 } ;
 int lib_open_virtual (LIB_IO *io, int mode, LIB_INFO *info, void *user) ;
+int lib_close (void *handle) ;
+void lib_free_buffer (void *buf) ;
+int lib_read_all (void *handle) ;
 const char *lib_get_string (void *handle, int str_type) ;
 #endif
 """
@@ -97,3 +100,16 @@ def test_output_is_truncated_to_the_limit(tmp_path):
     text = type_definitions_excerpt(docs, max_chars=200)
     assert len(text) <= 200 + len("\n// ... (truncated)")
     assert text.endswith("// ... (truncated)")
+
+
+def test_release_function_declarations_are_listed(tmp_path):
+    """실측: 그룹 API 에 sf_close 가 없어서 모델이 해제 호출을 주석 처리해 누수가 반복됨."""
+    header = _write(tmp_path)
+    docs = [_doc(header, "lib_open_virtual", [("io", "LIB_IO *")])]
+
+    text = type_definitions_excerpt(docs)
+
+    assert "Release functions declared in this header" in text
+    assert "int lib_close (void *handle) ;" in text
+    assert "void lib_free_buffer (void *buf) ;" in text
+    assert "lib_read_all" not in text                  # 해제 함수가 아닌 선언은 제외
