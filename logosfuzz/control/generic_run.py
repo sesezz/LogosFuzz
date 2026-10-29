@@ -51,7 +51,7 @@ class RunOptions:
     image: Optional[str] = None
     no_build: bool = False
     coverage: bool = True
-    smoke_rounds: int = 2     # 시드 스모크에서 하네스 결함이 나오면 LLM 으로 고치는 최대 횟수 (0 이면 생략)
+    smoke_rounds: int = 3     # 시드 스모크에서 하네스 결함이 나오면 LLM 으로 고치는 최대 횟수 (0 이면 생략)
 
 
 @dataclass
@@ -353,27 +353,44 @@ class GenericRun:
                 return built
             adapter = self.make_adapter(compiler.effective_profile)
             updated, statuses = [], {}
+            import dataclasses
+
             for entry, draft, source in built:
                 spec = compiler.spec_for(draft)
+                # 후보 수정본은 다른 이름(<이름>_smoke)으로 빌드한다. 같은 경로에 빌드하다 링크가 실패하면
+                # 멀쩡하던 원래 바이너리가 지워진다(실측: embedded-sample 에서 EXE 가 HarnessNotFound 로 중단)
+                candidate = dataclasses.replace(spec, name=f"{spec.name}_smoke")
+                errors = {"last": ""}
 
-                def rebuild(new_source, spec=spec):
-                    adapter.emit_build_definition(spec, new_source)
-                    result = adapter.build(spec)
+                def rebuild(new_source, candidate=candidate, errors=errors):
+                    adapter.emit_build_definition(candidate, new_source)
+                    result = adapter.build(candidate)
+                    errors["last"] = "" if result.ok else (result.short_log or result.log[-1500:])
                     return Path(result.binary) if result.ok and result.binary else None
 
+                original_binary = Path(entry["binary"])
                 outcome = smoke_repair(
-                    Path(entry["binary"]), source, seeds=seeds, profile=self.profile, kb=self.kb,
+                    original_binary, source, seeds=seeds, profile=self.profile, kb=self.kb,
                     complete=lambda prompt, system: self.llm.complete(prompt, system=system),
-                    rebuild=rebuild, rounds=self.opts.smoke_rounds,
+                    rebuild=rebuild, rounds=self.opts.smoke_rounds, build_error=lambda errors=errors: errors["last"],
                     sanitize=lambda text, draft=draft: sanitize_harness(text, draft),
                     log=self._log,
                 )
                 entry["smoke"] = outcome.status
                 entry["smoke_rounds"] = outcome.rounds
-                if outcome.source != source or outcome.rounds:
-                    # 마지막으로 채택한 소스를 디스크에도 남긴다(실패한 수정본이 파일에 남지 않게)
+                if outcome.changed:
+                    # 수정에 성공했으면 정식 이름으로 다시 빌드해 소스·바이너리 위치를 원래대로 맞춘다
+                    adapter.emit_build_definition(spec, outcome.source)
+                    final = adapter.build(spec)
+                    if final.ok and final.binary:
+                        entry["binary"] = str(final.binary)
+                    else:
+                        entry["binary"] = str(outcome.binary)       # 후보 바이너리를 그대로 쓴다
                     entry["source"] = str(adapter.emit_build_definition(spec, outcome.source))
-                    entry["binary"] = str(outcome.binary)
+                else:
+                    # 수정하지 않았거나 실패했으면 원래 소스를 정식 위치에 그대로 둔다(바이너리는 건드리지 않았다)
+                    entry["source"] = str(adapter.emit_build_definition(spec, source))
+                    outcome.source, outcome.binary = source, original_binary
                 statuses[entry["slug"]] = outcome.status
                 self._log(f"  ▶ {entry['group']}: 시드 스모크 {outcome.status}"
                           f"{' (LLM 수정 ' + str(outcome.rounds) + '회)' if outcome.rounds else ''}"
@@ -607,8 +624,8 @@ def add_run_parser(sub) -> None:
     r.add_argument("--no-build", action="store_true", help="격리 이미지 자동 빌드 생략")
     r.add_argument("--no-coverage", dest="coverage", action="store_false", default=True,
                    help="커버리지 빌드·재생 생략")
-    r.add_argument("--smoke-rounds", type=int, default=2,
-                   help="시드 스모크에서 하네스 결함이 나오면 LLM 으로 고치는 최대 횟수 (기본 2, 0 이면 생략)")
+    r.add_argument("--smoke-rounds", type=int, default=3,
+                   help="시드 스모크에서 하네스 결함이 나오면 LLM 으로 고치는 최대 횟수 (컴파일 오류 재시도 포함, 기본 3, 0 이면 생략)")
 
 
 def options_from_args(args) -> RunOptions:
@@ -622,7 +639,7 @@ def options_from_args(args) -> RunOptions:
     return RunOptions(profile=args.profile, budget=args.budget, output=output,
                       max_round=args.max_round, use_docker=args.docker, top=args.top,
                       model=args.model, image=args.image, no_build=args.no_build,
-                      coverage=args.coverage, smoke_rounds=getattr(args, "smoke_rounds", 2))
+                      coverage=args.coverage, smoke_rounds=getattr(args, "smoke_rounds", 3))
 
 
 def main_run(args) -> int:

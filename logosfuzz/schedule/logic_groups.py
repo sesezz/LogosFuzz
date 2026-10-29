@@ -150,12 +150,25 @@ def _candidate_types(text: str) -> List[str]:
     return names
 
 
-def state_types_of(document: dict, kb: KnowledgeBase) -> List[str]:
+def state_types_of(document: dict, kb: KnowledgeBase, include_return: bool = False) -> List[str]:
     """이 API 가 다루는 '상태 핸들' 타입 목록
 
     포인터로 주고받는, 프로젝트가 정의한 비스칼라 타입만 인정
+
+    ``include_return`` 이 참이면 **반환 타입**도 본다. 객체를 만들어 돌려주는 생성 함수
+    (``proto_ctx_t *proto_create(size_t)``, ``SNDFILE *sf_open(...)``)는 인자에 그 타입이 없어서
+    사용 함수들과 다른 그룹이 되었고, LLM 이 생성 함수를 모른 채 ``malloc`` 으로 객체를 만들어 넘기는
+    하네스를 썼다(실측: embedded-sample, libsndfile). 자동차 모드의 기존 그룹을 바꾸지 않도록 기본은 꺼 둔다.
     """
     found: List[str] = []
+    if include_return:
+        return_type = str(document.get("return_type") or "")
+        if "*" in return_type:
+            for name in _candidate_types(return_type):
+                if _SCALAR_TYPE_RE.match(name) or not kb.defines_struct_type(name):
+                    continue
+                if name not in found:
+                    found.append(name)
     for param in document.get("params", []):
         if not param.get("is_pointer"):
             continue
@@ -279,7 +292,8 @@ def generic_types(owners_by_type: Dict[str, List[int]], total_apis: int,
 
 def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
                    ratio: float = GENERIC_TYPE_RATIO,
-                   max_group: int = MAX_CALL_LINK_GROUP) -> List[GroupInfo]:
+                   max_group: int = MAX_CALL_LINK_GROUP,
+                   include_return: bool = False) -> List[GroupInfo]:
     """지식베이스에서 상태 기반 로직 그룹 추출
 
     Args:
@@ -287,6 +301,7 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
         link_calls: 호출 관계로 타입 없는 API 흡수 여부
         ratio: 이 비율을 넘게 쓰이는 타입은 그룹 구분력이 없어 제외
         max_group: 호출 관계 병합으로 만들 수 있는 그룹 크기 상한
+        include_return: 반환 타입도 상태 타입으로 본다(생성 함수를 사용 함수와 같은 그룹에 둔다)
     """
     documents = sorted(kb.documents, key=lambda d: d["api_id"])
     if not documents:
@@ -300,7 +315,7 @@ def extract_groups(kb: KnowledgeBase, link_calls: bool = True,
     types_by_api: Dict[int, List[str]] = {}
     owners_by_type: Dict[str, List[int]] = {}
     for document in documents:
-        types = state_types_of(document, kb)
+        types = state_types_of(document, kb, include_return=include_return)
         types_by_api[document["api_id"]] = types
         for type_name in types:
             owners_by_type.setdefault(type_name, []).append(document["api_id"])
@@ -482,8 +497,13 @@ def build_groups(kb: KnowledgeBase, link_calls: bool = True,
                  with_priority: bool = True,
                  max_group: int = MAX_CALL_LINK_GROUP,
                  domain: str = "automotive") -> List[GroupInfo]:
-    """추출 + 실시간 신호 결합 + 우선순위까지 한 번에. ``domain`` 은 프로필의 domain."""
-    groups = extract_groups(kb, link_calls=link_calls, max_group=max_group)
+    """추출 + 실시간 신호 결합 + 우선순위까지 한 번에. ``domain`` 은 프로필의 domain.
+
+    ``domain`` 이 ``automotive`` 가 아니면 생성 함수(반환 타입이 상태 핸들)를 사용 함수와 같은 그룹에 둔다.
+    자동차 도메인은 기존 그룹 구성을 그대로 유지한다(골든 회귀 보호).
+    """
+    groups = extract_groups(kb, link_calls=link_calls, max_group=max_group,
+                            include_return=(domain != "automotive"))
     attach_realtime_signals(groups, kb, domain=domain)
     if with_priority:
         attach_priorities(groups, kb)

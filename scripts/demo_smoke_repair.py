@@ -26,7 +26,7 @@ def main(argv=None) -> int:
     parser.add_argument("--harness", required=True, type=Path, help="결함이 있는 하네스 소스(.c)")
     parser.add_argument("--profile", type=Path, default=REPO / "targets" / "libsndfile.json")
     parser.add_argument("--model", default="gpt-4o")
-    parser.add_argument("--rounds", type=int, default=2)
+    parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--work-dir", type=Path, default=None)
     args = parser.parse_args(argv)
 

@@ -397,6 +397,11 @@ _C_GENERIC_EXTRA_RULES = """\
 25. When an API takes a command or option code, pick it from the valid values
     listed in the header excerpt (for example an array of those constants indexed
     by data[0] % N), never from a raw byte range such as data[0] % 256.
+26. When a creator or open function takes a size, capacity or limit argument,
+    take it from separate input bytes (for example data[0] % MAX + 1, within the
+    maximum the header documents) and pass the REMAINING bytes as the data to
+    process. NEVER derive the capacity from the data length (proto_create(size)):
+    a size-versus-capacity mismatch, the classic overflow, then can never happen.
 """
 
 

@@ -521,3 +521,67 @@ def test_max_group_blocks_call_link_merging(two_machines_kb):
     groups = extract_groups(two_machines_kb, max_group=1)
 
     assert _group_of(groups, "shared_util").api_names == ["shared_util"]
+
+
+# -- 생성 함수(반환 타입)를 사용 함수와 같은 그룹에 둔다 (범용 도메인) ----------------
+
+
+CREATOR_HEADER = """
+#include <stddef.h>
+typedef struct chan { int fd; size_t cap; } chan_t;
+chan_t *chan_create(size_t capacity);
+int chan_write(chan_t *c, const char *data, size_t len);
+int chan_read(chan_t *c, char *out, size_t len);
+void chan_destroy(chan_t *c);
+"""
+CREATOR_IMPL = """
+#include <stdlib.h>
+#include "chan.h"
+chan_t *chan_create(size_t capacity) { chan_t *c = calloc(1, sizeof(*c)); if (c) c->cap = capacity; return c; }
+int chan_write(chan_t *c, const char *data, size_t len) { return (int)(c->cap < len); }
+int chan_read(chan_t *c, char *out, size_t len) { out[0] = 0; return (int)c->cap + (int)len; }
+void chan_destroy(chan_t *c) { free(c); }
+"""
+
+
+@pytest.fixture
+def creator_kb(tmp_path):
+    (tmp_path / "chan.h").write_text(CREATOR_HEADER, encoding="utf-8")
+    (tmp_path / "chan.c").write_text(CREATOR_IMPL, encoding="utf-8")
+    return KnowledgeBase.build(paths=[str(tmp_path)])
+
+
+def test_creator_is_separated_by_default_but_joins_when_return_types_are_considered(creator_kb):
+    """실측: proto_create / sf_open 이 사용 함수와 다른 그룹이 되어 LLM 이 malloc 으로 객체를 만들었다."""
+    names = lambda groups: sorted(tuple(sorted(g.api_names)) for g in groups)
+
+    default = extract_groups(creator_kb, link_calls=False)
+    assert all("chan_create" not in g.api_names or len(g.api_names) == 1 for g in default)
+
+    joined = extract_groups(creator_kb, link_calls=False, include_return=True)
+    group = _group_of(joined, "chan_create")
+    assert {"chan_create", "chan_write", "chan_read", "chan_destroy"} <= set(group.api_names)
+    assert "chan_t" in group.state_types
+    assert len(names(joined)) < len(names(default)) or len(group.api_names) > 1
+
+
+def test_state_types_of_reads_the_return_type_only_when_asked(creator_kb):
+    create = creator_kb.api("chan_create")
+    assert state_types_of(create, creator_kb) == []
+    assert state_types_of(create, creator_kb, include_return=True) == ["chan_t"]
+    # 스칼라 반환형(int)은 상태 핸들이 아니다
+    assert state_types_of(creator_kb.api("chan_write"), creator_kb, include_return=True) == ["chan_t"]
+
+
+def test_build_groups_keeps_automotive_grouping_unchanged(creator_kb):
+    """자동차 도메인은 기존 그룹 구성을 유지한다 (골든 회귀 보호)."""
+    automotive = build_groups(creator_kb, domain="automotive", with_priority=False)
+    default = build_groups(creator_kb, with_priority=False)
+    assert [(g.group_id, tuple(g.api_ids)) for g in automotive] == [(g.group_id, tuple(g.api_ids)) for g in default]
+    assert _group_of(automotive, "chan_create") is not _group_of(automotive, "chan_read")
+
+
+@pytest.mark.parametrize("domain", ["generic", "embedded"])
+def test_build_groups_puts_the_creator_with_its_users_outside_automotive(creator_kb, domain):
+    groups = build_groups(creator_kb, domain=domain, with_priority=False)
+    assert _group_of(groups, "chan_create") is _group_of(groups, "chan_read")

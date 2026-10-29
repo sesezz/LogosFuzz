@@ -87,6 +87,7 @@ def test_c_prompt_generic_adds_handle_and_callback_rules():
     flat = " ".join(generic.split())                                           # 프롬프트의 줄바꿈 무시
     assert "read real data with a count derived from the input" in flat       # 0개 읽기 금지
     assert "never from a raw byte range such as data[0] % 256" in flat        # 명령 코드는 유효한 값에서
+    assert "NEVER derive the capacity from the data length" in flat           # 생성자 용량을 입력 길이에서 파생 금지
     assert "Do NOT invent or call any function not explicitly listed above." not in generic
     assert "needed to create, open, initialise or release" in generic        # 열기·닫기 함수 허용
     assert "STRICT RULES:" in generic and generic.index("STRICT RULES:") < generic.index("13. NEVER")

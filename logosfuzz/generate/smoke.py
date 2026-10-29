@@ -27,6 +27,7 @@ from typing import Any, Callable, List, Optional, Sequence
 
 SMOKE_TIMEOUT_S = 60
 OUTPUT_EXCERPT_LINES = 40
+BUILD_ERROR_LINES = 25
 
 STATUS_CLEAN = "clean"                    # 시드로 크래시 없음
 STATUS_REPAIRED = "repaired"              # 하네스 결함을 고쳐 크래시가 사라짐
@@ -118,16 +119,30 @@ _REASONS = {
     "harness-string": (
         "The harness passed fuzzer input directly as a `char *` string to the API {api}. The input has no NUL "
         "terminator. Build a NUL-terminated copy, or write the input to a temporary file and pass its path."),
+    "harness-uninitialized-object": (
+        "The harness created the object it passes to {api} with plain malloc/calloc instead of the library's "
+        "own constructor, so its fields are uninitialised garbage. Obtain the object from the creator function "
+        "declared in the headers (a *_create / *_init / *_open style function; it may not be in the API list "
+        "above), check the result for NULL, and release it with the matching destroy function afterwards. Take any "
+        "size/capacity argument of the creator from separate input bytes (for example data[0] % MAX + 1), never "
+        "from the data length, and pass the remaining bytes as the data to process."),
     "harness": (
         "The harness did not check the result of an earlier call (a NULL or error return) before passing it "
         "to the API {api}. Check every open/create result and return 0 when it failed."),
 }
 
 
-def build_runtime_repair_prompt(source: str, evidence, output: str) -> str:
+def build_runtime_repair_prompt(source: str, evidence, output: str, build_error: str = "") -> str:
     reason = _REASONS.get(evidence.violation, "The harness misuses the API {api}.").format(api=evidence.api)
     excerpt = "\n".join(output.splitlines()[:OUTPUT_EXCERPT_LINES])
-    return (
+    compile_note = ""
+    if build_error.strip():
+        errors = "\n".join(build_error.strip().splitlines()[-BUILD_ERROR_LINES:])
+        compile_note = (
+            "YOUR PREVIOUS FIX DID NOT COMPILE. Compiler/linker output:\n"
+            f"```\n{errors}\n```\n"
+            "Correct the source below so it compiles, and keep the runtime fix.\n\n")
+    return compile_note + (
         "The following libFuzzer harness crashed while running a VALID seed input, so the defect is in the "
         "harness, not in the library.\n\n"
         f"WHY: {reason}\n\n"
@@ -148,16 +163,20 @@ def smoke_repair(
     kb=None,
     complete: Callable[[str, str], str],
     rebuild: Callable[[str], Optional[Path]],
-    rounds: int = 2,
+    rounds: int = 3,
     sanitize: Callable[[str], str] = lambda text: text,
     run: Callable[..., SmokeRun] = run_seed_smoke,
     log: Callable[[str], None] = lambda message: None,
+    build_error: Callable[[], str] = lambda: "",
 ) -> SmokeOutcome:
     """시드 스모크 테스트를 돌리고, 하네스 결함 증거가 있으면 LLM 으로 고쳐 다시 빌드한다.
 
     Args:
         complete: ``(prompt, system) -> LLM 응답``
         rebuild: 새 소스를 빌드하고 바이너리 경로를 돌려준다(실패하면 None)
+        rounds: LLM 호출 상한. 수정본이 컴파일되지 않아 다시 부르는 것도 1회로 센다.
+        build_error: 직전 ``rebuild`` 가 실패했을 때의 컴파일러 출력. 있으면 다음 LLM 호출에 함께 준다
+            (실측: embedded-sample 에서 첫 수정본이 컴파일되지 않아 원래 하네스가 그대로 퍼징에 쓰였다)
     """
     from logosfuzz.generate.llm import domain_subject, extract_code
 
@@ -180,13 +199,19 @@ def smoke_repair(
         if used >= rounds:
             return SmokeOutcome(STATUS_UNRESOLVED, source, binary, used, evidence.violation)
 
-        used += 1
-        log(f"    시드 스모크: 하네스 결함({evidence.violation}) - LLM 수정 {used}/{rounds}")
-        reply = complete(build_runtime_repair_prompt(source, evidence, result.output), system)
-        fixed = sanitize(extract_code(reply))
-        if not fixed.strip():
-            return SmokeOutcome(STATUS_REBUILD_FAILED, source, binary, used, "LLM 이 빈 소스를 돌려줌")
-        new_binary = rebuild(fixed)
-        if new_binary is None:
+        # 수정본이 컴파일되면 다시 시드로 돌려 보고, 컴파일되지 않으면 오류를 돌려주며 남은 횟수만큼 다시 고친다.
+        attempt, error, built = source, "", None
+        while used < rounds and built is None:
+            used += 1
+            log(f"    시드 스모크: 하네스 결함({evidence.violation}) - LLM 수정 {used}/{rounds}"
+                f"{' (컴파일 오류 재전달)' if error else ''}")
+            reply = complete(build_runtime_repair_prompt(attempt, evidence, result.output, error), system)
+            fixed = sanitize(extract_code(reply))
+            if not fixed.strip():
+                return SmokeOutcome(STATUS_REBUILD_FAILED, source, binary, used, "LLM 이 빈 소스를 돌려줌")
+            built = rebuild(fixed)
+            attempt = fixed
+            error = build_error() if built is None else ""
+        if built is None:
             return SmokeOutcome(STATUS_REBUILD_FAILED, source, binary, used, "수정한 소스가 빌드되지 않음")
-        source, binary = fixed, new_binary
+        source, binary = attempt, built

@@ -121,8 +121,10 @@ def test_repair_prompt_carries_the_reason_the_log_and_the_source(profile):
 # smoke_repair
 # --------------------------------------------------------------------------- #
 class Recorder:
-    def __init__(self, runs, reply=f"```c\n{GOOD}```", rebuilt=Path("/bin/fixed")):
+    def __init__(self, runs, reply=f"```c\n{GOOD}```", rebuilt=Path("/bin/fixed"), replies=None, rebuilds=None):
         self.runs, self.reply, self.rebuilt = list(runs), reply, rebuilt
+        self.replies = list(replies) if replies else None      # 호출마다 다른 LLM 응답
+        self.rebuilds = list(rebuilds) if rebuilds else None   # 호출마다 다른 빌드 결과(None 이면 실패)
         self.prompts, self.sources = [], []
 
     def run(self, binary, seeds):
@@ -130,16 +132,20 @@ class Recorder:
 
     def complete(self, prompt, system):
         self.prompts.append((prompt, system))
-        return self.reply
+        return self.replies.pop(0) if self.replies else self.reply
 
     def rebuild(self, source):
         self.sources.append(source)
-        return self.rebuilt
+        return self.rebuilds.pop(0) if self.rebuilds else self.rebuilt
+
+    def build_error(self):
+        return "proto_parser.h:5:10: error: unknown type name 'size_t'"
 
 
 def _repair(rec, profile, seeds=(Path("seed"),), rounds=2):
     return smoke_repair(Path("/bin/orig"), BAD, seeds=list(seeds), profile=profile,
-                        complete=rec.complete, rebuild=rec.rebuild, rounds=rounds, run=rec.run)
+                        complete=rec.complete, rebuild=rec.rebuild, rounds=rounds, run=rec.run,
+                        build_error=rec.build_error)
 
 
 def test_clean_harness_is_left_alone(profile):
@@ -198,3 +204,27 @@ def test_no_seeds_skips_the_smoke_test(profile):
 def test_unrunnable_binary_is_skipped_not_judged(profile):
     rec = Recorder([SmokeRun(ok=False, output="실행할 수 없음", returncode=127)])
     assert _repair(rec, profile).status == "skipped"
+
+
+def test_compile_error_is_sent_back_to_the_llm_and_the_second_fix_is_used(profile):
+    """실측: embedded-sample 에서 첫 수정본이 컴파일되지 않아 원래 하네스가 그대로 퍼징에 쓰였다."""
+    first = "int LLVMFuzzerTestOneInput(const unsigned char *d, unsigned long n) { /* does not compile */ }\n"
+    rec = Recorder([_crash_run(), SmokeRun(ok=True)], replies=[f"```c\n{first}```", f"```c\n{GOOD}```"],
+                   rebuilds=[None, Path("/bin/fixed2")])
+
+    outcome = _repair(rec, profile, rounds=3)
+
+    assert outcome.status == "repaired" and outcome.rounds == 2
+    assert outcome.source.strip() == GOOD.strip() and outcome.binary == Path("/bin/fixed2")
+    assert len(rec.prompts) == 2
+    second_prompt = rec.prompts[1][0]
+    assert "YOUR PREVIOUS FIX DID NOT COMPILE" in second_prompt and "unknown type name" in second_prompt
+    assert first.strip() in second_prompt                          # 고칠 대상은 컴파일되지 않은 첫 수정본
+    assert "YOUR PREVIOUS FIX DID NOT COMPILE" not in rec.prompts[0][0]
+
+
+def test_compile_retries_count_against_the_round_limit(profile):
+    rec = Recorder([_crash_run()], rebuilds=[None, None, None])
+    outcome = _repair(rec, profile, rounds=2)
+    assert outcome.status == "rebuild-failed" and outcome.rounds == 2 and len(rec.prompts) == 2
+    assert outcome.source == BAD and outcome.binary == Path("/bin/orig")

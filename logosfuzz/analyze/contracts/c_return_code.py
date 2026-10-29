@@ -50,6 +50,9 @@ VIOLATED_BY_HARNESS_STRING = "harness-string"
 # 하네스가 할당한 버퍼를 공개 API 가 넘어 쓴 경우. API 가 요구하는 버퍼 크기(예: frames x channels)를
 # 하네스가 못 맞췄을 가능성이 커서 의심으로만 표시한다(라이브러리가 요청보다 더 쓴 결함일 수도 있다)
 SUSPECT_HARNESS_BUFFER = "harness-buffer-suspect"
+# 하네스가 API 에 넘기는 객체를 라이브러리의 생성 함수 대신 malloc/calloc 으로 직접 만든 경우(필드가 초기화되지 않음)
+VIOLATED_BY_HARNESS_UNINIT = "harness-uninitialized-object"
+_CREATOR_NAME_RE = re.compile(r"create|new|init|open|alloc|make", re.IGNORECASE)
 _ALLOCATORS = frozenset({"malloc", "calloc", "realloc", "posix_memalign", "aligned_alloc", "memalign",
                          "operator new", "operator new[]"})
 
@@ -205,19 +208,19 @@ def _unterminated_string(record: CrashRecord, apis: set, kb=None) -> Optional[CR
 
 
 def _harness_allocated_overflow(record: CrashRecord, apis: set, kb=None) -> Optional[CReturnCodeEvidence]:
-    """하네스가 할당한 힙 버퍼를 하네스가 직접 부른 공개 API 가 넘어 쓴 크래시를 스택으로 포착
+    """하네스가 소유한 버퍼(힙 또는 스택)를 하네스가 직접 부른 공개 API 가 넘어 쓴 크래시를 스택으로 포착
 
-    조건: ASan heap-buffer-overflow, 최상위 대상 프레임이 라이브러리, 그 호출 체인에서 하네스 바로 위
-    프레임이 ``profile.apis`` 중 하나, 그리고 ``allocated by`` 스택의 첫 사용자 프레임이 하네스.
+    조건: ASan heap/stack-buffer-overflow, 최상위 대상 프레임이 라이브러리, 그 호출 체인에서 하네스 바로 위
+    프레임이 ``profile.apis`` 중 하나. 힙은 ``allocated by`` 스택의 첫 사용자 프레임이 하네스여야 하고,
+    스택은 ASan 이 넘친 변수가 하네스 프레임에 있다고 표시해야 한다.
     API 가 요구하는 버퍼 크기를 하네스가 못 맞춘 경우(libsndfile ``sf_readf_float`` 는 frames x channels
     개 항목을 쓰는데 하네스가 frames 개만 할당)의 전형이라서 정탐으로 자동 승인하지 않는다.
     """
-    if "heap-buffer-overflow" not in (record.error_reason or "").lower():
+    reason = (record.error_reason or "").lower()
+    stack_case = "stack-buffer-overflow" in reason
+    if "heap-buffer-overflow" not in reason and not stack_case:
         return None
     log = list(record.raw_log)
-    alloc_at = next((i for i, line in enumerate(log) if "allocated by thread" in line), -1)
-    if alloc_at < 0:
-        return None
     frames = parse_frames(log)
     user = [f for f in frames if not is_runtime(f)]
     if not user or is_harness(user[0]):
@@ -229,16 +232,78 @@ def _harness_allocated_overflow(record: CrashRecord, apis: set, kb=None) -> Opti
     api = short_name(api_frame.function)
     if api not in apis:
         return None
-    allocation = [f for f in parse_frames(log[alloc_at + 1:]) if short_name(f.function) not in _ALLOCATORS]
-    if not allocation or not is_harness(allocation[0]):
-        return None
+    if stack_case:
+        # 스택 버퍼: ASan 이 "is located in stack of thread ... in frame" 아래에 그 버퍼가 속한 함수 프레임을 적는다.
+        # 그 프레임이 하네스이고 넘친 변수가 하네스 안에 있다는 표시(<== Memory access ... overflows this variable)가 있어야 한다.
+        located_at = next((i for i, line in enumerate(log) if "is located in stack of thread" in line), -1)
+        if located_at < 0 or "overflows this variable" not in "\n".join(log[located_at:]):
+            return None
+        owner = parse_frames(log[located_at + 1:])
+        if not owner or not is_harness(owner[0]):
+            return None
+        variable = next((m.group(1) for line in log[located_at:]
+                         if "overflows this variable" in line and (m := re.search(r"'([^']+)'", line))), "")
+        where = f"하네스 스택 변수 {variable}" if variable else "하네스 스택 버퍼"
+    else:
+        alloc_at = next((i for i, line in enumerate(log) if "allocated by thread" in line), -1)
+        if alloc_at < 0:
+            return None
+        allocation = [f for f in parse_frames(log[alloc_at + 1:]) if short_name(f.function) not in _ALLOCATORS]
+        if not allocation or not is_harness(allocation[0]):
+            return None
+        where = f"하네스가 할당한 버퍼({allocation[0].render()})"
     return CReturnCodeEvidence(
         violation=SUSPECT_HARNESS_BUFFER,
         api=api,
         frame=api_frame,
         caller=harness_frame,
         crash_function=short_name(user[0].function),
-        null_reason=(f"하네스가 할당한 버퍼({allocation[0].render()})를 {api} 가 넘어 썼다"),
+        null_reason=f"{where}를 {api} 가 넘어 썼다",
+        declared_contracts=_kb_contracts(kb, api),
+    )
+
+
+def _uninitialized_object(record: CrashRecord, apis: set, kb=None) -> Optional[CReturnCodeEvidence]:
+    """하네스가 API 첫 인자를 ``malloc``/``calloc`` 으로 직접 만들어 넘긴 크래시를 스택과 소스로 증명
+
+    조건: 크래시 호출 체인에서 하네스 바로 위 프레임이 ``profile.apis`` 중 하나이고, 하네스의 그 호출 줄의 첫 인자
+    변수가 같은 파일에서 ``= (type*)malloc(sizeof ...)`` 로 만들어졌으며, ``profile.apis`` 에 생성 함수
+    (create/new/init/open ...)가 따로 있다. 실측(embedded-sample): ``ctx = malloc(sizeof(proto_ctx_t))`` 를 만들어
+    ``proto_parse`` 에 넘겨 ``ctx->payload`` 가 쓰레기 값인 채로 ``memcpy`` 가 죽었다.
+    """
+    frames = parse_frames(record.raw_log)
+    harness_at = next((i for i, f in enumerate(frames) if is_harness(f)), -1)
+    if harness_at < 1:
+        return None
+    api_frame, harness_frame = frames[harness_at - 1], frames[harness_at]
+    api = short_name(api_frame.function)
+    if api not in apis or not harness_frame.file or not harness_frame.line:
+        return None
+    creators = sorted(name for name in apis if name != api and _CREATOR_NAME_RE.search(name))
+    if not creators:
+        return None
+    try:
+        source = open(harness_frame.file, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return None
+    lines = source.splitlines()
+    call = lines[harness_frame.line - 1] if 0 < harness_frame.line <= len(lines) else ""
+    match = re.search(rf"\b{re.escape(api)}\s*\(\s*(\w+)", call)
+    if not match:
+        return None
+    variable = match.group(1)
+    made_by_malloc = re.search(
+        rf"\b{re.escape(variable)}\s*=\s*(?:\([^)]*\)\s*)?(?:malloc|calloc)\s*\(\s*(?:1\s*,\s*)?sizeof", source)
+    if not made_by_malloc:
+        return None
+    return CReturnCodeEvidence(
+        violation=VIOLATED_BY_HARNESS_UNINIT,
+        api=api,
+        frame=api_frame,
+        caller=harness_frame,
+        crash_function=short_name(next((f.function for f in frames if not is_runtime(f)), api_frame.function)),
+        null_reason=(f"하네스가 {variable} 를 malloc 으로 직접 만들어 {api} 에 넘겼다"
+                     f"(생성 함수 {creators[0]} 를 쓰지 않아 필드가 초기화되지 않음)"),
         declared_contracts=_kb_contracts(kb, api),
     )
 
@@ -259,6 +324,9 @@ def analyze(record: CrashRecord, kb=None, profile=None) -> CReturnCodeEvidence:
     undersized = _harness_allocated_overflow(record, apis, kb)
     if undersized is not None:
         return undersized
+    uninitialized = _uninitialized_object(record, apis, kb)
+    if uninitialized is not None:
+        return uninitialized
     user = _user_frames(parse_frames(record.raw_log))
     evidence = CReturnCodeEvidence()
     address, reason = _null_fault(record)
@@ -292,6 +360,8 @@ _HARNESS_STRING_DELTA = -0.65
 # 의심 단계: 재현성 보너스(+0.10)까지 받은 점수 1.05 에서도 정탐 기준(0.65) 아래로 내려 사람 검토로 보내야 한다.
 # -0.35 는 같은 입력군이 3번 이상 재현되면 0.70 으로 정탐이 되었다(libsndfile 8차 실측) -> -0.45 (1.05 -> 0.60)
 _HARNESS_BUFFER_DELTA = -0.45
+# 소스 줄(malloc 으로 만든 객체)까지 확인한 증거라서 문자열 오용과 같은 무게로 오탐 기준 아래로 내린다
+_HARNESS_UNINIT_DELTA = -0.65
 
 
 def derive_signals(evidence: CReturnCodeEvidence, bug_type: str = "") -> tuple[float, list[str]]:
@@ -302,6 +372,8 @@ def derive_signals(evidence: CReturnCodeEvidence, bug_type: str = "") -> tuple[f
         return _HARNESS_STRING_DELTA, ["c-string-unterminated-by-harness"]
     if evidence.violation == SUSPECT_HARNESS_BUFFER:
         return _HARNESS_BUFFER_DELTA, ["c-harness-buffer-overflow-suspect"]
+    if evidence.violation == VIOLATED_BY_HARNESS_UNINIT:
+        return _HARNESS_UNINIT_DELTA, ["c-object-not-created-by-library"]
     return 0.0, []
 
 
@@ -312,6 +384,12 @@ def render_rationale(evidence: CReturnCodeEvidence) -> str:
             f" 하네스가 퍼저 입력을 NUL 로 끝나지 않는 문자열로 공개 API {evidence.api} 에 넘겼다"
             f"({evidence.caller.render()} → {evidence.frame.render()}, {evidence.null_reason}) — "
             "API 는 정상 문자열 인자를 전제로 하므로 대상 결함이 아니라 하네스 결함이다."
+        )
+    if evidence.violation == VIOLATED_BY_HARNESS_UNINIT:
+        return (
+            f" 하네스가 라이브러리의 생성 함수를 쓰지 않고 객체를 직접 만들어 공개 API {evidence.api} 에 넘겼다"
+            f"({evidence.caller.render()} → {evidence.frame.render()}, {evidence.null_reason}) — "
+            "초기화되지 않은 필드를 읽은 것이므로 대상 결함이 아니라 하네스 결함이다."
         )
     if evidence.violation == SUSPECT_HARNESS_BUFFER:
         return (
@@ -340,6 +418,8 @@ def render_for_prompt(evidence: CReturnCodeEvidence) -> str:
         lines.append(f"- 문자열 인자 오용: {evidence.null_reason}")
     elif evidence.violation == SUSPECT_HARNESS_BUFFER:
         lines.append(f"- 하네스 할당 버퍼 초과 쓰기: {evidence.null_reason}")
+    elif evidence.violation == VIOLATED_BY_HARNESS_UNINIT:
+        lines.append(f"- 객체를 라이브러리 생성 함수 없이 직접 만듦: {evidence.null_reason}")
     elif evidence.null_reason:
         lines.append(f"- NULL 근처 접근: {evidence.null_reason}")
     if evidence.declared_contracts:

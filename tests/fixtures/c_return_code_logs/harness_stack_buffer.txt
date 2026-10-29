@@ -1,0 +1,37 @@
+==1==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7c2e521abf40 at pc 0x5b40032f9ff9 bp 0x7fff5790c440 sp 0x7fff5790bc10
+WRITE of size 262144 at 0x7c2e521abf40 thread T0
+    #0 0x5b40032f9ff8 in __asan_memset (/harness/lg_sndfile+0x3b2ff8) (BuildId: 3f5b2f414967e37c358414216326ae9d838abb0d)
+    #1 0x5b400348a7c4 in psf_memset third_party/libsndfile/src/common.c:1297:3
+    #2 0x5b400335cf48 in sf_readf_float third_party/libsndfile/src/sndfile.c:2039:4
+    #3 0x5b400333a7c4 in LLVMFuzzerTestOneInput out/libsndfile-demo2/build/harness/lg_sndfile.c:79:5
+    #4 0x5b4003247da4 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/harness/lg_sndfile+0x300da4) (BuildId: 3f5b2f414967e37c358414216326ae9d838abb0d)
+    #5 0x5b4003247499 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool, bool*) (/harness/lg_sndfile+0x300499) (BuildId: 3f5b2f414967e37c358414216326ae9d838abb0d)
+    #6 0x5b4003248c85 in fuzzer::Fuzzer::MutateAndTestOne() (/harness/lg_sndfile+0x301c85) (BuildId: 3f5b2f414967e37c358414216326ae9d838abb0d)
+    #7 0x5b40032497e5 in fuzzer::Fuzzer::Loop(std::vector<fuzzer::SizedFile, std::allocator<fuzzer::SizedFile>>&) (/harness/lg_sndfile+0x3027e5) (BuildId: 3f5b2f414967e37c358414216326ae9d838abb0d)
+    #8 0x5b4003236abf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/harness/lg_sndfile+0x2efabf) (BuildId: 3f5b2f414967e37c358414216326ae9d838abb0d)
+    #9 0x5b4003261146 in main (/harness/lg_sndfile+0x31a146) (BuildId: 3f5b2f414967e37c358414216326ae9d838abb0d)
+    #10 0x7c2e53bf81c9  (/lib/x86_64-linux-gnu/libc.so.6+0x2a1c9) (BuildId: a4a7992a8e66555c8141ab2a08a8465ff6e0ea65)
+    #11 0x7c2e53bf828a in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x2a28a) (BuildId: a4a7992a8e66555c8141ab2a08a8465ff6e0ea65)
+    #12 0x5b400322baa4 in _start (/harness/lg_sndfile+0x2e4aa4) (BuildId: 3f5b2f414967e37c358414216326ae9d838abb0d)
+
+Address 0x7c2e521abf40 is located in stack of thread T0 at offset 1856 in frame
+    #0 0x5b400333a467 in LLVMFuzzerTestOneInput out/libsndfile-demo2/build/harness/lg_sndfile.c:44
+
+  This frame has 6 object(s):
+    [32, 72) 'sfvirtual' (line 47)
+    [112, 136) 'user_data' (line 55)
+    [176, 208) 'sfinfo' (line 57)
+    [240, 244) 'command_data' (line 65)
+    [256, 768) 'buffer' (line 75)
+    [832, 1856) 'float_buffer' (line 78) <== Memory access at offset 1856 overflows this variable
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism, swapcontext or vfork
+      (longjmp and C++ exceptions *are* supported)
+SUMMARY: AddressSanitizer: stack-buffer-overflow (/harness/lg_sndfile+0x3b2ff8) (BuildId: 3f5b2f414967e37c358414216326ae9d838abb0d) in __asan_memset
+Shadow bytes around the buggy address:
+  0x7c2e521abc80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7c2e521abd00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7c2e521abd80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7c2e521abe00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7c2e521abe80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x7c2e521abf00: 00 00 00 00 00 00 00 00[f3]f3 f3 f3 f3 f3 f3 f3
+  0x7c2e521abf80: f3 f3 f3 f3 f3 f3 f3 f3 00 00 00 00 00 00 00 00

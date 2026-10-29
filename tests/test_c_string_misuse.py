@@ -138,3 +138,93 @@ def test_buffer_suspect_stays_needs_review_even_when_reproduced_many_times(profi
     assert result.verdict is Verdict.NEEDS_REVIEW
     assert "highly-reproducible" in result.signals
     assert "c-harness-buffer-overflow-suspect" in result.signals
+
+
+# --------------------------------------------------------------------------- #
+# 라이브러리 생성 함수 대신 malloc 으로 만든 객체 (embedded-sample 실측)
+# --------------------------------------------------------------------------- #
+HARNESS_MALLOC_CTX = """\
+#include "proto_parser.h"
+int LLVMFuzzerTestOneInput(const unsigned char *data, unsigned long size) {
+    proto_ctx_t *ctx = malloc(sizeof(proto_ctx_t));
+    int parse_result = proto_parse(ctx, data, size);
+    return parse_result;
+}
+"""
+HARNESS_CREATED_CTX = HARNESS_MALLOC_CTX.replace("malloc(sizeof(proto_ctx_t))", "proto_create(64)")
+
+
+@pytest.fixture(scope="module")
+def embedded_profile():
+    return load_profile(REPO / "targets" / "embedded-sample.json", base_dir=REPO)
+
+
+def _uninit_record(tmp_path: Path, harness_source: str) -> CrashRecord:
+    harness = tmp_path / "lg_proto.c"
+    harness.write_text(harness_source, encoding="utf-8")
+    log = f"""\\
+==1==ERROR: AddressSanitizer: SEGV on unknown address (pc 0x1 bp 0x2 sp 0x3 T0)
+==1==The signal is caused by a WRITE memory access.
+==1==Hint: this fault was caused by a dereference of a high value address
+    #0 0x5685add819f4 in __asan_memcpy (/harness/lg_proto+0xff9f4) (BuildId: 42ec)
+    #1 0x5685addc2a0c in proto_parse {tmp_path}/proto_parser.c:64:5
+    #2 0x5685addc2476 in LLVMFuzzerTestOneInput {harness}:4:24
+    #3 0x5685adccfca4 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/harness/lg_proto+0x4dca4) (BuildId: 42ec)
+SUMMARY: AddressSanitizer: SEGV (/harness/lg_proto+0xff9f4) (BuildId: 42ec) in __asan_memcpy
+"""
+    monitor = SanitizerMonitor()
+    for line in log.splitlines():
+        monitor.feed(line)
+    (finding,) = monitor.finish()
+    return CrashRecord.from_finding(finding.to_dict())
+
+
+def test_object_made_with_malloc_instead_of_the_creator_is_a_harness_defect(tmp_path, embedded_profile):
+    record = _uninit_record(tmp_path, HARNESS_MALLOC_CTX)
+    evidence = get_contract("c_return_code").analyze(record, profile=embedded_profile)
+
+    assert evidence.violation == "harness-uninitialized-object"
+    assert evidence.api == "proto_parse" and "proto_create" in evidence.null_reason
+
+    clusters, _ = deduplicate([record])
+    result = rule_triage(clusters[0], profile=embedded_profile)
+    assert result.verdict is Verdict.FALSE_POSITIVE
+    assert "c-object-not-created-by-library" in result.signals
+
+
+def test_object_made_by_the_creator_is_not_judged_a_harness_defect(tmp_path, embedded_profile):
+    """생성 함수로 만든 객체의 크래시(심어 둔 길이 검증 결함 등)는 대상 결함 후보로 남긴다."""
+    record = _uninit_record(tmp_path, HARNESS_CREATED_CTX)
+    assert get_contract("c_return_code").analyze(record, profile=embedded_profile).violation == ""
+
+
+# --------------------------------------------------------------------------- #
+# 하네스의 스택 버퍼를 API 가 넘어 쓴 경우 (libsndfile 신규 그룹 구성 실행의 실측)
+# --------------------------------------------------------------------------- #
+def _stack_record() -> CrashRecord:
+    monitor = SanitizerMonitor()
+    path = REPO / "tests" / "fixtures" / "c_return_code_logs" / "harness_stack_buffer.txt"
+    for line in path.read_text(encoding="utf-8").splitlines():
+        monitor.feed(line)
+    (finding,) = monitor.finish()
+    return CrashRecord.from_finding(finding.to_dict())
+
+
+def test_stack_buffer_of_the_harness_overwritten_by_the_api_is_not_auto_approved(profile):
+    """float float_buffer[256] 에 sf_readf_float(…, 256) -> 256프레임 x 채널 만큼 쓰는데 정탐(0.95)으로 자동 승인되었다."""
+    record = _stack_record()
+    evidence = get_contract("c_return_code").analyze(record, profile=profile)
+
+    assert evidence.violation == "harness-buffer-suspect"
+    assert evidence.api == "sf_readf_float" and "float_buffer" in evidence.null_reason
+
+    clusters, _ = deduplicate([record])
+    result = rule_triage(clusters[0], profile=profile)
+    assert result.verdict is Verdict.NEEDS_REVIEW
+    assert "c-harness-buffer-overflow-suspect" in result.signals
+
+
+def test_stack_overflow_of_a_variable_outside_the_harness_is_not_judged(profile):
+    record = _stack_record()
+    record.raw_log = [line.replace("'float_buffer'", "'x'").replace("overflows this variable", "is near") for line in record.raw_log]
+    assert get_contract("c_return_code").analyze(record, profile=profile).violation == ""
