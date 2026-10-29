@@ -28,7 +28,7 @@ class CrashCollector:
     _seen: set[str] = field(default_factory=set)
 
     def _digest(self, path: Path) -> str:
-        h = hashlib.sha1()
+        h = hashlib.sha256()
         h.update(path.read_bytes())
         return h.hexdigest()
 

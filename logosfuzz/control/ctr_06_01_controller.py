@@ -49,6 +49,7 @@ import sys
 import json
 import shutil
 import argparse
+import logging
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -56,6 +57,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()  # cwd부터 상위로 .env 자동 탐색 (팀원 환경마다 경로가 다르므로 하드코딩 금지)
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------
@@ -403,8 +406,8 @@ def _heal_details(heal) -> dict:
     if callable(digest):
         try:
             details["error_digest"] = digest()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("error_digest 계산 실패: %s", exc)
     rounds = []
     for item in getattr(heal, "rounds", None) or []:
         rounds.append({

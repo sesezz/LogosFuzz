@@ -47,8 +47,8 @@ def _resolve_libclang():
     try:
         cindex.Index.create()
         return  # 기본 탐색 성공 시 유지
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("libclang 기본 탐색 실패, 패키지 경로 탐색: %s", exc)
 
     try:
         import clang.native
@@ -58,8 +58,8 @@ def _resolve_libclang():
             if os.path.exists(candidate):
                 cindex.Config.set_library_file(candidate)
                 return
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("libclang 패키지 경로 탐색 실패: %s", exc)
 
 
 def clang_args_for_path(path, clang_args=None, language=None):
@@ -139,8 +139,8 @@ def analyze_with_clang(path, clang_args=None, language=None):
                 inc = f"-I{resource_dir}/include"
                 if inc not in clang_args:
                     clang_args = list(clang_args) + [inc]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("clang resource-dir 조회 실패: %s", exc)
 
     try:
         index = cindex.Index.create()
@@ -175,15 +175,15 @@ def analyze_with_clang(path, clang_args=None, language=None):
         try:
             if any(token.spelling == "{" for token in node.get_tokens()):
                 return True
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("토큰 조회 실패: %s", exc)
         if source_text:
             try:
                 head = source_text[:node.extent.end.offset].rstrip()
                 tail = source_text[node.extent.end.offset:].lstrip()
                 return head.endswith("{") or tail.startswith("{")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("소스 범위 확인 실패: %s", exc)
         return False
 
     def walk(node):

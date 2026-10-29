@@ -139,7 +139,8 @@ def _default_executor(argv: list, timeout: float, on_line: OnLine) -> ProcResult
         finally:
             lines.put((tag, None))  # EOF 신호
 
-    assert proc.stdout is not None and proc.stderr is not None
+    if proc.stdout is None or proc.stderr is None:
+        raise RuntimeError("자식 프로세스 stdout/stderr 파이프 없음")
     readers = [
         threading.Thread(target=_pump, args=(proc.stdout, "stdout"), daemon=True),
         threading.Thread(target=_pump, args=(proc.stderr, "stderr"), daemon=True),

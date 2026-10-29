@@ -122,7 +122,7 @@ def signature_key(record: CrashRecord, depth: int = 3) -> str:
 
 def signature_digest(key: str) -> str:
     """시그니처 문자열의 클러스터 ID용 다이제스트"""
-    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
 
 
 def cluster_id_for(record: CrashRecord, depth: int = 3) -> str:

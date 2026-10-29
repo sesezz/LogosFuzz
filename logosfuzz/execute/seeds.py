@@ -40,7 +40,7 @@ def copy_seeds(seed_paths: Sequence[Path], dest: Path) -> int:
         if target.exists():
             if target.read_bytes() == src.read_bytes():
                 continue
-            digest = hashlib.sha1(src.read_bytes()).hexdigest()[:12]
+            digest = hashlib.sha256(src.read_bytes()).hexdigest()[:12]
             target = dest / f"{src.name}-{digest}"
         shutil.copyfile(src, target)
         copied += 1

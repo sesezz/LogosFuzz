@@ -185,7 +185,7 @@ class FakeCompiler(Compiler):
         code = source if source is not None else draft.source
         if self.success_marker in code:
             return CompileResult(ok=True, returncode=0, stdout="", duration_sec=0.001,
-                                 artifact_path=f"/tmp/{draft.logic_group}.o")
+                                 artifact_path=f"{draft.logic_group}.o")
         log = self.error_template.format(
             group=draft.logic_group, line=self.error_line, msg=self.error_message
         )
