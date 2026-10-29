@@ -9,6 +9,7 @@ python -m logosfuzz.pipeline --source test_target.c --output harness_output.c
 from __future__ import annotations
 import os
 import json
+import logging
 import argparse
 from pathlib import Path
 from dotenv import load_dotenv
@@ -43,6 +44,9 @@ from logosfuzz.generate.selfheal import SelfHealLoop
 # ---------------------------------------------------------------------
 # EXT 출력 → ApiMetadata 변환
 # ---------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
+
 
 def ext_to_api_metadata(ext_json: list[dict]) -> list[ApiMetadata]:
     """ast_analyzer 출력 JSON에서 FUNCTION_DECL만 뽑아 ApiMetadata로 변환.
@@ -196,8 +200,8 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
             try:
                 parts.append(f"// --- {h.name} ---\n" + h.read_text(encoding="utf-8", errors="replace"))
                 header_filenames.append(h.name)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("헤더 읽기 실패, 건너뜀: %s (%s)", h, exc)
         header_content = "\n".join(parts)
         print(f"  헤더 {len(header_files)}개 주입: {[h.name for h in header_files]}")
     else:

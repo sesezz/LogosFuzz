@@ -200,7 +200,7 @@ class SeedEntry:
 
     @property
     def checksum(self) -> str:
-        return hashlib.md5(self.data).hexdigest()
+        return hashlib.sha256(self.data).hexdigest()
 
 
 @dataclass

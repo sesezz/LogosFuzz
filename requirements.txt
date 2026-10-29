@@ -6,3 +6,4 @@ tree_sitter
 pytest
 openai
 python-dotenv
+defusedxml==0.7.1

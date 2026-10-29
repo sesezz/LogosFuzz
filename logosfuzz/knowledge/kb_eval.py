@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -32,6 +33,8 @@ from logosfuzz.extract.ast_analyzer import clang_args_for_path, qualified_name
 from logosfuzz.extract.constraint_extractor import iter_source_files
 from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 from logosfuzz.knowledge.rag_index import split_identifier
+
+logger = logging.getLogger(__name__)
 
 EVAL_VERSION = 1
 
@@ -82,7 +85,8 @@ def clang_ground_truth(paths: Sequence[str],
             source_text = ""
         try:
             unit = index.parse(source, args=args)
-        except Exception:
+        except Exception as exc:
+            logger.warning("파싱 실패, 건너뜀: %s (%s)", source, exc)
             continue
         parsed += 1
         argument_sets.add(tuple(args))
@@ -107,15 +111,15 @@ def clang_ground_truth(paths: Sequence[str],
                         is_definition = any(
                             token.spelling == "{" for token in cursor.get_tokens()
                         )
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("토큰 조회 실패: %s", exc)
                 if not is_definition and source_text:
                     try:
                         head = source_text[:cursor.extent.end.offset].rstrip()
                         tail = source_text[cursor.extent.end.offset:].lstrip()
                         is_definition = head.endswith("{") or tail.startswith("{")
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("소스 범위 확인 실패: %s", exc)
             if not is_definition:
                 continue
             location = cursor.location
