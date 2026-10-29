@@ -98,6 +98,36 @@ def split_budget(schedule: Sequence[Any], budget: int, *, floor: int = MIN_GROUP
 # --------------------------------------------------------------------------- #
 # 실행기
 # --------------------------------------------------------------------------- #
+def generation_summary_from_groups(groups, model: str = "") -> Dict[str, Any]:
+    """HEAL 결과(``GenericRun.groups``)를 리포트의 '하네스 생성 요약' 입력 형식으로 바꾼다.
+
+    이 요약을 넘기지 않으면 웹 리포트가 "GEN 단계 미실행"으로 표시한다(logosfuzz run 의 리포트에서 실측).
+    """
+    outcomes = []
+    for entry in groups:
+        built = bool(entry.get("binary"))
+        rounds = int(entry.get("llm_rounds") or 0)
+        outcomes.append({
+            "group_id": entry.get("group") or entry.get("slug") or "unknown",
+            "final_status": "validated" if built else "validation_failed",
+            "rounds": rounds,
+            "generation_attempts": 1,
+            "repair_attempts": rounds,
+            "reports": [],
+            "source": entry.get("source"),
+            "binary": entry.get("binary"),
+        })
+    passed = sum(1 for o in outcomes if o["final_status"] == "validated")
+    return {
+        "status": "completed",
+        "model": model,
+        "total_groups": len(outcomes),
+        "passed": passed,
+        "failed": len(outcomes) - passed,
+        "outcomes": outcomes,
+    }
+
+
 class GenericRun:
     """프로필 대상 E2E 실행기 (LLM, 빌드 어댑터, 퍼징 세션, 커버리지 도구 주입 가능)"""
 
@@ -513,6 +543,7 @@ class GenericRun:
             "version": self.profile.version,
             "domain": self.profile.domain,
             "build_system": self.profile.build.system,
+            "model": self.opts.model,
             "budget_sec": self.opts.budget,
             "max_round": self.opts.max_round,
             "docker": self.opts.use_docker,
@@ -545,8 +576,9 @@ class GenericRun:
             write_validation_summary,
         )
         try:
-            result = build_validation_summary(fuzz_summary, analysis,
-                                              metadata=profile_metadata(self.profile))
+            result = build_validation_summary(
+                fuzz_summary, analysis, metadata=profile_metadata(self.profile),
+                generation_summary=generation_summary_from_groups(self.groups, self.opts.model))
             write_validation_summary(self.out / "validation-summary.json", result)
         except (OSError, ValidationSummaryError) as exc:
             self._log(f"  [WARN] validation-summary.json 을 못 썼다: {exc}")
