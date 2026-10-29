@@ -8,6 +8,7 @@
 판별기
 --------------
 - :class:`RuleBasedTriager` (기본): 결함 분류 규칙과 콜스택 위치·재현성 신호 기반 결정적 휴리스틱
+  (결함 분류 어휘는 :mod:`logosfuzz.analyze.categories` 단일 정의)
 - :class:`LLMTriager`: 추론 특화 LLM 연동 (모델 부재 시 규칙 기반 폴백)
 
 판정에 사용한 신호는 HITL 검토용으로 ``signals`` 에 기록
@@ -16,22 +17,14 @@
 from __future__ import annotations
 
 from logosfuzz.analyze import contracts as _contracts
+from logosfuzz.analyze.categories import (
+    CONCURRENCY_BUGS,
+    MEMORY_BUGS,
+    NULL_DEREF_BUGS,
+    SANITIZER_MEMORY_BUGS,
+)
 from logosfuzz.analyze.models import CrashCluster, TriageResult, Verdict
 from logosfuzz.analyze.signature import application_frames, has_application_frame
-
-# 메모리 커럽션 계열: sanitizer 탐지 신뢰도가 높아 정탐 사전확률 높음
-_MEMORY_BUGS = {
-    "use-after-free",
-    "double-free",
-    "heap-buffer-overflow",
-    "buffer-overflow",
-    "stack-buffer-overflow",
-    "global-buffer-overflow",
-    "bad-alloc",
-    "null-pointer-dereference",
-}
-# 동시성 계열: 문맥(락 순서/공유자원) 확인 필요
-_CONCURRENCY_BUGS = {"race-condition", "data-race", "deadlock"}
 
 RULE_MODEL_NAME = "logosfuzz-rule-triage/v1"
 
@@ -118,10 +111,15 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None,
         )
 
     # (1) 결함 유형 사전확률
-    if cat in _MEMORY_BUGS:
+    if cat in MEMORY_BUGS:
         score = 0.70
         signals.append("memory-corruption")
-    elif cat in _CONCURRENCY_BUGS:
+    elif cat in NULL_DEREF_BUGS:
+        # 대상 코드 프레임이면 정탐 임계치를 넘지만, 에러계약이 하네스 위반을
+        # 증명하면 오탐으로 내려간다 (NULL 반환 미확인이 흔한 가짜 크래시)
+        score = 0.50
+        signals.append("null-dereference")
+    elif cat in CONCURRENCY_BUGS:
         score = 0.50
         signals.append("concurrency-needs-context")
     elif cat == "watchdog-timeout":
@@ -149,7 +147,7 @@ def rule_triage(cluster: CrashCluster, context=None, contract=None,
 
     # (4) sanitizer 신뢰도: ASAN 메모리 오류는 오탐이 드묾
     # 단, 프레임이 하네스에만 있으면 대상 라이브러리 검증이 아니므로 보너스 미부여
-    if (rep.sanitizer.upper() == "ASAN" and cat in _MEMORY_BUGS
+    if (rep.sanitizer.upper() == "ASAN" and cat in SANITIZER_MEMORY_BUGS
             and has_application_frame(rep)):
         score += 0.05
         signals.append("asan-high-fidelity")

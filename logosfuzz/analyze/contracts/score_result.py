@@ -42,6 +42,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
+from logosfuzz.analyze.categories import SANITIZER_MEMORY_BUGS
 from logosfuzz.analyze.contracts.frames import (
     NamedFrame,
     parse_frames,
@@ -201,11 +202,8 @@ _HARNESS_VIOLATION_DELTA = -0.45
 _TARGET_VIOLATION_DELTA = 0.35
 _CONTRACT_BYPASSED_DELTA = 0.10
 
-_MEMORY_LIKE = {
-    "use-after-free", "double-free", "heap-buffer-overflow", "buffer-overflow",
-    "stack-buffer-overflow", "global-buffer-overflow", "null-pointer-dereference",
-    "segv", "array-bounds", "null-deref",
-}
+# 메모리 계열 판단은 analyze/categories.py 어휘 사용 (NULL 역참조 포함)
+_MEMORY_LIKE = SANITIZER_MEMORY_BUGS
 
 
 def derive_signals(evidence: ErrorContractEvidence, bug_type: str = "") -> tuple[float, list[str]]:

@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from logosfuzz.analyze.categories import (
+    CONCURRENCY_BUGS,
+    MEMORY_BUGS,
+    SANITIZER_MEMORY_BUGS,
+)
 from logosfuzz.analyze.dedup import deduplicate
 from logosfuzz.analyze.loader import load_jsonl_findings
 from logosfuzz.analyze.models import CrashCluster, CrashRecord, Frame, Verdict
@@ -16,6 +21,7 @@ from logosfuzz.analyze.triage import (
     summarize,
     triage_clusters,
 )
+from logosfuzz.execute.sanitizer import classify_sanitizer_error
 
 SAMPLE = Path(__file__).resolve().parent.parent / "samples" / "sanitizer_dlt.jsonl"
 
@@ -56,6 +62,47 @@ def test_memory_bug_in_app_code_is_true_positive():
     assert r.confidence <= 0.95  # 절대 확신 회피
     assert "target-code-frame" in r.signals
     assert "highly-reproducible" in r.signals
+
+
+def test_asan_segv_in_app_code_is_true_positive():
+    # EXE 분류기는 ASan "SEGV on unknown address" 를 ``segv`` 로 낸다 —
+    # 판별기 어휘에서 빠져 사람 검토로 밀려나던 회귀 방지
+    c = _cluster("segv", [("/src/dlt-daemon/src/shared/dlt_common.c", 77)])
+    r = rule_triage(c)
+    assert r.verdict is Verdict.TRUE_POSITIVE
+    assert "null-dereference" in r.signals
+    assert "asan-high-fidelity" in r.signals
+
+
+def test_exe_classifier_memory_categories_are_in_triage_vocabulary():
+    # 분류기(생산자)와 판별기(소비자) 어휘가 어긋나면 메모리 오류가 조용히
+    # ``unclassified-category``(0.30) 로 떨어진다
+    reasons = [
+        ("ASAN", "heap-buffer-overflow on address 0x602000000050"),
+        ("ASAN", "stack-buffer-overflow on address 0x7ffd"),
+        ("ASAN", "heap-use-after-free on address 0x602000000050"),
+        ("ASAN", "attempting double-free on 0x602000000050"),
+        ("ASAN", "SEGV on unknown address 0x000000000000"),
+        ("UBSAN", "member access within null pointer of type 'Header'"),
+        ("UBSAN", "index 5 out of bounds for type 'int [4]'"),
+    ]
+    for sanitizer, reason in reasons:
+        cat = classify_sanitizer_error(sanitizer, reason)
+        assert cat in SANITIZER_MEMORY_BUGS, f"{sanitizer} {reason!r} -> {cat}"
+
+
+def test_asan_parser_memory_categories_are_in_triage_vocabulary():
+    # 과거 산출물·샘플 스트림의 category 는 asan_parser 정규화 어휘다
+    for name in ("heap-buffer-overflow", "stack-buffer-overflow",
+                 "global-buffer-overflow", "heap-use-after-free",
+                 "null-pointer-dereference", "double-free"):
+        assert name in SANITIZER_MEMORY_BUGS
+    assert "buffer-overflow" in MEMORY_BUGS  # EXE 분류기의 뭉친 이름
+
+
+def test_tsan_data_race_shares_concurrency_vocabulary():
+    assert classify_sanitizer_error("TSAN", "data race on 0x55") in CONCURRENCY_BUGS
+    assert "data-race" in CONCURRENCY_BUGS  # asan_parser 어휘
 
 
 def test_harness_only_crash_not_true_positive():
