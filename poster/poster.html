@@ -27,7 +27,7 @@ html,body { width:1000mm; height:1200mm; }
 body { background:var(--bg); color:var(--text); font-family:"Pretendard","Inter",system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
 b { font-weight:700; color:var(--text); }
 
-.poster { position:relative; width:1000mm; height:1200mm; overflow:hidden; padding:20mm 46mm 0; display:flex; flex-direction:column; gap:8.5mm;
+.poster { position:relative; width:1000mm; height:1200mm; overflow:hidden; padding:16mm 46mm 0; display:flex; flex-direction:column; gap:7mm;
   background:radial-gradient(620mm 220mm at 50% -40mm, rgba(68,88,216,.10), transparent 70%), var(--bg); }
 .poster::before { content:""; position:absolute; inset:0; pointer-events:none;
   background-image:linear-gradient(rgba(68,88,216,.06) .4mm, transparent .4mm), linear-gradient(90deg, rgba(68,88,216,.06) .4mm, transparent .4mm);
@@ -43,7 +43,7 @@ b { font-weight:700; color:var(--text); }
 .logo i { font-style:normal; color:var(--blue); font-size:19mm; }
 .ev { font-size:11.5mm; font-weight:600; color:var(--dim); text-align:right; line-height:1.4; }
 
-.hero h1 { font-size:52mm; font-weight:800; line-height:1.05; letter-spacing:-.035em; color:var(--blue); }
+.hero h1 { font-size:50mm; font-weight:800; line-height:1.05; letter-spacing:-.035em; color:var(--blue); }
 .hero h2 { font-size:19.5mm; font-weight:800; line-height:1.3; letter-spacing:-.02em; margin-top:4mm; word-break:keep-all; }
 .hero .team { margin-top:5mm; font-size:12.5mm; font-weight:600; color:var(--dim); }
 .hero .team b { color:var(--blue); }
@@ -103,6 +103,7 @@ b { font-weight:700; color:var(--text); }
 
 /* 비교표 */
 table { width:100%; border-collapse:collapse; font-size:9.6mm; font-weight:600; }
+table.cmp { flex:1; }
 th, td { padding:2.1mm 1.5mm; border-bottom:.4mm solid var(--line); text-align:center; color:var(--dim); }
 th { color:var(--text); font-weight:800; font-size:9mm; line-height:1.15; }
 td:first-child, th:first-child { text-align:left; padding-left:0; }
@@ -111,15 +112,15 @@ th:last-child { border-radius:3mm 3mm 0 0; }
 .leg { font-size:8.2mm; color:var(--mute); text-align:right; margin-top:2mm; font-weight:500; }
 
 /* 보안 */
-.sec4 { display:grid; grid-template-columns:1fr 1fr; gap:3.5mm 5mm; }
-.sec4 > div { background:var(--soft); border-radius:3.5mm; padding:3.5mm 4.5mm; font-size:9.3mm; line-height:1.3; font-weight:500; }
-.sec4 b { display:block; font-size:10.6mm; color:var(--blue); margin-bottom:.5mm; }
+.sec4 { flex:1; display:grid; grid-template-columns:1fr 1fr; grid-auto-rows:1fr; gap:3.5mm; }
+.sec4 > div { background:var(--soft); border-radius:3.5mm; padding:3mm 4.5mm; font-size:9.4mm; line-height:1.3; font-weight:500; display:flex; flex-direction:column; justify-content:center; }
+.sec4 b { display:block; font-size:11mm; color:var(--blue); margin-bottom:.5mm; }
 .mini { display:grid; grid-template-columns:repeat(3,1fr); gap:3.5mm; margin-top:4mm; }
 .mini > div { border:.5mm solid var(--line); border-radius:3.5mm; text-align:center; padding:3mm 1mm; }
 .mini .v { font-family:var(--mono); font-weight:700; font-size:12.5mm; color:var(--c); letter-spacing:-.04em; line-height:1.1; }
 .mini .l { font-size:8mm; line-height:1.25; font-weight:600; color:var(--dim); margin-top:.8mm; }
 
-.foot { margin-top:auto; padding:7mm 0 8mm; border-top:.6mm solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+.foot { margin-top:auto; padding:5mm 0 6mm; border-top:.6mm solid var(--line); display:flex; justify-content:space-between; align-items:center; }
 .foot .repo { font-family:var(--mono); font-size:13mm; font-weight:700; color:var(--blue); }
 .foot .n { font-size:9.2mm; color:var(--mute); text-align:right; line-height:1.45; font-weight:500; }
 .foot .n b { color:var(--dim); }
@@ -136,26 +137,26 @@ th:last-child { border-radius:3mm 3mm 0 0; }
   <section class="hero">
     <h1>LogosFuzz</h1>
     <h2>빌드 구조와 API 제약 분석 기반<br>퍼징 하네스 자동 생성 보안 테스트 시스템</h2>
-    <div class="team">김민주 · 송서원 · 임세은 · 황다연 (서울여자대학교) &nbsp;|&nbsp; <b>팀 Fuzzing Candy</b></div>
+    <div class="team">김민주 · 송서원 · 임세은 · 황다연 (서울여자대학교) &nbsp;|&nbsp; <b>팀 FuzzingCandy</b></div>
   </section>
 
   <section class="kpi">
     <div style="--c:var(--blue)"><div class="v">3,080</div><div class="t">S-CORE C++ API 추출</div><div class="d">기존 0개 → 682개 로직 그룹</div></div>
-    <div style="--c:var(--green)"><div class="v">181→216</div><div class="t">S-CORE 커버리지</div><div class="d">동일 조건, 300초 실행</div></div>
-    <div style="--c:var(--purple)"><div class="v">2 / 2</div><div class="t">LLM 하네스 빌드 성공</div><div class="d">DLT·S-CORE, 자가치유 1회</div></div>
-    <div style="--c:var(--yellow)"><div class="v">1,182</div><div class="t">테스트 통과</div><div class="d">단위·통합 테스트</div></div>
+    <div style="--c:var(--blue)"><div class="v">181→216</div><div class="t">S-CORE 커버리지</div><div class="d">동일 조건, 300초 실행</div></div>
+    <div style="--c:var(--blue)"><div class="v">2 / 2</div><div class="t">LLM 하네스 빌드 성공</div><div class="d">DLT·S-CORE, 자가치유 1회</div></div>
+    <div style="--c:var(--blue)"><div class="v">1,182</div><div class="t">테스트 통과</div><div class="d">단위·통합 테스트</div></div>
   </section>
 
   <section>
     <div class="st"><span class="no">01</span><h3>배경과 목표</h3><span class="ln"></span></div>
     <div class="g3">
-      <div class="card accent" style="--c:var(--red)"><h4>왜 필요한가</h4>
+      <div class="card accent" style="--c:var(--blue)"><h4>왜 필요한가</h4>
         <ul>
           <li><b>공급망 위험</b>: 라이브러리 하나의 결함이 SW 전체로 확산 (Heartbleed, BadAlloc, Redis)</li>
           <li><b>높은 진입장벽</b>: OSS-Fuzz가 1,000개 프로젝트에서 10,000건+ 발견했지만 수작업 하네스 필요</li>
           <li><b>규제</b>: 자동차·SDV는 UN R155(CSMS) 준수 의무</li>
         </ul></div>
-      <div class="card accent" style="--c:var(--yellow)"><h4>기존 방식의 한계</h4>
+      <div class="card accent" style="--c:var(--blue)"><h4>기존 방식의 한계</h4>
         <ul>
           <li><b>수작업</b>: 프로젝트당 수 시간과 전문지식</li>
           <li><b>구조 복원 실패</b>: score/json 106개 파일에서 API 0개 추출</li>
@@ -171,11 +172,11 @@ th:last-child { border-radius:3mm 3mm 0 0; }
   <section>
     <div class="st"><span class="no">02</span><h3>5단계 자동화 파이프라인</h3><span class="ln"></span></div>
     <div class="flow">
-      <div class="stage" style="--c:var(--blue)"><div class="code">EXT</div><h4>지식 추출</h4><p>Bazel query, AST·주석에서 API 제약 KB 생성</p></div>
-      <div class="stage" style="--c:var(--green)"><div class="code">SCH</div><h4>스케줄링</h4><p>연관 API 로직 그룹화, 시너지 점수와 시간 배분</p></div>
-      <div class="stage" style="--c:var(--yellow)"><div class="code">GEN</div><h4>하네스 생성</h4><p>LLM 하네스 생성, 오류 분류 자가치유</p></div>
-      <div class="stage" style="--c:var(--purple)"><div class="code">EXE</div><h4>퍼징 실행</h4><p>Docker 격리 libFuzzer, ASan/UBSan</p></div>
-      <div class="stage" style="--c:var(--red)"><div class="code">ANA</div><h4>크래시 분석</h4><p>중복 제거, 규칙 판별, 리포트</p></div>
+      <div class="stage" style="--c:#7a8af0"><div class="code">EXT</div><h4>지식 추출</h4><p>Bazel query, AST·주석에서 API 제약 KB 생성</p></div>
+      <div class="stage" style="--c:#6477e8"><div class="code">SCH</div><h4>스케줄링</h4><p>연관 API 로직 그룹화, 시너지 점수와 시간 배분</p></div>
+      <div class="stage" style="--c:#4a5bd6"><div class="code">GEN</div><h4>하네스 생성</h4><p>LLM 하네스 생성, 오류 분류 자가치유</p></div>
+      <div class="stage" style="--c:#3948bd"><div class="code">EXE</div><h4>퍼징 실행</h4><p>Docker 격리 libFuzzer, ASan/UBSan</p></div>
+      <div class="stage" style="--c:#2b379c"><div class="code">ANA</div><h4>크래시 분석</h4><p>중복 제거, 규칙 판별, 리포트</p></div>
     </div>
     <div class="fb"><b>오탐 역피드백</b> &nbsp;ANA 원인 분석 <span>→</span> KB 변경안(diff) <span>→</span> <b>사람 승인</b> <span>→</span> KB 반영 <span>→</span> 해당 그룹 하네스 재생성</div>
   </section>
@@ -185,9 +186,9 @@ th:last-child { border-radius:3mm 3mm 0 0; }
     <div class="g3 tech">
       <div class="card" style="--c:var(--blue)"><h4>다중 소스 지식 추출</h4>
         AST, 주석, 분기문에서 NULL 검사·버퍼-길이 쌍·값 범위·해제 책임을 추출해 신뢰도와 함께 하네스 프롬프트에 주입</div>
-      <div class="card" style="--c:var(--yellow)"><h4>빌드 자가치유</h4>
+      <div class="card" style="--c:var(--blue)"><h4>빌드 자가치유</h4>
         컴파일·링커 오류(미정의 심볼, 중복 정의, 라이브러리 누락)를 분류해 LLM이 수정, 미정의 HAL 함수는 weak 스텁 자동 생성</div>
-      <div class="card" style="--c:var(--green)"><div class="big">10→85%</div><h4>크래시 판별 정확도</h4>
+      <div class="card" style="--c:var(--blue)"><div class="big">10→85%</div><h4>크래시 판별 정확도</h4>
         규칙 판별 + 신뢰도 0.8 미만은 증거 주입 LLM 판별 (dlt-daemon 크래시 20건 기준)</div>
     </div>
   </section>
@@ -196,9 +197,9 @@ th:last-child { border-radius:3mm 3mm 0 0; }
     <div class="st"><span class="no">04</span><h3>대상별 검증 결과</h3><span class="ln"></span></div>
     <div class="g4">
       <div class="tg" style="--c:var(--blue)"><div class="nm">Eclipse S-CORE</div><div class="bd">BAZEL · 자동차</div><div class="v">216</div><div class="d">커버리지 (기존 181)<br>API 3,080 · 그룹 682</div></div>
-      <div class="tg" style="--c:var(--green)"><div class="nm">COVESA DLT</div><div class="bd">COMPILE_COMMANDS · 자동차</div><div class="v">373K<small>/s</small></div><div class="d">API 914개<br>제약조건 보유 80.6%</div></div>
-      <div class="tg" style="--c:var(--purple)"><div class="nm">libsndfile 1.2.2</div><div class="bd">CMAKE · 범용 C</div><div class="v">6<small>건</small></div><div class="d">UBSan 정수 오버플로우<br>고유 6건 (검토 대기)</div></div>
-      <div class="tg" style="--c:var(--yellow)"><div class="nm">임베디드 HAL</div><div class="bd">PREBUILT · 임베디드</div><div class="v">86.4<small>%</small></div><div class="d">라인 커버리지, 브랜치 70.0%<br>HAL 스텁 후 힙 OOB 탐지</div></div>
+      <div class="tg" style="--c:var(--blue)"><div class="nm">COVESA DLT</div><div class="bd">COMPILE_COMMANDS · 자동차</div><div class="v">373K<small>/s</small></div><div class="d">API 914개<br>제약조건 보유 80.6%</div></div>
+      <div class="tg" style="--c:var(--blue)"><div class="nm">libsndfile 1.2.2</div><div class="bd">CMAKE · 범용 C</div><div class="v">6<small>건</small></div><div class="d">UBSan 정수 오버플로우<br>고유 6건 (검토 대기)</div></div>
+      <div class="tg" style="--c:var(--blue)"><div class="nm">임베디드 HAL</div><div class="bd">PREBUILT · 임베디드</div><div class="v">86.4<small>%</small></div><div class="d">라인 커버리지, 브랜치 70.0%<br>HAL 스텁 후 힙 OOB 탐지</div></div>
     </div>
     <div class="pnote"><b>범용 프로필</b>: 대상마다 JSON 프로필 하나만 작성하면 빌드 방식이 달라도 같은 명령어로 실행 &nbsp;·&nbsp; ※ libsndfile·임베디드는 수동 하네스, S-CORE·DLT는 LLM 생성 하네스 실측</div>
   </section>
@@ -206,8 +207,9 @@ th:last-child { border-radius:3mm 3mm 0 0; }
   <section>
     <div class="st"><span class="no">05</span><h3>기존 도구 비교 · 보안 설계</h3><span class="ln"></span></div>
     <div class="g2" style="grid-template-columns:1.08fr 1fr">
-      <div class="card" style="padding:5mm 7mm 5mm">
-        <table>
+      <div class="card" style="padding:6mm 7mm 5mm; display:flex; flex-direction:column">
+        <h4>기존 도구 비교</h4>
+        <table class="cmp">
           <tr><th>비교 항목</th><th>Locus</th><th>Prome<br>Fuzz</th><th>OSS-<br>Fuzz-Gen</th><th>lib<br>Erator</th><th>Logos<br>Fuzz</th></tr>
           <tr><td>LLM 하네스 생성</td><td>△</td><td>○</td><td>○</td><td>×</td><td>○</td></tr>
           <tr><td>API 문서 활용(RAG)</td><td>×</td><td>○</td><td>△</td><td>×</td><td>○</td></tr>
@@ -219,30 +221,31 @@ th:last-child { border-radius:3mm 3mm 0 0; }
         </table>
         <div class="leg">○ 지원 &nbsp; △ 일부 지원 &nbsp; × 미지원</div>
       </div>
-      <div class="card" style="padding:5mm 7mm 5mm">
+      <div class="card" style="padding:6mm 7mm 6mm; display:flex; flex-direction:column">
+        <h4>보안약점 예방 설계</h4>
         <div class="sec4">
           <div><b>신뢰 경계 분리</b>LLM 코드·퍼징 입력은 격리 컨테이너에서만 실행</div>
           <div><b>명령 문자열 미사용</b>shell=True, eval/exec 0건</div>
           <div><b>사람 승인 게이트</b>KB 변경·취약점 공개는 HITL 승인, 감사 로그</div>
-          <div><b>비밀정보 보호</b>API 키 환경변수, 리포트 esc() 처리</div>
+          <div><b>비밀정보 보호</b>API 키는 환경변수, 리포트 esc() 처리</div>
         </div>
         <div class="mini">
           <div style="--c:var(--blue)"><div class="v">47→29</div><div class="l">Bandit 검출<br>High/Medium 0</div></div>
-          <div style="--c:var(--green)"><div class="v">100%</div><div class="l">조치 대상 18건<br>모두 조치</div></div>
-          <div style="--c:var(--purple)"><div class="v">0건</div><div class="l">의존성 취약점<br>비밀정보 노출</div></div>
+          <div style="--c:var(--blue)"><div class="v">100%</div><div class="l">조치 대상 18건<br>모두 조치</div></div>
+          <div style="--c:var(--blue)"><div class="v">0건</div><div class="l">의존성 취약점<br>비밀정보 노출</div></div>
         </div>
       </div>
     </div>
-  </section>
+    </section>
 
   <section>
     <div class="st"><span class="no">06</span><h3>기대효과 · 향후 계획</h3><span class="ln"></span></div>
     <div class="g2">
-      <div class="card accent" style="--c:var(--green)"><h4>기대효과</h4><ul>
+      <div class="card accent" style="--c:var(--blue)"><h4>기대효과</h4><ul>
         <li><b>하네스 작성 자동화</b>: 프로필 1회 작성으로 수작업 대체</li>
         <li><b>탐지 범위 확대</b>: 하드웨어 없이 임베디드 코드 탐색</li>
         <li><b>공급망 검증</b>: 도입 전 보안 검증, UN R155 증거 축적</li></ul></div>
-      <div class="card accent" style="--c:var(--purple)"><h4>향후 계획</h4><ul>
+      <div class="card accent" style="--c:var(--blue)"><h4>향후 계획</h4><ul>
         <li><b>기술 고도화</b>: ASan 크래시 위치 복원, 누락 로직 그룹 보완</li>
         <li><b>검증 자동화</b>: GitHub Actions 연동 CI 보안 검증</li>
         <li><b>범위 확대</b>: 바이너리 대상 퍼징, 다양한 CPU 아키텍처</li></ul></div>
