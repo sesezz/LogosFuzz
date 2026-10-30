@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>LogosFuzz 포스터 (1000 × 1200 mm)</title>
+<style>
+/* 규격: 가로 1,000mm × 세로 1,200mm (세로형). 모든 치수는 mm 로 지정한다. */
+@page { size: 1000mm 1200mm; margin: 0; }
+
+@font-face { font-family: "Pretendard"; font-weight: 400; src: url(fonts/Pretendard-Regular.otf); }
+@font-face { font-family: "Pretendard"; font-weight: 500; src: url(fonts/Pretendard-Medium.otf); }
+@font-face { font-family: "Pretendard"; font-weight: 600; src: url(fonts/Pretendard-SemiBold.otf); }
+@font-face { font-family: "Pretendard"; font-weight: 700; src: url(fonts/Pretendard-Bold.otf); }
+@font-face { font-family: "Pretendard"; font-weight: 800; src: url(fonts/Pretendard-ExtraBold.otf); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url(fonts/jetbrains-mono-latin-400-normal.woff2); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 500; src: url(fonts/jetbrains-mono-latin-500-normal.woff2); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 700; src: url(fonts/jetbrains-mono-latin-700-normal.woff2); }
+
+/* 토큰: logosfuzz/reporting/web/style.css 와 동일 */
+:root {
+  --bg:#0b0f14; --bg-2:#111820; --bg-3:#1a222c; --bg-4:#222c38;
+  --border:#26303b; --border-strong:#364250;
+  --text:#e8eef5; --text-dim:#b4c0cc; --text-mute:#8392a3;
+  --green:#3fb950; --red:#f85149; --yellow:#e3b341; --blue:#58a6ff; --purple:#bc8cff;
+  --font-mono:"JetBrains Mono", ui-monospace, monospace;
+  --font-sans:"Pretendard", "Inter", system-ui, sans-serif;
+  --radius:5mm; --radius-lg:8mm;
+}
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+html,body { width:1000mm; height:1200mm; }
+body { background:var(--bg); color:var(--text); font-family:var(--font-sans); -webkit-font-smoothing:antialiased; }
+
+.poster {
+  position:relative; width:1000mm; height:1200mm; overflow:hidden; padding:38mm 50mm 30mm;
+  background:
+    radial-gradient(620mm 220mm at 50% -40mm, rgba(88,166,255,.20), transparent 70%),
+    radial-gradient(420mm 300mm at 100% 62%, rgba(188,140,255,.07), transparent 70%),
+    var(--bg);
+  display:flex; flex-direction:column; gap:17mm;
+}
+/* 은은한 격자 */
+.poster::before { content:""; position:absolute; inset:0; pointer-events:none;
+  background-image:linear-gradient(rgba(54,66,80,.22) .4mm, transparent .4mm),
+                   linear-gradient(90deg, rgba(54,66,80,.22) .4mm, transparent .4mm);
+  background-size:25mm 25mm;
+  -webkit-mask-image:linear-gradient(180deg, #000 0, transparent 38%);
+          mask-image:linear-gradient(180deg, #000 0, transparent 38%); }
+.poster > * { position:relative; }
+
+.mono { font-family:var(--font-mono); }
+
+/* ── 헤더 ── */
+.top { display:flex; justify-content:space-between; align-items:center; }
+.logo { display:flex; align-items:center; gap:7mm; }
+.logo-icon { font-size:26mm; line-height:1; color:var(--blue); }
+.logo-text { font-family:var(--font-mono); font-size:19mm; font-weight:700; letter-spacing:-.02em; }
+.top-meta { font-family:var(--font-mono); font-size:11mm; color:var(--text-mute); text-align:right; line-height:1.5; }
+
+.hero h1 { font-size:63mm; word-break:keep-all; font-weight:800; line-height:1.12; letter-spacing:-.035em; }
+.hero h1 em { font-style:normal; color:var(--blue); }
+.hero p { margin-top:9mm; word-break:keep-all; font-size:17.5mm; line-height:1.5; color:var(--text-dim); font-weight:500; max-width:860mm; }
+.chips { display:flex; gap:7mm; margin-top:10mm; }
+.badge { display:inline-flex; align-items:center; gap:4mm; padding:3mm 8mm; border:.7mm solid; border-radius:99mm;
+  font-family:var(--font-mono); font-size:10.5mm; font-weight:500; letter-spacing:.02em; text-transform:uppercase; }
+.badge::before { content:""; width:4.5mm; height:4.5mm; border-radius:50%; background:currentColor; }
+.b-green { color:var(--green); border-color:rgba(63,185,80,.55);  background:rgba(63,185,80,.10); }
+.b-blue  { color:var(--blue);  border-color:rgba(88,166,255,.55); background:rgba(88,166,255,.10); }
+.b-yellow{ color:var(--yellow);border-color:rgba(227,179,65,.55); background:rgba(227,179,65,.10); }
+.b-purple{ color:var(--purple);border-color:rgba(188,140,255,.55);background:rgba(188,140,255,.10); }
+
+/* ── 섹션 제목 ── */
+.sec-title { display:flex; align-items:baseline; gap:8mm; margin-bottom:7mm; }
+.sec-title .no { font-family:var(--font-mono); font-size:12mm; color:var(--blue); font-weight:700; letter-spacing:.06em; }
+.sec-title h2 { font-size:25mm; font-weight:800; letter-spacing:-.02em; }
+.sec-title .line { flex:1; height:.7mm; background:var(--border-strong); align-self:center; }
+
+/* ── 파이프라인 ── */
+.pipe { display:grid; grid-template-columns:repeat(3,1fr); gap:10mm 12mm; }
+.stage { background:var(--bg-2); border:.7mm solid var(--border); border-top:2mm solid var(--c); border-radius:var(--radius-lg);
+  padding:11mm 11mm 13mm; position:relative; }
+.stage .code { font-family:var(--font-mono); font-size:11mm; font-weight:700; color:var(--c); letter-spacing:.04em; }
+.stage h3 { font-size:20mm; font-weight:800; margin:1mm 0 4mm; letter-spacing:-.02em; }
+.stage ul { list-style:none; display:flex; flex-direction:column; gap:2.5mm; }
+.stage li { word-break:keep-all; font-size:13.4mm; line-height:1.38; color:var(--text-dim); font-weight:500; padding-left:7mm; position:relative; }
+.stage li::before { content:""; position:absolute; left:0; top:4.9mm; width:2.6mm; height:2.6mm; border-radius:50%; background:var(--c); }
+.stage:not(:nth-child(3n))::after { content:"▶"; position:absolute; right:-10.5mm; top:50%; transform:translateY(-50%);
+  color:var(--text-mute); font-size:9mm; }
+.s1{--c:var(--blue)} .s2{--c:var(--green)} .s3{--c:var(--yellow)}
+.s4{--c:var(--purple)} .s5{--c:var(--red)} .s6{--c:var(--blue)}
+
+/* ── 핵심 기능 ── */
+.feat { display:grid; grid-template-columns:repeat(3,1fr); gap:12mm; }
+.fcard { background:linear-gradient(180deg, var(--bg-3), var(--bg-2)); border:.7mm solid var(--border-strong); border-radius:var(--radius-lg); padding:12mm 12mm 14mm; }
+.fcard .ic { width:22mm; height:22mm; border-radius:50%; display:grid; place-items:center; font-size:12mm; font-family:var(--font-mono); font-weight:700;
+  background:var(--bg-3); border:.7mm solid var(--border-strong); color:var(--c); margin-bottom:6mm; }
+.fcard h3 { font-size:17mm; font-weight:800; line-height:1.25; letter-spacing:-.02em; margin-bottom:4mm; }
+.fcard p { word-break:keep-all; font-size:13mm; line-height:1.5; color:var(--text-dim); font-weight:500; }
+.fcard b { color:var(--text); font-weight:700; }
+
+/* ── 하단: 로그 + 지표 ── */
+.bottom { display:grid; grid-template-columns:1.12fr 1fr; gap:14mm; align-items:stretch; }
+.term { background:#070a0e; border:.7mm solid var(--border-strong); border-radius:var(--radius-lg); overflow:hidden; display:flex; flex-direction:column; }
+.term-bar { display:flex; align-items:center; gap:4mm; padding:6mm 9mm; background:var(--bg-2); border-bottom:.7mm solid var(--border); }
+.term-bar i { width:5mm; height:5mm; border-radius:50%; background:var(--border-strong); }
+.term-bar i:nth-child(1){background:var(--red)} .term-bar i:nth-child(2){background:var(--yellow)} .term-bar i:nth-child(3){background:var(--green)}
+.term-bar span { margin-left:5mm; font-family:var(--font-mono); font-size:9.5mm; color:var(--text-mute); }
+.term pre { flex:1; word-break:keep-all; font-family:var(--font-mono); font-size:10.8mm; line-height:1.7; padding:11mm 11mm; color:var(--text-dim); white-space:pre-wrap; word-break:break-all; }
+.term .k{color:var(--text-mute)} .term .r{color:var(--red)} .term .g{color:var(--green)} .term .b{color:var(--blue)} .term .y{color:var(--yellow)}
+
+.stats { display:grid; grid-template-columns:1fr 1fr; gap:9mm; }
+.stat { background:var(--bg-2); border:.7mm solid var(--border); border-radius:var(--radius-lg); padding:8mm 10mm; display:flex; flex-direction:column; justify-content:center; }
+.stat .l { font-family:var(--font-mono); font-size:9.5mm; color:var(--text-mute); text-transform:uppercase; letter-spacing:.06em; margin-bottom:2mm; }
+.stat .v { font-family:var(--font-mono); font-size:36mm; font-weight:700; line-height:1.05; letter-spacing:-.03em; color:var(--c); }
+.stat .v small { font-size:13mm; color:var(--text-dim); font-weight:500; margin-left:2mm; }
+.stat .d { font-size:11.5mm; color:var(--text-dim); line-height:1.35; margin-top:2mm; font-weight:500; }
+
+/* ── 푸터 ── */
+.foot { margin-top:auto; display:flex; justify-content:space-between; align-items:center; padding-top:10mm; border-top:.7mm solid var(--border-strong); }
+.foot .repo { font-family:var(--font-mono); font-size:15mm; font-weight:700; color:var(--blue); }
+.foot .note { font-size:10.5mm; color:var(--text-mute); text-align:right; line-height:1.5; font-weight:500; }
+.foot .note b { color:var(--text-dim); font-weight:600; }
+</style>
+</head>
+<body>
+<div class="poster">
+
+  <header class="top">
+    <div class="logo"><span class="logo-icon">◈</span><span class="logo-text">LogosFuzz</span></div>
+    <div class="top-meta">AUTOMATED FUZZING PIPELINE<br>EXT → SCH → GEN → EXE → ANA</div>
+  </header>
+
+  <section class="hero">
+    <h1>소스 코드에서 크래시 리포트까지,<br><em>LLM이 잇는 자동 퍼징</em></h1>
+    <p>C/C++ 소스와 Bazel 빌드 그래프를 읽어 퍼징 하네스를 스스로 생성·수선하고,
+       격리 환경에서 실행한 뒤 크래시의 정탐 여부까지 판별하는 End-to-End 파이프라인</p>
+    <div class="chips">
+      <span class="badge b-blue">Bazel-aware</span>
+      <span class="badge b-green">libFuzzer + ASan/UBSan/LSan</span>
+      <span class="badge b-yellow">Self-heal loop</span>
+      <span class="badge b-purple">Human-in-the-loop</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">01</span><h2>파이프라인 6단계</h2><span class="line"></span></div>
+    <div class="pipe">
+      <div class="stage s1"><div class="code">EXT-01</div><h3>추출</h3>
+        <ul><li>Bazel 의존 그래프(deps·include·copts)</li><li>C/C++17 AST 분석</li><li>API 제약조건 → RAG 지식베이스</li></ul></div>
+      <div class="stage s2"><div class="code">SCH-02</div><h3>스케줄링</h3>
+        <ul><li>같은 상태를 공유하는 API를 Logic Group으로 패키징</li><li>시너지 우선순위·자원 할당</li></ul></div>
+      <div class="stage s3"><div class="code">GEN-03</div><h3>하네스 생성</h3>
+        <ul><li>제약조건 컨텍스트로 LLM 하네스 초안</li><li>빌드 에러 분류 → 자가치유</li><li>입력 소비 정적 검증</li></ul></div>
+      <div class="stage s4"><div class="code">EXE-04</div><h3>격리 퍼징 실행</h3>
+        <ul><li>Docker 격리 libFuzzer 실행</li><li>커버리지·크래시 수집</li><li>타임아웃·코퍼스 관리</li></ul></div>
+      <div class="stage s5"><div class="code">ANA-05</div><h3>크래시 분석</h3>
+        <ul><li>중복 제거·근본 원인 분석</li><li>정탐/오탐 자동 판별</li><li>CVE 리포트·KB 역피드백</li></ul></div>
+      <div class="stage s6"><div class="code">CTR-06</div><h3>제어 · HITL</h3>
+        <ul><li>파이프라인 컨트롤러</li><li>체크포인트별 AUTO / MANUAL / CONDITIONAL 승인 정책</li></ul></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><span class="no">02</span><h2>핵심 기술</h2><span class="line"></span></div>
+    <div class="feat">
+      <div class="fcard" style="--c:var(--blue)"><div class="ic">//</div>
+        <h3>Bazel 빌드 그래프 인지</h3>
+        <p>strict deps·visibility 를 강제하는 환경에서 정답을 아는 건 <b>bazel query</b> 뿐. 타깃 경계를 넘는 API 는 한 그룹으로 묶지 않습니다.</p></div>
+      <div class="fcard" style="--c:var(--yellow)"><div class="ic">↻</div>
+        <h3>실측 코퍼스 기반 자가치유</h3>
+        <p>실제로 빌드를 깨뜨려 모은 에러 원문으로 <b>10종 분류기</b>를 구성. 고칠 수 없는 결함은 LLM 호출 없이 즉시 에스컬레이션합니다.</p></div>
+      <div class="fcard" style="--c:var(--purple)"><div class="ic">✓</div>
+        <h3>검증된 하네스만 실행</h3>
+        <p>퍼즈 입력을 쓰지 않는 하네스는 커버리지만 나오고 새 경로가 없습니다. <b>입력 소비 검증</b>으로 헛도는 캠페인을 사전에 차단합니다.</p></div>
+    </div>
+  </section>
+
+  <section class="bottom">
+    <div>
+      <div class="sec-title"><span class="no">03</span><h2>자가치유 실제 복구</h2><span class="line"></span></div>
+      <div class="term" style="height:calc(100% - 34mm)">
+        <div class="term-bar"><i></i><i></i><i></i><span>SelfHealLoop · bazel build //harness:json_fuzzer</span></div>
+<pre><span class="k">최종 결과</span>  <span class="g">success</span>  (LLM 수정 라운드 1회)
+
+<span class="k">라운드 0</span> <span class="r">빌드 실패</span>
+  진단 = <span class="y">undefined_symbol / resolve_symbol</span>
+  <span class="r">ld.lld: error: undefined symbol:
+  score::json::ParseStrict(...)</span>
+
+<span class="k">라운드 1</span> <span class="g">빌드 성공</span>
+  산출물 = <span class="b">bazel-bin/harness/json_fuzzer</span></pre>
+      </div>
+    </div>
+    <div>
+      <div class="sec-title"><span class="no">04</span><h2>검증 현황</h2><span class="line"></span></div>
+      <div class="stats" style="height:calc(100% - 34mm)">
+        <div class="stat" style="--c:var(--green)"><div class="l">tests passed</div><div class="v">395</div><div class="d">EC2 회귀 검증 (skip 4)</div></div>
+        <div class="stat" style="--c:var(--blue)"><div class="l">S-CORE apis</div><div class="v">3,080</div><div class="d">→ 682 Logic Group</div></div>
+        <div class="stat" style="--c:var(--yellow)"><div class="l">DLT apis → groups</div><div class="v">230<small>→21</small></div><div class="d">제약조건 커버리지 87.4%</div></div>
+        <div class="stat" style="--c:var(--purple)"><div class="l">libFuzzer exec/s</div><div class="v">518<small>K</small></div><div class="d">DLT 300초 실행, 크래시 0</div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <div class="repo">github.com/sesezz/LogosFuzz</div>
+    <div class="note"><b>대상</b> Eclipse S-CORE baselibs · DLT daemon · Automotive UDS<br><b>스택</b> Python · libclang · Bazel · libFuzzer · Docker</div>
+  </footer>
+</div>
+</body>
+</html>
