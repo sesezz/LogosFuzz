@@ -2,211 +2,299 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>LogosFuzz 포스터 (1000 × 1200 mm)</title>
+<title>LogosFuzz 최종 포스터 (1000 × 1200 mm)</title>
 <style>
-/* 규격: 가로 1,000mm × 세로 1,200mm (세로형). 모든 치수는 mm 로 지정한다. */
+/* 규격: 가로 1,000mm × 세로 1,200mm (세로형). 모든 치수는 mm. */
 @page { size: 1000mm 1200mm; margin: 0; }
+@font-face { font-family:"Pretendard"; font-weight:400; src:url(fonts/Pretendard-Regular.otf); }
+@font-face { font-family:"Pretendard"; font-weight:500; src:url(fonts/Pretendard-Medium.otf); }
+@font-face { font-family:"Pretendard"; font-weight:600; src:url(fonts/Pretendard-SemiBold.otf); }
+@font-face { font-family:"Pretendard"; font-weight:700; src:url(fonts/Pretendard-Bold.otf); }
+@font-face { font-family:"Pretendard"; font-weight:800; src:url(fonts/Pretendard-ExtraBold.otf); }
+@font-face { font-family:"JetBrains Mono"; font-weight:400; src:url(fonts/jetbrains-mono-latin-400-normal.woff2); }
+@font-face { font-family:"JetBrains Mono"; font-weight:700; src:url(fonts/jetbrains-mono-latin-700-normal.woff2); }
 
-@font-face { font-family: "Pretendard"; font-weight: 400; src: url(fonts/Pretendard-Regular.otf); }
-@font-face { font-family: "Pretendard"; font-weight: 500; src: url(fonts/Pretendard-Medium.otf); }
-@font-face { font-family: "Pretendard"; font-weight: 600; src: url(fonts/Pretendard-SemiBold.otf); }
-@font-face { font-family: "Pretendard"; font-weight: 700; src: url(fonts/Pretendard-Bold.otf); }
-@font-face { font-family: "Pretendard"; font-weight: 800; src: url(fonts/Pretendard-ExtraBold.otf); }
-@font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url(fonts/jetbrains-mono-latin-400-normal.woff2); }
-@font-face { font-family: "JetBrains Mono"; font-weight: 500; src: url(fonts/jetbrains-mono-latin-500-normal.woff2); }
-@font-face { font-family: "JetBrains Mono"; font-weight: 700; src: url(fonts/jetbrains-mono-latin-700-normal.woff2); }
-
-/* 토큰: logosfuzz/reporting/web/style.css 와 동일 */
 :root {
-  --bg:#f3f5fb; --bg-2:#ffffff; --bg-3:#eef1fa; --bg-4:#e4e9f7;
-  --border:#e1e6f2; --border-strong:#cdd5ea;
-  --text:#1a2140; --text-dim:#454e70; --text-mute:#7a84a3;
-  --green:#1f9d55; --red:#e5484d; --yellow:#d9890b; --blue:#4458d8; --purple:#7c5cff;
-  --band:#4a5bd6;
-  --font-mono:"JetBrains Mono", ui-monospace, monospace;
-  --font-sans:"Pretendard", "Inter", system-ui, sans-serif;
-  --radius:5mm; --radius-lg:8mm;
-  --shadow:0 1.2mm 5mm rgba(40,56,130,.10);
+  --bg:#f3f5fb; --card:#fff; --soft:#eef1fa; --soft2:#e4e9f7;
+  --line:#d5dbee; --text:#1a2140; --dim:#454e70; --mute:#7a84a3;
+  --blue:#4458d8; --navy:#26338f; --band:#4a5bd6;
+  --green:#1f9d55; --red:#e5484d; --yellow:#d9890b; --purple:#7c5cff;
+  --mono:"JetBrains Mono", ui-monospace, monospace;
+  --shadow:0 1mm 4mm rgba(40,56,130,.12);
 }
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
 html,body { width:1000mm; height:1200mm; }
-body { background:var(--bg); color:var(--text); font-family:var(--font-sans); -webkit-font-smoothing:antialiased; }
+body { background:var(--bg); color:var(--text); font-family:"Pretendard","Inter",system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+b { font-weight:700; }
 
-.poster {
-  position:relative; width:1000mm; height:1200mm; overflow:hidden; padding:38mm 62mm 30mm;
-  background:
-    radial-gradient(620mm 220mm at 50% -40mm, rgba(68,88,216,.10), transparent 70%),
-    var(--bg);
-  display:flex; flex-direction:column; gap:17mm;
-}
-/* 은은한 격자 */
-.poster::before { content:""; position:absolute; inset:0; pointer-events:none;
-  background-image:linear-gradient(rgba(68,88,216,.07) .4mm, transparent .4mm),
-                   linear-gradient(90deg, rgba(68,88,216,.07) .4mm, transparent .4mm);
-  background-size:25mm 25mm;
-   }
-.poster > * { position:relative; }
-.poster::after { content:""; position:absolute; inset:0; pointer-events:none;
-  background:linear-gradient(90deg, var(--band) 0 22mm, transparent 22mm calc(100% - 22mm), var(--band) calc(100% - 22mm)); }
+.poster { position:relative; width:1000mm; height:1200mm; overflow:hidden; display:flex; flex-direction:column; background:var(--bg); }
+.poster::after { content:""; position:absolute; inset:0; pointer-events:none; z-index:9;
+  background:linear-gradient(90deg, var(--band) 0 12mm, transparent 12mm calc(100% - 12mm), var(--band) calc(100% - 12mm)); }
 
-.mono { font-family:var(--font-mono); }
+/* 헤더 */
+.head { background:linear-gradient(135deg, #2a37a0, #4458d8 70%, #5a6cf0); color:#fff; padding:17mm 34mm 15mm; text-align:center; position:relative; }
+.head::before { content:""; position:absolute; inset:0; opacity:.14;
+  background-image:linear-gradient(#fff .3mm, transparent .3mm), linear-gradient(90deg,#fff .3mm, transparent .3mm); background-size:22mm 22mm; }
+.head > * { position:relative; }
+.head .ev { font-size:10.5mm; font-weight:500; letter-spacing:.04em; opacity:.9; }
+.head h1 { font-size:21mm; font-weight:800; line-height:1.22; letter-spacing:-.02em; margin:6mm 0 6mm; word-break:keep-all; }
+.head .sub { font-size:10.5mm; font-weight:500; opacity:.95; margin-bottom:5mm; }
+.head .team { font-size:11.5mm; font-weight:700; }
 
-/* ── 헤더 ── */
-.top { display:flex; justify-content:space-between; align-items:center; }
-.logo { display:flex; align-items:center; gap:7mm; }
-.logo-icon { font-size:26mm; line-height:1; color:var(--blue); }
-.logo-text { font-family:var(--font-mono); font-size:19mm; font-weight:700; letter-spacing:-.02em; }
-.top-meta { font-family:var(--font-mono); font-size:11mm; color:var(--text-mute); text-align:right; line-height:1.5; }
+/* KPI */
+.kpi { display:grid; grid-template-columns:repeat(4,1fr); gap:8mm; padding:0 22mm; margin-top:-9mm; position:relative; z-index:2; }
+.kpi > div { background:var(--card); border-radius:5mm; box-shadow:var(--shadow); text-align:center; padding:5mm 3mm 5mm; border-top:1.6mm solid var(--c); }
+.kpi .v { font-family:var(--mono); font-weight:700; font-size:20mm; line-height:1.1; letter-spacing:-.04em; color:var(--c); }
+.kpi .v small { font-size:11mm; letter-spacing:0; }
+.kpi .l { font-size:8.8mm; font-weight:600; color:var(--dim); margin-top:1mm; }
 
-.hero h1 { font-size:63mm; word-break:keep-all; font-weight:800; line-height:1.12; letter-spacing:-.035em; }
-.hero h1 em { font-style:normal; color:var(--blue); }
-.hero p { margin-top:9mm; word-break:keep-all; font-size:17.5mm; line-height:1.5; color:var(--text-dim); font-weight:500; max-width:860mm; }
-.chips { display:flex; gap:7mm; margin-top:10mm; }
-.badge { display:inline-flex; align-items:center; gap:4mm; padding:3mm 8mm; border:.7mm solid; border-radius:99mm;
-  font-family:var(--font-mono); font-size:10.5mm; font-weight:500; letter-spacing:.02em; text-transform:uppercase; }
-.badge::before { content:""; width:4.5mm; height:4.5mm; border-radius:50%; background:currentColor; }
-.b-green { color:var(--green); border-color:rgba(31,157,85,.45); background:rgba(31,157,85,.08); }
-.b-blue  { color:var(--blue);  border-color:rgba(68,88,216,.45); background:rgba(68,88,216,.08); }
-.b-yellow{ color:var(--yellow);border-color:rgba(217,137,11,.45); background:rgba(217,137,11,.08); }
-.b-purple{ color:var(--purple);border-color:rgba(124,92,255,.45);background:rgba(124,92,255,.08); }
+/* 본문 3단 */
+.cols { zoom:1.2; flex:none; height:calc(1005mm / 1.2); display:grid; grid-template-columns:repeat(3,1fr); gap:9mm; padding:10mm 22mm 8mm; }
+.col { display:flex; flex-direction:column; gap:9mm; min-width:0; }
+.sec { background:var(--card); border-radius:4mm; box-shadow:var(--shadow); overflow:hidden; display:flex; flex-direction:column; }
+.sec.grow { flex:1; }
+.sec > h2 { background:var(--blue); color:#fff; font-size:11.5mm; font-weight:800; text-align:center; padding:3.2mm 0; letter-spacing:-.01em; }
+.body { padding:5mm 6mm 6mm; font-size:8.1mm; line-height:1.45; color:var(--dim); font-weight:500; word-break:keep-all; }
+.body h3 { font-size:9.4mm; font-weight:800; color:var(--text); margin:4.5mm 0 2.2mm; letter-spacing:-.01em; }
+.body h3:first-child { margin-top:0; }
+.body ul { list-style:none; display:flex; flex-direction:column; gap:1.8mm; }
+.body li { padding-left:5mm; position:relative; }
+.body li::before { content:""; position:absolute; left:.4mm; top:3.1mm; width:2mm; height:2mm; border-radius:50%; background:var(--blue); }
+.body li b { color:var(--text); }
 
-/* ── 섹션 제목 ── */
-.sec-title { display:flex; align-items:baseline; gap:8mm; margin-bottom:7mm; }
-.sec-title .no { font-family:var(--font-mono); font-size:12mm; color:var(--blue); font-weight:700; letter-spacing:.06em; }
-.sec-title h2 { font-size:25mm; font-weight:800; letter-spacing:-.02em; }
-.sec-title .line { flex:1; height:.7mm; background:var(--border-strong); align-self:center; }
+table { width:100%; border-collapse:collapse; font-size:7.3mm; line-height:1.38; margin:2mm 0; }
+th, td { border:.35mm solid var(--line); padding:1.8mm 2.2mm; text-align:left; vertical-align:middle; color:var(--dim); font-weight:500; }
+th { background:var(--soft); color:var(--text); font-weight:700; }
+td.k { background:var(--blue); color:#fff; font-weight:700; width:27%; }
+td.n { color:var(--text); font-weight:600; }
+table.cmp th, table.cmp td { text-align:center; font-size:7.2mm; }
+table.cmp td:first-child, table.cmp th:first-child { text-align:left; }
+table.cmp td:last-child, table.cmp th:last-child { background:var(--soft); color:var(--blue); font-weight:800; }
+.legend { text-align:right; font-size:6.8mm; color:var(--mute); margin-top:1mm; }
 
-/* ── 파이프라인 ── */
-.pipe { display:grid; grid-template-columns:repeat(3,1fr); gap:10mm 12mm; }
-.stage { background:var(--bg-2); border:.7mm solid var(--border); border-top:2mm solid var(--c); border-radius:var(--radius-lg);
-  padding:11mm 11mm 13mm; position:relative; box-shadow:var(--shadow); }
-.stage .code { font-family:var(--font-mono); font-size:11mm; font-weight:700; color:var(--c); letter-spacing:.04em; }
-.stage h3 { font-size:20mm; font-weight:800; margin:1mm 0 4mm; letter-spacing:-.02em; }
-.stage ul { list-style:none; display:flex; flex-direction:column; gap:2.5mm; }
-.stage li { word-break:keep-all; font-size:13.4mm; line-height:1.38; color:var(--text-dim); font-weight:500; padding-left:7mm; position:relative; }
-.stage li::before { content:""; position:absolute; left:0; top:4.9mm; width:2.6mm; height:2.6mm; border-radius:50%; background:var(--c); }
-.stage:not(:nth-child(3n))::after { content:"▶"; position:absolute; right:-10.5mm; top:50%; transform:translateY(-50%);
-  color:var(--text-mute); font-size:9mm; }
-.s1{--c:var(--blue)} .s2{--c:var(--green)} .s3{--c:var(--yellow)}
-.s4{--c:var(--purple)} .s5{--c:var(--red)} .s6{--c:var(--blue)}
+.goal { background:var(--soft); border:.4mm solid var(--line); border-radius:3mm; padding:3.5mm 4mm; text-align:center; font-weight:700; color:var(--text); font-size:8.8mm; line-height:1.4; }
+.cmd { background:#1a2140; color:#d8e0ff; font-family:var(--mono); font-size:6.9mm; line-height:1.55; padding:3.5mm 4.5mm; border-radius:3mm; margin:2.5mm 0 3mm; word-break:break-all; }
+.cmd i { color:#8fa0ff; font-style:normal; }
 
-/* ── 핵심 기능 ── */
-.feat { display:grid; grid-template-columns:repeat(3,1fr); gap:12mm; }
-.fcard { box-shadow:var(--shadow); background:var(--bg-2); border:.7mm solid var(--border-strong); border-radius:var(--radius-lg); padding:12mm 12mm 14mm; }
-.fcard .ic { width:22mm; height:22mm; border-radius:50%; display:grid; place-items:center; font-size:12mm; font-family:var(--font-mono); font-weight:700;
-  background:var(--bg-3); border:.7mm solid var(--border-strong); color:var(--c); margin-bottom:6mm; }
-.fcard h3 { font-size:17mm; font-weight:800; line-height:1.25; letter-spacing:-.02em; margin-bottom:4mm; }
-.fcard p { word-break:keep-all; font-size:13mm; line-height:1.5; color:var(--text-dim); font-weight:500; }
-.fcard b { color:var(--text); font-weight:700; }
+/* 파이프라인 */
+.flow { display:grid; grid-template-columns:repeat(5,1fr); gap:1.6mm; margin:2mm 0 3mm; }
+.flow > div { border:.4mm solid var(--line); border-radius:2.5mm; overflow:hidden; background:#fff; }
+.flow .t { background:var(--c); color:#fff; text-align:center; font-weight:800; font-size:7.4mm; line-height:1.2; padding:2mm 0.5mm; }
+.flow .t span { display:block; font-family:var(--mono); font-size:7.4mm; }
+.flow .d { padding:1.8mm 1.4mm; font-size:6.3mm; line-height:1.35; color:var(--dim); font-weight:500; }
+.fb { border:.4mm dashed var(--blue); background:var(--soft); border-radius:2.5mm; padding:2.5mm 3.5mm; font-size:7.3mm; line-height:1.4; color:var(--text); font-weight:500; }
+.fb b { color:var(--blue); }
 
-/* ── 하단: 로그 + 지표 ── */
-.bottom { display:grid; grid-template-columns:1.12fr 1fr; gap:14mm; align-items:stretch; }
-.term { box-shadow:var(--shadow); background:#f8f9fd; border:.7mm solid var(--border-strong); border-radius:var(--radius-lg); overflow:hidden; display:flex; flex-direction:column; }
-.term-bar { display:flex; align-items:center; gap:4mm; padding:6mm 9mm; background:var(--bg-2); border-bottom:.7mm solid var(--border); }
-.term-bar i { width:5mm; height:5mm; border-radius:50%; background:var(--border-strong); }
-.term-bar i:nth-child(1){background:var(--red)} .term-bar i:nth-child(2){background:var(--yellow)} .term-bar i:nth-child(3){background:var(--green)}
-.term-bar span { margin-left:5mm; font-family:var(--font-mono); font-size:9.5mm; color:var(--text-mute); }
-.term pre { flex:1; word-break:keep-all; font-family:var(--font-mono); font-size:10.8mm; line-height:1.7; padding:11mm 11mm; color:var(--text-dim); white-space:pre-wrap; word-break:break-all; }
-.term .k{color:var(--text-mute)} .term .r{color:var(--red)} .term .g{color:var(--green)} .term .b{color:var(--blue)} .term .y{color:var(--yellow)}
+/* 프로파일 3종 */
+.prof { display:grid; grid-template-columns:repeat(3,1fr); gap:2mm; margin:2.5mm 0 3mm; }
+.prof > div { border:.4mm solid var(--line); border-radius:2.5mm; overflow:hidden; font-size:6.7mm; line-height:1.4; }
+.prof .t { background:var(--soft2); color:var(--text); font-weight:800; padding:2mm 2.5mm; font-size:7.1mm; line-height:1.25; }
+.prof .d { padding:2mm 2.5mm; color:var(--dim); font-weight:500; }
 
-.stats { display:grid; grid-template-columns:1fr 1fr; gap:9mm; }
-.stat { box-shadow:var(--shadow); background:var(--bg-2); border:.7mm solid var(--border); border-radius:var(--radius-lg); padding:8mm 10mm; display:flex; flex-direction:column; justify-content:center; }
-.stat .l { font-family:var(--font-mono); font-size:9.5mm; color:var(--text-mute); text-transform:uppercase; letter-spacing:.06em; margin-bottom:2mm; }
-.stat .v { font-family:var(--font-mono); font-size:36mm; font-weight:700; line-height:1.05; letter-spacing:-.03em; color:var(--c); }
-.stat .v small { font-size:13mm; color:var(--text-dim); font-weight:500; margin-left:2mm; }
-.stat .d { font-size:11.5mm; color:var(--text-dim); line-height:1.35; margin-top:2mm; font-weight:500; }
+/* 성과 카드 */
+.nums { display:grid; grid-template-columns:repeat(3,1fr); gap:3mm; margin:2.5mm 0 3mm; }
+.nums > div { border:.4mm solid var(--line); border-radius:2.5mm; text-align:center; padding:3mm 1mm; }
+.nums .v { font-family:var(--mono); font-weight:700; font-size:11.5mm; color:var(--c); letter-spacing:-.03em; line-height:1.15; }
+.nums .l { font-size:6.6mm; line-height:1.3; color:var(--dim); font-weight:600; margin-top:.8mm; }
+.note { font-size:6.8mm; line-height:1.4; color:var(--mute); margin-top:2.5mm; }
 
-/* ── 푸터 ── */
-.foot { margin-top:auto; display:flex; justify-content:space-between; align-items:center; padding-top:10mm; border-top:.7mm solid var(--border-strong); }
-.foot .repo { font-family:var(--font-mono); font-size:15mm; font-weight:700; color:var(--blue); }
-.foot .note { font-size:10.5mm; color:var(--text-mute); text-align:right; line-height:1.5; font-weight:500; }
-.foot .note b { color:var(--text-dim); font-weight:600; }
+.foot { padding:0 22mm 9mm; font-size:6.8mm; color:var(--mute); text-align:center; font-weight:500; }
+.foot b { color:var(--blue); font-family:var(--mono); }
 </style>
 </head>
 <body>
 <div class="poster">
 
-  <header class="top">
-    <div class="logo"><span class="logo-icon">◈</span><span class="logo-text">LogosFuzz</span></div>
-    <div class="top-meta">AUTOMATED FUZZING PIPELINE<br>EXT → SCH → GEN → EXE → ANA</div>
-  </header>
+<header class="head">
+  <div class="ev">2026 소개딩 SW개발보안 경진대회 | 트랙B 기술혁신</div>
+  <h1>LogosFuzz: 빌드 구조와 API 제약 분석 기반<br>퍼징 하네스 자동 생성 보안 테스트 시스템</h1>
+  <div class="sub">C/C++ 오픈소스 · 빌드 구조와 API 제약을 분석해 지식 추출부터 크래시 판별까지 자동화</div>
+  <div class="team">김민주, 송서원, 임세은, 황다연 (서울여자대학교) &nbsp;|&nbsp; 팀 Fuzzing Candy</div>
+</header>
 
-  <section class="hero">
-    <h1>소스 코드에서 크래시 리포트까지,<br><em>LLM이 잇는 자동 퍼징</em></h1>
-    <p>C/C++ 소스와 Bazel 빌드 그래프를 읽어 퍼징 하네스를 스스로 생성·수선하고,
-       격리 환경에서 실행한 뒤 크래시의 정탐 여부까지 판별하는 End-to-End 파이프라인</p>
-    <div class="chips">
-      <span class="badge b-blue">Bazel-aware</span>
-      <span class="badge b-green">libFuzzer + ASan/UBSan/LSan</span>
-      <span class="badge b-yellow">Self-heal loop</span>
-      <span class="badge b-purple">Human-in-the-loop</span>
-    </div>
-  </section>
+<section class="kpi">
+  <div style="--c:var(--blue)"><div class="v">3,080</div><div class="l">S-CORE C++ API 추출 · 682개 로직 그룹</div></div>
+  <div style="--c:var(--green)"><div class="v">181→216</div><div class="l">S-CORE 커버리지 · 동일 조건, 300초 실행</div></div>
+  <div style="--c:var(--purple)"><div class="v">2 / 2</div><div class="l">LLM 생성 하네스 빌드 성공 · 자가치유 1회</div></div>
+  <div style="--c:var(--yellow)"><div class="v">1,182</div><div class="l">단위·통합 테스트 통과</div></div>
+</section>
 
-  <section>
-    <div class="sec-title"><span class="no">01</span><h2>파이프라인 6단계</h2><span class="line"></span></div>
-    <div class="pipe">
-      <div class="stage s1"><div class="code">EXT-01</div><h3>추출</h3>
-        <ul><li>Bazel 의존 그래프(deps·include·copts)</li><li>C/C++17 AST 분석</li><li>API 제약조건 → RAG 지식베이스</li></ul></div>
-      <div class="stage s2"><div class="code">SCH-02</div><h3>스케줄링</h3>
-        <ul><li>같은 상태를 공유하는 API를 Logic Group으로 패키징</li><li>시너지 우선순위·자원 할당</li></ul></div>
-      <div class="stage s3"><div class="code">GEN-03</div><h3>하네스 생성</h3>
-        <ul><li>제약조건 컨텍스트로 LLM 하네스 초안</li><li>빌드 에러 분류 → 자가치유</li><li>입력 소비 정적 검증</li></ul></div>
-      <div class="stage s4"><div class="code">EXE-04</div><h3>격리 퍼징 실행</h3>
-        <ul><li>Docker 격리 libFuzzer 실행</li><li>커버리지·크래시 수집</li><li>타임아웃·코퍼스 관리</li></ul></div>
-      <div class="stage s5"><div class="code">ANA-05</div><h3>크래시 분석</h3>
-        <ul><li>중복 제거·근본 원인 분석</li><li>정탐/오탐 자동 판별</li><li>CVE 리포트·KB 역피드백</li></ul></div>
-      <div class="stage s6"><div class="code">CTR-06</div><h3>제어 · HITL</h3>
-        <ul><li>파이프라인 컨트롤러</li><li>체크포인트별 AUTO / MANUAL / CONDITIONAL 승인 정책</li></ul></div>
-    </div>
-  </section>
+<main class="cols">
 
-  <section>
-    <div class="sec-title"><span class="no">02</span><h2>핵심 기술</h2><span class="line"></span></div>
-    <div class="feat">
-      <div class="fcard" style="--c:var(--blue)"><div class="ic">//</div>
-        <h3>Bazel 빌드 그래프 인지</h3>
-        <p>strict deps·visibility 를 강제하는 환경에서 정답을 아는 건 <b>bazel query</b> 뿐. 타깃 경계를 넘는 API 는 한 그룹으로 묶지 않습니다.</p></div>
-      <div class="fcard" style="--c:var(--yellow)"><div class="ic">↻</div>
-        <h3>실측 코퍼스 기반 자가치유</h3>
-        <p>실제로 빌드를 깨뜨려 모은 에러 원문으로 <b>10종 분류기</b>를 구성. 고칠 수 없는 결함은 LLM 호출 없이 즉시 에스컬레이션합니다.</p></div>
-      <div class="fcard" style="--c:var(--purple)"><div class="ic">✓</div>
-        <h3>검증된 하네스만 실행</h3>
-        <p>퍼즈 입력을 쓰지 않는 하네스는 커버리지만 나오고 새 경로가 없습니다. <b>입력 소비 검증</b>으로 헛도는 캠페인을 사전에 차단합니다.</p></div>
-    </div>
-  </section>
-
-  <section class="bottom">
-    <div>
-      <div class="sec-title"><span class="no">03</span><h2>자가치유 실제 복구</h2><span class="line"></span></div>
-      <div class="term" style="height:calc(100% - 34mm)">
-        <div class="term-bar"><i></i><i></i><i></i><span>SelfHealLoop · bazel build //harness:json_fuzzer</span></div>
-<pre><span class="k">최종 결과</span>  <span class="g">success</span>  (LLM 수정 라운드 1회)
-
-<span class="k">라운드 0</span> <span class="r">빌드 실패</span>
-  진단 = <span class="y">undefined_symbol / resolve_symbol</span>
-  <span class="r">ld.lld: error: undefined symbol:
-  score::json::ParseStrict(...)</span>
-
-<span class="k">라운드 1</span> <span class="g">빌드 성공</span>
-  산출물 = <span class="b">bazel-bin/harness/json_fuzzer</span></pre>
+  <!-- 1열 -->
+  <div class="col">
+    <section class="sec">
+      <h2>프로젝트 개요</h2>
+      <div class="body">
+        <h3>1. 개발 배경</h3>
+        <ul>
+          <li><b>오픈소스 공급망 보안 위험</b>: 대부분의 SW가 C/C++ 오픈소스 라이브러리를 재사용하므로, 라이브러리 하나의 결함이 의존하는 SW 전체로 확산</li>
+          <li><b>메모리 안전성 결함</b>: 길이, 할당 크기, 객체 수명 같은 경계 조건은 정상 기능 시험으로 놓치기 쉬움</li>
+          <li><b>퍼징의 높은 진입장벽</b>: OSS-Fuzz는 1,000개 프로젝트에서 10,000건 이상의 취약점을 발견했지만, 수작업 하네스와 복잡한 빌드 설정으로 일반 조직의 도입이 어려움</li>
+          <li><b>자동차와 임베디드의 시급성</b>: SDV의 진단, 로깅, 통신이 C/C++ 오픈소스에 의존하며 UN R155(CSMS) 규제 준수가 의무화됨</li>
+        </ul>
+        <table>
+          <tr><th>주요 사례</th><th>내용</th><th>KISA 보안약점</th></tr>
+          <tr><td>Heartbleed (2014)</td><td>메모리 경계 검증 누락 → 대규모 정보 유출</td><td>메모리 버퍼 오버플로우</td></tr>
+          <tr><td>BadAlloc (2021)</td><td>할당 크기 오류 → 임베디드 SDK 등 CVE 25개 이상</td><td>정수형 오버플로우</td></tr>
+          <tr><td>Redis CVE-2025-49844</td><td>조작된 Lua 스크립트의 use-after-free → 원격 코드 실행</td><td>해제된 자원 사용</td></tr>
+        </table>
+        <h3>2. 기존 방식의 한계</h3>
+        <ul>
+          <li><b>하네스와 빌드 수작업</b>: 프로젝트당 수 시간의 수작업과 고도의 전문지식 필요</li>
+          <li><b>C++와 Bazel 구조 복원 실패</b>: score/json 기준 106개 파일이 있어도 API 0개 추출</li>
+          <li><b>환경 의존 오류</b>: 하드웨어와 외부 함수 부재로 링크 실패와 가짜 크래시 발생</li>
+        </ul>
+        <h3>3. LogosFuzz 개발 목표</h3>
+        <div class="goal">“대상 프로필 1개 설정, 명령어 한 줄로<br>지식 추출부터 크래시 판별까지 자동 수행”</div>
+        <div class="cmd"><i>$</i> logosfuzz run --profile targets/libsndfile.json<br>&nbsp;&nbsp;--budget 600 -o out/libsndfile</div>
+        <ul>
+          <li>소스, 주석, 빌드 정보에서 API 제약을 추출해 지식베이스 구축</li>
+          <li>연관 API를 상태 기반 로직 그룹으로 묶어 하네스 생성</li>
+          <li>컴파일/링크 오류 분류 기반 자가치유, 누락된 HAL 함수 자동 Mock 주입</li>
+          <li>Docker 격리 퍼징, ASan/UBSan 메모리 오류 탐지</li>
+          <li>규칙 기반 판별과 사람 승인을 거쳐 오탐을 지식베이스에 역피드백</li>
+        </ul>
       </div>
-    </div>
-    <div>
-      <div class="sec-title"><span class="no">04</span><h2>검증 현황</h2><span class="line"></span></div>
-      <div class="stats" style="height:calc(100% - 34mm)">
-        <div class="stat" style="--c:var(--green)"><div class="l">tests passed</div><div class="v">395</div><div class="d">EC2 회귀 검증 (skip 4)</div></div>
-        <div class="stat" style="--c:var(--blue)"><div class="l">S-CORE apis</div><div class="v">3,080</div><div class="d">→ 682 Logic Group</div></div>
-        <div class="stat" style="--c:var(--yellow)"><div class="l">DLT apis → groups</div><div class="v">230<small>→21</small></div><div class="d">제약조건 커버리지 87.4%</div></div>
-        <div class="stat" style="--c:var(--purple)"><div class="l">libFuzzer exec/s</div><div class="v">518<small>K</small></div><div class="d">DLT 300초 실행, 크래시 0</div></div>
-      </div>
-    </div>
-  </section>
+    </section>
 
-  <footer class="foot">
-    <div class="repo">github.com/sesezz/LogosFuzz</div>
-    <div class="note"><b>대상</b> Eclipse S-CORE baselibs · DLT daemon · Automotive UDS<br><b>스택</b> Python · libclang · Bazel · libFuzzer · Docker</div>
-  </footer>
+    <section class="sec grow">
+      <h2>기존 도구 비교</h2>
+      <div class="body">
+        <table class="cmp">
+          <tr><th>비교 항목</th><th>Locus</th><th>Prome<br>Fuzz</th><th>OSS-<br>Fuzz-Gen</th><th>lib<br>Erator</th><th>Logos<br>Fuzz</th></tr>
+          <tr><td>LLM 기반 하네스 생성</td><td>△</td><td>○</td><td>○</td><td>×</td><td>○</td></tr>
+          <tr><td>API 문서 활용(RAG)</td><td>×</td><td>○</td><td>△</td><td>×</td><td>○</td></tr>
+          <tr><td>API 호출 순서 추론</td><td>△</td><td>△</td><td>×</td><td>○</td><td>○</td></tr>
+          <tr><td>컴파일/링크 오류 자동 수정</td><td>×</td><td>×</td><td>○</td><td>×</td><td>○</td></tr>
+          <tr><td>Coverage 기반 최적화</td><td>○</td><td>○</td><td>○</td><td>△</td><td>○</td></tr>
+          <tr><td>크래시 정탐/오탐 자동 분류</td><td>×</td><td>○</td><td>×</td><td>×</td><td>○</td></tr>
+          <tr><td>Bazel, 임베디드 C/C++ 대응</td><td>×</td><td>×</td><td>×</td><td>×</td><td>○</td></tr>
+        </table>
+        <div class="legend">○ 지원 &nbsp; △ 일부 지원 &nbsp; × 미지원</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 2열 -->
+  <div class="col">
+    <section class="sec">
+      <h2>시스템 설계</h2>
+      <div class="body">
+        <h3>1. 시스템 구성</h3>
+        <table>
+          <tr><td class="k">입력</td><td>오픈소스 소스코드, 대상 프로필(targets/*.json), 빌드 어댑터(Bazel, CMake, prebuilt)</td></tr>
+          <tr><td class="k">AI와<br>지식 계층</td><td>LLM(GPT-4o) 하네스 생성과 퍼징 오류 자가치유, 지식베이스 + BM25 RAG, 규칙 기반 크래시 판별 + 예외 케이스 LLM 보완</td></tr>
+          <tr><td class="k">코어 엔진</td><td>정적 분석(Bazel query, compile_commands, libclang AST), 동적 퍼징(libFuzzer), 오류 탐지와 계측(ASan, UBSan, llvm-cov)</td></tr>
+          <tr><td class="k">보안 경계</td><td>Docker 격리 실행(네트워크 차단, 권한 최소화, 자원과 파일 보호), HITL 승인 게이트(지식베이스 변경과 취약점 공개는 사람 승인 후 반영)</td></tr>
+        </table>
+        <h3>2. 5단계 파이프라인</h3>
+        <div class="flow">
+          <div style="--c:#3a4cc8"><div class="t"><span>EXT</span>지식 추출</div><div class="d">Bazel query, AST와 주석에서 API 제약 KB 생성</div></div>
+          <div style="--c:#1f9d55"><div class="t"><span>SCH</span>스케줄링</div><div class="d">연관 API 로직 그룹화, 시너지 점수와 시간 배분</div></div>
+          <div style="--c:#d9890b"><div class="t"><span>GEN</span>하네스 생성</div><div class="d">LLM 하네스 생성, 오류 분류 자가치유</div></div>
+          <div style="--c:#7c5cff"><div class="t"><span>EXE</span>퍼징 실행</div><div class="d">Docker 격리 libFuzzer, ASan/UBSan, 커버리지</div></div>
+          <div style="--c:#e5484d"><div class="t"><span>ANA</span>크래시 분석</div><div class="d">중복 제거, 규칙 판별, 리포트, KB 역피드백</div></div>
+        </div>
+        <div class="fb"><b>오탐 역피드백</b>: ANA 오탐 원인 분석 → 지식베이스 변경안(diff) → 사람 승인 → KB 반영 → 해당 그룹 하네스 재생성</div>
+        <h3>3. 핵심 기술</h3>
+        <table>
+          <tr><th style="width:27%">기술</th><th>설명</th></tr>
+          <tr><td class="n">다중 소스<br>지식 추출</td><td>AST, 주석, 분기문에서 NULL 검사, 버퍼-길이 쌍, 값 범위, 해제 책임을 추출해 신뢰도와 함께 저장하고 하네스 프롬프트에 주입</td></tr>
+          <tr><td class="n">빌드<br>자가치유</td><td>컴파일 오류와 3대 링커 오류(미정의 심볼, 중복 정의, 라이브러리 누락)를 분류해 LLM으로 수정하고, 미정의 HAL 함수는 weak 스텁 자동 생성</td></tr>
+          <tr><td class="n">크래시 판별과 역피드백</td><td>스택 서명 중복 제거와 함수별 에러 반환 규격 기반 규칙 판별, 신뢰도 0.8 미만은 사람 검토와 증거 주입 LLM 판별로 정확도 <b>10% → 85%</b> (dlt-daemon 크래시 20건 기준)</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec grow">
+      <h2>보안약점 예방 설계</h2>
+      <div class="body">
+        <h3>1. 설계 원칙: 외부 코드, LLM 생성 코드, 크래시 입력은 신뢰하지 않음</h3>
+        <table>
+          <tr><th style="width:27%">원칙</th><th>적용 내용</th></tr>
+          <tr><td class="n">신뢰 경계 분리</td><td>LLM 생성 코드와 퍼징 입력은 격리 컨테이너에서만 실행 (--network none, cap-drop ALL, 자원 상한, 읽기 전용 마운트)</td></tr>
+          <tr><td class="n">명령 문자열 미사용</td><td>외부 도구는 인자 리스트로만 호출 (shell=True, os.system 0건), LLM 출력은 eval/exec 없이 C 코드로만 컴파일</td></tr>
+          <tr><td class="n">사람 승인 게이트</td><td>KB 변경과 취약점 공개는 HITL 승인 필수, 락과 원자적 쓰기의 append-only 감사 로그</td></tr>
+          <tr><td class="n">비밀정보와 출력 보호</td><td>API 키는 환경변수로만 수신, HTML 리포트의 모든 문자열 esc() 처리</td></tr>
+        </table>
+        <h3>2. 참고 가이드라인과 적용</h3>
+        <table>
+          <tr><th style="width:36%">가이드라인</th><th>주요 적용 내용</th></tr>
+          <tr><td class="n">소프트웨어 개발보안 가이드<br>(행안부, KISA 2021)</td><td>구현단계 49개 항목 적용표 작성, 경로 조작(safe_join)과 명령어 삽입(argv 호출) 차단</td></tr>
+          <tr><td class="n">SW 보안약점 진단가이드<br>(행안부, KISA 2021)</td><td>Bandit, pip-audit, Gitleaks 점검, 보안 회귀 테스트 53개로 재검사</td></tr>
+          <tr><td class="n">Python 시큐어코딩 가이드<br>(과기정통부, KISA 2023)</td><td>eval/exec, pickle 미사용, 비밀 환경변수 차단, 오류 메시지 절대경로 제거</td></tr>
+          <tr><td class="n">AI 보안 안내서<br>(과기정통부, KISA 2025)</td><td>LLM 전송 전 비밀값 마스킹, 비신뢰 데이터 분리, KB 변경과 CVE 공개는 사람 승인</td></tr>
+          <tr><td class="n">SW 공급망 보안 강화 로드맵<br>(관계부처 합동 2026)</td><td>도입 전 오픈소스 보안 검증 자동화, 이미지 digest와 의존성 버전 고정</td></tr>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <!-- 3열 -->
+  <div class="col">
+    <section class="sec">
+      <h2>범용 대상 프로필</h2>
+      <div class="body">
+        대상마다 <b>JSON 프로필 하나</b>만 작성하면 빌드 방식이 달라도 같은 명령어로 실행
+        <div class="prof">
+          <div><div class="t">범용 C<br>libsndfile 1.2.2</div><div class="d">빌드: CMake<br>에러 규격: C 반환코드<br>API 8개 지정, 누락 0</div></div>
+          <div><div class="t">자동차<br>Eclipse S-CORE</div><div class="d">빌드: Bazel<br>에러 규격: score::Result C++ 클래스와 템플릿 API 추출</div></div>
+          <div><div class="t">임베디드<br>HAL 샘플</div><div class="d">빌드: prebuilt<br>미정의 HAL 함수 weak 스텁 자동 생성, 하드웨어 없이 퍼징</div></div>
+        </div>
+        회귀 테스트 자동화: 범용화 후 빌드 요약과 BUILD.bazel 결과물을 범용화 전 기준 결과와 pytest로 교차 검증
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>성과 및 검증</h2>
+      <div class="body">
+        <h3>1. 주요 성과 (단위/통합 테스트 1,182개 통과)</h3>
+        <div class="nums">
+          <div style="--c:var(--blue)"><div class="v">3,080</div><div class="l">S-CORE C++ API 추출<br>(기존 0개, 그룹 682개)</div></div>
+          <div style="--c:var(--green)"><div class="v">216</div><div class="l">S-CORE 커버리지<br>(기존 하네스 181, 300초)</div></div>
+          <div style="--c:var(--purple)"><div class="v">86.4%</div><div class="l">임베디드 라인 커버리지<br>(HAL 스텁 후 힙 OOB 탐지)</div></div>
+        </div>
+        <h3>2. 대상별 검증 결과</h3>
+        <table>
+          <tr><th>대상</th><th>빌드</th><th>검증 결과</th></tr>
+          <tr><td class="n">Eclipse S-CORE<br>(자동차)</td><td>Bazel</td><td>API 3,080개, 그룹 682개, 300초 커버리지 216 (기존 181)</td></tr>
+          <tr><td class="n">COVESA DLT<br>(자동차)</td><td>compile_<br>commands</td><td>API 914개, 제약조건 보유 80.6%, 초당 373,855회 실행</td></tr>
+          <tr><td class="n">libsndfile 1.2.2<br>(범용 C)</td><td>CMake</td><td>전 단계 연결 검증, UBSan 정수 오버플로우 고유 6건 (검토 대기)</td></tr>
+          <tr><td class="n">임베디드<br>HAL 샘플</td><td>prebuilt</td><td>HAL 함수 2개 자동 스텁, 힙 OOB 탐지, 라인 86.4%, 브랜치 70.0%</td></tr>
+        </table>
+        <div class="note">※ libsndfile·임베디드는 수동 하네스로 전 단계를 검증, S-CORE·DLT는 LLM 생성 하네스 실측</div>
+        <h3>3. 자체 보안 점검 (Bandit, pip-audit, Gitleaks)</h3>
+        <div class="nums">
+          <div style="--c:var(--blue)"><div class="v">47→29건</div><div class="l">Bandit 검출<br>(High, Medium 0건)</div></div>
+          <div style="--c:var(--green)"><div class="v">100%</div><div class="l">조치 대상 18건<br>모두 조치</div></div>
+          <div style="--c:var(--purple)"><div class="v">0건</div><div class="l">의존성 취약점,<br>비밀정보 노출</div></div>
+        </div>
+        <div style="font-size:7.3mm;line-height:1.45">조치 내역: SHA1, MD5 → SHA-256(4건), 표준 XML 파서 → defusedxml(2건), except-pass → 로그 기록(10건), assert와 /tmp 고정 경로 제거(2건). 남은 29건은 셸 없이 인자 리스트로 호출하는 subprocess 안내성 경고</div>
+      </div>
+    </section>
+
+    <section class="sec grow">
+      <h2>결론</h2>
+      <div class="body">
+        <h3>1. 기대효과</h3>
+        <ul>
+          <li><b>하네스 작성 자동화</b>: 프로필 1회 작성으로 하네스 수작업을 대체하고 반복 빌드 오류 수정 시간 단축</li>
+          <li><b>탐지 범위 확대</b>: 자동 스텁으로 하드웨어 없이 임베디드 코드를 탐색하고, 에러계약 판별로 실제 취약점 후보에 집중</li>
+          <li><b>오픈소스 공급망 검증</b>: 도입 전 보안 검증 자동화, UN R155 테스트 증거 축적</li>
+        </ul>
+        <h3>2. 향후 계획</h3>
+        <ul>
+          <li><b>기술 고도화</b>: ASan 크래시 위치 복원 후처리, 생성 함수 누락 로직 그룹 보완</li>
+          <li><b>검증 자동화</b>: GitHub Actions 연동 CI 보안 검증, 생성 하네스 기반 실측 대상 확대</li>
+          <li><b>적용 범위 확대</b>: 바이너리 대상 퍼징, 다양한 CPU 아키텍처 지원</li>
+        </ul>
+      </div>
+    </section>
+  </div>
+
+</main>
+<footer class="foot">GitHub <b>github.com/sesezz/LogosFuzz</b> &nbsp;·&nbsp; 서울여자대학교 팀 Fuzzing Candy</footer>
 </div>
 </body>
 </html>
