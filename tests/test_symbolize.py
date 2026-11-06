@@ -5,6 +5,7 @@
 """
 
 import io
+from pathlib import Path
 
 from logosfuzz.config import FuzzConfig, LogicGroup
 from logosfuzz.execute.coverage import CmdResult
@@ -120,8 +121,12 @@ def test_unknown_location_keeps_the_line_unchanged(tmp_path):
     assert report.resolved == 0 and report.unresolved == 3
 
 
-def test_missing_module_is_skipped(tmp_path):
+def test_missing_module_is_skipped(tmp_path, monkeypatch):
     """컨테이너의 libc 처럼 호스트에 없는 모듈은 조용히 건너뛴다."""
+    # Linux 호스트에 실제 libc 가 있어도 '호스트에 없음' 상태로 고정
+    exists = Path.exists
+    monkeypatch.setattr(Path, "exists",
+                        lambda self: self.name != "libc.so.6" and exists(self))
     calls = []
     CrashSymbolizer(_cfg(tmp_path), runner=_runner(OFFSETS, calls)).symbolize(_findings())
 
