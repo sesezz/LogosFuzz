@@ -34,7 +34,7 @@ from logosfuzz.extract.ast_analyzer import analyze_file  # noqa: E402
 try:
     from clang import cindex
     HAVE_CLANG = True
-except Exception:  # pragma: no cover - libclang 없으면 진단 수집 불가
+except ImportError:  # pragma: no cover - clang 바인딩 미설치 시 진단 수집 불가
     HAVE_CLANG = False
 
 SOURCE_SUFFIXES = (".c", ".cc", ".cpp", ".h", ".hpp")
@@ -112,7 +112,8 @@ def collect_tu(path: Path, args):
     try:
         index = cindex.Index.create()
         tu = index.parse(str(path), args=list(args))
-    except Exception as exc:
+    except (cindex.LibclangError, cindex.TranslationUnitLoadError) as exc:
+        # libclang 로드 실패 또는 TU 로드 실패: 실패 원인을 결과에 기록
         return {
             "parse_exception": f"{type(exc).__name__}: {exc}",
             "diagnostics": [],
@@ -127,7 +128,7 @@ def collect_tu(path: Path, args):
         try:
             if diag.location.file:
                 location = f"{diag.location.file}:{diag.location.line}"
-        except Exception:
+        except (AttributeError, ValueError):  # 위치 정보가 없거나 해석 불가한 진단
             location = ""
         diagnostics.append({
             "severity": "fatal" if diag.severity >= cindex.Diagnostic.Fatal else "error",
@@ -144,7 +145,7 @@ def collect_tu(path: Path, args):
                 continue
             if os.path.normcase(os.path.abspath(cursor.location.file.name)) != target:
                 continue
-        except Exception:
+        except (AttributeError, ValueError):  # 파일 정보가 없거나 경로 해석 불가한 커서
             continue
         own_kinds[cursor.kind.name] += 1
 
