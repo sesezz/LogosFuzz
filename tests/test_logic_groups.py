@@ -6,6 +6,7 @@ from logosfuzz.common.models import SIGNAL_UDS_P2, SIGNAL_WATCHDOG, LogicGroup
 from logosfuzz.knowledge.knowledge_base import KnowledgeBase
 from logosfuzz.schedule.logic_groups import (
     build_groups,
+    constructor_types_of,
     extract_groups,
     extract_realtime_signals,
     generic_types,
@@ -521,3 +522,65 @@ def test_max_group_blocks_call_link_merging(two_machines_kb):
     groups = extract_groups(two_machines_kb, max_group=1)
 
     assert _group_of(groups, "shared_util").api_names == ["shared_util"]
+
+
+# -- 생성 API 보완 (생성자 누락 그룹) ------------------------------------------
+
+# libsndfile 형태: 불투명 핸들을 반환하는 생성 API 가 다른 구조체를 매개변수로 받음
+SND_HEADER = """
+#include <stddef.h>
+typedef struct snd_private snd_t;
+typedef struct snd_info { int rate; int channels; } snd_info_t;
+
+snd_t *snd_open(const char *path, snd_info_t *info);
+snd_t *snd_open_mem(const void *buf, size_t len, snd_info_t *info);
+int snd_read(snd_t *s, short *out, int frames);
+void snd_close(snd_t *s);
+int snd_info_check(const snd_info_t *info);
+"""
+
+SND_IMPL = """
+#include "snd.h"
+struct snd_private { int fd; };
+snd_t *snd_open(const char *path, snd_info_t *info) { (void)path; (void)info; return NULL; }
+snd_t *snd_open_mem(const void *buf, size_t len, snd_info_t *info) { (void)buf; (void)len; (void)info; return NULL; }
+int snd_read(snd_t *s, short *out, int frames) { if (!s || !out) { return -1; } return frames; }
+void snd_close(snd_t *s) { (void)s; }
+int snd_info_check(const snd_info_t *info) { return info ? 0 : -1; }
+"""
+
+
+@pytest.fixture
+def snd_kb(tmp_path):
+    (tmp_path / "snd.h").write_text(SND_HEADER, encoding="utf-8")
+    (tmp_path / "snd.c").write_text(SND_IMPL, encoding="utf-8")
+    return KnowledgeBase.build(paths=[str(tmp_path)])
+
+
+def test_constructor_types_come_from_pointer_return(snd_kb):
+    by_name = {d["function"]: d for d in snd_kb.documents}
+
+    assert constructor_types_of(by_name["snd_open"], snd_kb) == ["snd_t"]
+    assert constructor_types_of(by_name["snd_read"], snd_kb) == []
+
+
+def test_state_group_gets_its_constructors(snd_kb):
+    groups = build_groups(snd_kb, with_priority=False)
+    handle_group = _group_of(groups, "snd_read")
+
+    assert "snd_t" in handle_group.state_types
+    assert {"snd_open", "snd_open_mem"} <= set(handle_group.api_names)
+
+
+def test_constructor_stays_in_its_original_group(snd_kb):
+    groups = build_groups(snd_kb, with_priority=False)
+    info_group = next(g for g in groups
+                      if "snd_info_check" in g.api_names)
+
+    assert "snd_open" in info_group.api_names
+
+
+def test_constructors_can_be_turned_off(snd_kb):
+    groups = build_groups(snd_kb, with_priority=False, with_constructors=False)
+
+    assert "snd_open" not in _group_of(groups, "snd_read").api_names

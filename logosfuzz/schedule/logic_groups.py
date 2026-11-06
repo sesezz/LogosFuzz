@@ -171,6 +171,23 @@ def state_types_of(document: dict, kb: KnowledgeBase) -> List[str]:
     return found
 
 
+def constructor_types_of(document: dict, kb: KnowledgeBase) -> List[str]:
+    """이 API 가 반환으로 만들어 내는 '상태 핸들' 타입 목록
+
+    포인터 반환 중 프로젝트가 정의한 구조체 타입만 인정 (``SNDFILE* sf_open(...)``)
+    """
+    return_type = document.get("return_type") or ""
+    if "*" not in return_type:
+        return []
+    found: List[str] = []
+    for name in _candidate_types(return_type):
+        if _SCALAR_TYPE_RE.match(name) or not kb.defines_struct_type(name):
+            continue
+        if name not in found:
+            found.append(name)
+    return found
+
+
 # ---------------------------------------------------------------------------
 # 그룹 추출
 # ---------------------------------------------------------------------------
@@ -455,6 +472,35 @@ def attach_realtime_signals(groups: Sequence[GroupInfo], kb: KnowledgeBase,
         )
 
 
+def attach_constructors(groups: Sequence[GroupInfo], kb: KnowledgeBase) -> None:
+    """상태 타입 그룹에 그 핸들을 반환하는 생성 API 추가
+
+    생성 API 가 매개변수 타입 기준으로 다른 그룹에 묶이면 이 그룹의 하네스는 핸들을
+    열 수단이 없어 입력 바이트로 포인터를 만드는 결함 발생
+    (libsndfile ``lg_SNDFILE`` 의 ``sf_open_virtual`` 누락). 원래 그룹 소속은 유지
+    """
+    by_id = {d["api_id"]: d for d in kb.documents}
+    makers: Dict[str, List[int]] = {}
+    for document in sorted(kb.documents, key=lambda d: d["api_id"]):
+        for type_name in constructor_types_of(document, kb):
+            makers.setdefault(type_name, []).append(document["api_id"])
+
+    for group in groups:
+        boundaries = {_build_unit_boundary(by_id[i]) for i in group.api_ids if i in by_id}
+        added = [
+            api_id
+            for type_name in group.state_types
+            for api_id in makers.get(type_name, [])
+            if api_id not in group.api_ids
+            and _build_unit_boundary(by_id[api_id]) in boundaries
+        ]
+        if not added:
+            continue
+        group.api_ids = sorted(set(group.api_ids) | set(added))
+        group.api_names = [by_id[i]["function"] for i in group.api_ids]
+        group.files = sorted(set(group.files) | {by_id[i]["file"] for i in added})
+
+
 def attach_priorities(groups: Sequence[GroupInfo], kb: KnowledgeBase) -> bool:
     """SCH-02-02 시너지 점수를 그룹 우선순위로 부착
 
@@ -481,9 +527,12 @@ def attach_priorities(groups: Sequence[GroupInfo], kb: KnowledgeBase) -> bool:
 def build_groups(kb: KnowledgeBase, link_calls: bool = True,
                  with_priority: bool = True,
                  max_group: int = MAX_CALL_LINK_GROUP,
-                 domain: str = "automotive") -> List[GroupInfo]:
-    """추출 + 실시간 신호 결합 + 우선순위까지 한 번에. ``domain`` 은 프로필의 domain."""
+                 domain: str = "automotive",
+                 with_constructors: bool = True) -> List[GroupInfo]:
+    """추출 + 생성 API 보완 + 실시간 신호 결합 + 우선순위까지 한 번에. ``domain`` 은 프로필의 domain."""
     groups = extract_groups(kb, link_calls=link_calls, max_group=max_group)
+    if with_constructors:
+        attach_constructors(groups, kb)
     attach_realtime_signals(groups, kb, domain=domain)
     if with_priority:
         attach_priorities(groups, kb)
