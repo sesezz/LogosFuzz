@@ -178,6 +178,19 @@ def test_repo_libsndfile_profile_contents():
         assert arg in profile.build.configure_args
 
 
+
+def test_repo_libsndfile_profile_seeds_are_real_audio_files():
+    from logosfuzz.execute.seeds import _seed_files, profile_seed_paths
+
+    profile = load_profile(REPO_ROOT / "targets" / "libsndfile.json", base_dir=REPO_ROOT)
+    files = _seed_files(profile_seed_paths(profile))
+
+    assert {f.suffix for f in files} == {".wav", ".aiff", ".aifc", ".au"}
+    assert len(files) == 6
+    assert all(f.stat().st_size <= 4096 for f in files)   # libFuzzer 기본 max_len 이내
+    magics = {f.read_bytes()[:4] for f in files}
+    assert magics <= {b"RIFF", b"FORM", b".snd"}
+
 def test_repo_automotive_profile_contents():
     profile = load_profile(REPO_ROOT / "targets" / "automotive.json", base_dir=REPO_ROOT)
     assert profile.domain == "automotive"

@@ -38,5 +38,6 @@
     "stub_undefined": false,
     "stub_allowlist": []
   },
-  "seeds": []
+  "_seeds": "WAV, AIFF, AU 정상 소리 파일 6개 (각 400바이트 이하, 실제 libsndfile 열기·읽기 확인)",
+  "seeds": ["../../targets/seeds/libsndfile"]
 }
