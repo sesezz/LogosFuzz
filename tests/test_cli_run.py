@@ -17,6 +17,7 @@ import pytest
 from logosfuzz import cli
 from logosfuzz.control.generic_run import GenericRun, RunOptions, split_budget
 from logosfuzz.execute.coverage import CmdResult
+from logosfuzz.execute.docker_runner import ProcResult
 from logosfuzz.generate.build.base import BuildResult
 
 REPO = Path(__file__).resolve().parents[1]
@@ -171,7 +172,24 @@ def _fake_cov_runner(argv):
         "regions": {"count": 50, "covered": 40}, "branches": {"count": 30, "covered": 20}}}]}))
 
 
-def _fake_run(tmp_path, *, fail_link=False, llm=None, **opts):
+class FakeSmoke:
+    """dry-run 실행기. ``results`` 를 순서대로 돌려준다 (소진 후 마지막 값 반복)"""
+
+    def __init__(self, *results):
+        self.results = list(results) or [ProcResult(0, False, stderr="#2 INITED cov: 120 ft: 130")]
+        self.calls = []
+
+    def __call__(self, argv, timeout, on_line):
+        self.calls.append(argv)
+        return self.results.pop(0) if len(self.results) > 1 else self.results[0]
+
+
+CRASH = ProcResult(1, False, stderr="#1 INITED cov: 12\n==1==ERROR: AddressSanitizer: SEGV")
+LOW_COV = ProcResult(0, False, stderr="#2 INITED cov: 8 ft: 9\nDone 200 runs")
+GOOD = ProcResult(0, False, stderr="#2 INITED cov: 450 ft: 900\nDone 200 runs")
+
+
+def _fake_run(tmp_path, *, fail_link=False, llm=None, smoke_exec=None, **opts):
     profile = _embedded_profile(tmp_path)
     out = tmp_path / "out"
     adapters = []
@@ -185,7 +203,7 @@ def _fake_run(tmp_path, *, fail_link=False, llm=None, **opts):
         RunOptions(profile=profile, budget=opts.pop("budget", 120), output=out,
                    use_docker=False, **opts),
         llm=llm or HarnessLLM(), adapter_factory=factory, session_factory=FakeSession,
-        coverage_runner=_fake_cov_runner)
+        coverage_runner=_fake_cov_runner, smoke_executor=smoke_exec or FakeSmoke())
     return run, run.run(), out, adapters
 
 
@@ -194,7 +212,7 @@ def test_stages_run_in_order_and_summary_is_written(tmp_path):
     assert rc == 0
     summary = json.loads((out / "run_summary.json").read_text())
     assert [s["stage"] for s in summary["stages"]] == \
-        ["BUILD", "EXT", "SCH", "GEN", "HEAL", "COVBIN", "EXE", "COV", "ANA"]
+        ["BUILD", "EXT", "SCH", "GEN", "HEAL", "SMOKE", "COVBIN", "EXE", "COV", "ANA"]
     assert all(s["ok"] and s["automatic"] for s in summary["stages"])
     assert summary["totals"]["harness_built"] == summary["totals"]["groups"] >= 1
     for name in ("kb.json", "fuzz_summary.json", "analysis.json", "validation-summary.json"):
@@ -244,6 +262,84 @@ def test_no_coverage_skips_coverage_stages(tmp_path):
     stages = [s["stage"] for s in json.loads((out / "run_summary.json").read_text())["stages"]]
     assert "COVBIN" not in stages and "COV" not in stages
     assert not any(a.coverage for a in adapters)
+
+
+def test_smoke_runs_each_harness_with_libfuzzer_runs_flag(tmp_path):
+    smoke = FakeSmoke()
+    run, rc, out, _ = _fake_run(tmp_path, top=1, smoke_runs=50)
+    assert rc == 0
+    summary = json.loads((out / "run_summary.json").read_text())
+    [group] = summary["groups"]
+    assert group["smoke"]["passed"] and group["smoke"]["used"]
+    assert group["smoke"]["attempts"][0]["coverage_edges"] == 120
+    assert summary["totals"]["smoke_passed"] == 1
+
+
+def test_smoke_argv_uses_runs_and_libfuzzer_options(tmp_path):
+    smoke = FakeSmoke()
+    _fake_run(tmp_path, top=1, smoke_exec=smoke, max_len=1024)
+    argv = " ".join(smoke.calls[0])
+    assert "-runs=200" in argv and "-max_len=1024" in argv
+    assert "-timeout=1" in argv and "-rss_limit_mb=2048" in argv
+    assert "/smoke/" in argv                     # 본 퍼징 crashes/ 와 분리
+
+
+def test_immediate_crash_is_regenerated_with_reason(tmp_path):
+    llm = HarnessLLM()
+    smoke = FakeSmoke(CRASH, GOOD)
+    run, rc, out, _ = _fake_run(tmp_path, top=1, llm=llm, smoke_exec=smoke)
+    assert rc == 0
+    [group] = json.loads((out / "run_summary.json").read_text())["groups"]
+    assert group["smoke"]["regenerated"] == 1 and group["smoke"]["passed"]
+    regen = [p for p in llm.prompts if "dry-run 실패" in p]
+    assert regen and "비정상 종료" in regen[0] and "AddressSanitizer: SEGV" in regen[0]
+    assert "핸들은" in regen[0] or "생성 API" in regen[0]
+
+
+def test_low_coverage_harness_is_regenerated(tmp_path):
+    smoke = FakeSmoke(LOW_COV, GOOD)
+    run, rc, out, _ = _fake_run(tmp_path, top=1, smoke_exec=smoke)
+    [group] = json.loads((out / "run_summary.json").read_text())["groups"]
+    assert "타겟 API 미도달" in group["smoke"]["attempts"][0]["reason"]
+    assert group["smoke"]["passed"]
+
+
+def test_crashing_harness_is_dropped_after_retries(tmp_path):
+    run, rc, out, _ = _fake_run(tmp_path, top=1, smoke_exec=FakeSmoke(CRASH), smoke_retries=1)
+    assert rc == 1
+    summary = json.loads((out / "run_summary.json").read_text())
+    assert summary["stages"][-1]["stage"] == "SMOKE" and not summary["stages"][-1]["ok"]
+    assert summary["groups"][0]["smoke"]["regenerated"] == 1
+    assert summary["totals"]["smoke_immediate_crash"] == 1
+    assert not (out / "fuzz_summary.json").exists()
+
+
+def test_low_coverage_only_harness_still_fuzzes_as_fallback(tmp_path):
+    run, rc, out, _ = _fake_run(tmp_path, top=1, smoke_exec=FakeSmoke(LOW_COV), smoke_retries=0)
+    assert rc == 0
+    [group] = json.loads((out / "run_summary.json").read_text())["groups"]
+    assert not group["smoke"]["passed"] and group["smoke"]["used"]
+    assert len(FakeSession.seen["groups"]) == 1
+
+
+def test_no_smoke_skips_stage(tmp_path):
+    smoke = FakeSmoke()
+    run, rc, out, _ = _fake_run(tmp_path, smoke_exec=smoke, smoke=False)
+    stages = [s["stage"] for s in json.loads((out / "run_summary.json").read_text())["stages"]]
+    assert "SMOKE" not in stages and not smoke.calls
+
+
+def test_run_parser_accepts_smoke_and_libfuzzer_flags(tmp_path):
+    from logosfuzz.control.generic_run import options_from_args
+
+    parser = cli._build_parser()
+    args = parser.parse_args(["run", "--profile", "p.json", "--budget", "60", "-o", str(tmp_path),
+                              "--no-smoke", "--smoke-retries", "1", "--smoke-min-edges", "80",
+                              "--max-len", "512", "--rss-limit-mb", "1024",
+                              "--dict-dir", str(tmp_path / "d")])
+    opts = options_from_args(args)
+    assert (opts.smoke, opts.smoke_retries, opts.smoke_min_edges) == (False, 1, 80)
+    assert (opts.max_len, opts.rss_limit_mb, opts.dict_dir) == (512, 1024, tmp_path / "d")
 
 
 # --------------------------------------------------------------------------- #

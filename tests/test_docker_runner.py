@@ -287,3 +287,99 @@ def test_run_group_finds_harness_outside_harness_dir(tmp_path):
     runner = DockerIsolationRunner(cfg, executor=fake_executor)
     result = runner.run_group(grp)   # HarnessNotFoundError 발생 시 실패
     assert result.exit_code == 0
+
+
+# --------------------------------------------------------------------------- #
+# libFuzzer 실행 옵션 / 딕셔너리 / 스모크 테스트
+# --------------------------------------------------------------------------- #
+def test_libfuzzer_options_are_passed_in_both_paths(tmp_path):
+    cfg = _config(tmp_path, max_len=4096, rss_limit_mb=1024, malloc_limit_mb=512,
+                  per_input_timeout_ms=2500)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    for argv in (runner.build_run_argv(grp), runner._local_argv(grp)):
+        joined = " ".join(argv)
+        assert "-timeout=3" in joined            # 2500ms → 올림 3초
+        assert "-rss_limit_mb=1024" in joined
+        assert "-malloc_limit_mb=512" in joined
+        assert "-max_len=4096" in joined
+
+
+def test_default_input_timeout_follows_timeout_manager(tmp_path):
+    from logosfuzz.execute.timeout_manager import DEFAULT_PER_INPUT_MS
+
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg)
+    assert runner.per_input_timeout_sec() == max(1, -(-DEFAULT_PER_INPUT_MS // 1000))
+    joined = " ".join(runner._local_argv(_make_harness(cfg)))
+    assert "-max_len=" not in joined             # 0 이면 생략
+
+
+def test_zero_memory_limits_are_omitted(tmp_path):
+    cfg = _config(tmp_path, rss_limit_mb=0, malloc_limit_mb=0)
+    joined = " ".join(DockerIsolationRunner(cfg)._local_argv(_make_harness(cfg)))
+    assert "rss_limit_mb" not in joined and "malloc_limit_mb" not in joined
+
+
+def test_group_dict_is_added_and_mounted(tmp_path):
+    dict_dir = tmp_path / "dict"
+    dict_dir.mkdir()
+    (dict_dir / "grp1.dict").write_text('kw="RIFF"\n')
+    cfg = _config(tmp_path, dict_dir=dict_dir)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    local = " ".join(runner._local_argv(grp))
+    assert f"-dict={(dict_dir / 'grp1.dict').resolve()}" in local
+    docker = runner.build_run_argv(grp)
+    assert f"{(dict_dir / 'grp1.dict').resolve()}:/dict/fuzz.dict:ro" in docker
+    assert "-dict=/dict/fuzz.dict" in docker[-1]
+
+
+def test_dict_next_to_binary_and_explicit_path(tmp_path):
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    assert runner.resolve_dict(grp) is None
+    assert "-dict=" not in " ".join(runner._local_argv(grp))
+    side = cfg.harness_dir / "grp1.dict"
+    side.write_text('a="x"\n')
+    assert runner.resolve_dict(grp) == side.resolve()
+    explicit = tmp_path / "custom.dict"
+    explicit.write_text('b="y"\n')
+    grp2 = LogicGroup(name="grp1", harness_path=grp.harness_path, dict_path=explicit)
+    assert runner.resolve_dict(grp2) == explicit.resolve()
+
+
+def test_run_smoke_uses_runs_and_separate_artifacts(tmp_path):
+    seen = {}
+
+    def executor(argv, timeout, on_line):
+        seen["argv"], seen["timeout"] = argv, timeout
+        return ProcResult(0, False, stdout="", stderr="#2 INITED cov: 40\nDone 50 runs")
+
+    cfg = _config(tmp_path, use_docker=False)
+    runner = DockerIsolationRunner(cfg, executor=executor)
+    grp = _make_harness(cfg)
+    result = runner.run_smoke(grp, runs=50, timeout_sec=20)
+    joined = " ".join(seen["argv"])
+    assert result.exit_code == 0
+    assert "-runs=50" in joined and "-max_total_time=20" in joined
+    assert f"-artifact_prefix={cfg.output_dir / 'smoke' / 'grp1'}/" in joined
+    assert cfg.timeout_sec == 60                 # 본 퍼징 설정 복원
+    assert (cfg.logs_dir / "grp1" / "smoke.stderr.log").read_text().endswith("Done 50 runs")
+
+
+def test_run_smoke_in_docker_keeps_isolation(tmp_path):
+    seen = {}
+
+    def executor(argv, timeout, on_line):
+        seen["argv"] = argv
+        return ProcResult(0, False)
+
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg, executor=executor)
+    runner.run_smoke(_make_harness(cfg), runs=10, timeout_sec=5)
+    argv = seen["argv"]
+    assert "logosfuzz-grp1-smoke" in argv
+    assert "--network" in argv and "--cap-drop" in argv
+    assert "-runs=10" in argv[-1] and "/out/smoke/grp1/" in argv[-1]

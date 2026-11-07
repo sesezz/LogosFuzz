@@ -11,6 +11,8 @@
     SCH     build_groups → 시너지 랭킹 → allocate_resources(budget)
     GEN     generate_harness (LLM)           gen/<group>.prompt.txt, gen/<group>.draft.c
     HEAL    heal_loop_for(profile) 로 링크까지 빌드·자가치유·스텁   build/harness, build/bin
+    SMOKE   validation.run_smoke_test dry-run (즉시 크래시·저커버리지면 사유 넣어 재생성)
+                                                          smoke/<group>/, logs/<group>/smoke.*.log
     COVBIN  같은 하네스를 커버리지 계측으로 다시 빌드              build/bin-cov
     EXE     FuzzSession (SCH 배분 시간, 시드 → corpus/<group>)   fuzz_summary.json, crashes/
     COV     collect_corpus_coverage (최종 코퍼스 재생)          coverage/<group>.summary.json
@@ -38,6 +40,22 @@ MIN_GROUP_SEC = 30
 
 DEFAULT_MODEL = "gpt-4o-mini"
 
+#: 스모크 테스트 기본값 (dry-run 실행 횟수, 시간 상한(초), 최소 edge 커버리지, 재생성 횟수)
+SMOKE_RUNS = 200
+SMOKE_TIMEOUT_SEC = 30
+SMOKE_MIN_EDGES = 30
+SMOKE_RETRIES = 2
+
+#: 재생성 프롬프트에 넣을 dry-run 로그 최대 길이(자)
+_SMOKE_LOG_CHARS = 4000
+
+_SMOKE_RULES = """\
+- 퍼징 입력 바이트로 포인터·함수 포인터·핸들 값을 채우지 않기 (memcpy 로 구조체 포인터 채우기 금지)
+- 상태 핸들은 대상 라이브러리의 생성 API(open/create 계열)로 열고, 열기 실패 시 바로 return 0
+- 파일 형식 라이브러리는 퍼징 입력을 메모리 버퍼로 감싼 가상 I/O(길이·seek·read·tell 콜백)로 열기
+- 콜백 구조체는 모든 필드를 실제 함수로 채우기 (0 으로 비워 두지 않기)
+- 퍼징 입력(data, size)이 대상 API 의 실제 처리 경로까지 전달되게 하기"""
+
 
 @dataclass
 class RunOptions:
@@ -51,6 +69,18 @@ class RunOptions:
     image: Optional[str] = None
     no_build: bool = False
     coverage: bool = True
+    # 스모크 테스트 (GEN-03-04 dry-run)
+    smoke: bool = True
+    smoke_runs: int = SMOKE_RUNS
+    smoke_timeout: int = SMOKE_TIMEOUT_SEC
+    smoke_min_edges: int = SMOKE_MIN_EDGES
+    smoke_retries: int = SMOKE_RETRIES
+    # libFuzzer 실행 옵션 (0/None 이면 FuzzConfig 기본값)
+    input_timeout_ms: Optional[int] = None
+    rss_limit_mb: Optional[int] = None
+    malloc_limit_mb: Optional[int] = None
+    max_len: int = 0
+    dict_dir: Optional[Path] = None
 
 
 @dataclass
@@ -94,6 +124,13 @@ def split_budget(schedule: Sequence[Any], budget: int, *, floor: int = MIN_GROUP
     return out
 
 
+def _smoke_test_config(opts: "RunOptions"):
+    """RunOptions → validation.SmokeTestConfig"""
+    from logosfuzz.generate.validation import SmokeTestConfig
+
+    return SmokeTestConfig(runs=opts.smoke_runs, timeout_sec=float(opts.smoke_timeout))
+
+
 # --------------------------------------------------------------------------- #
 # 실행기
 # --------------------------------------------------------------------------- #
@@ -108,6 +145,7 @@ class GenericRun:
         adapter_factory: Optional[Callable[..., Any]] = None,
         session_factory: Optional[Callable[[Any], Any]] = None,
         coverage_runner=None,
+        smoke_executor=None,
         stream=None,
     ) -> None:
         self.opts = opts
@@ -117,6 +155,9 @@ class GenericRun:
         self._adapter_factory = adapter_factory
         self._session_factory = session_factory
         self._coverage_runner = coverage_runner
+        self._smoke_executor = smoke_executor
+        self._heal_loop = None
+        self._prompts: Dict[str, str] = {}
         self.stages: List[Stage] = []
         self.profile = None
         self.kb = None
@@ -281,6 +322,7 @@ class GenericRun:
                 draft = HarnessDraft(logic_group=group_slug(d.group_name), source=d.code,
                                      project=self.profile.name, target_apis=names,
                                      language=d.language)
+                self._prompts[draft.logic_group] = d.prompt_used
                 self._log(f"  ▶ {d.group_name} (최대 {self.opts.max_round} 라운드)")
                 report = loop.run(draft)
                 compiled = report.last_compile
@@ -307,7 +349,151 @@ class GenericRun:
                              stubbed=sorted({s for e in self.groups for s in e["stubbed_symbols"]}))
             if not built:
                 raise StageFailed("빌드에 성공한 하네스가 없다 (gen/ 의 초안과 run_summary 의 outcome 확인)")
+            self._heal_loop = loop
             return built, loop.compiler
+
+    def fuzz_config(self, n_groups: int):
+        """SMOKE·EXE 공통 FuzzConfig (격리 이미지, libFuzzer 옵션)"""
+        from logosfuzz.cli import default_exec_dockerfile, default_exec_image
+        from logosfuzz.config import CoverageMode, Engine, FuzzConfig
+
+        system = self.profile.build.system
+        extra: Dict[str, Any] = {}
+        if self.opts.input_timeout_ms:
+            extra["per_input_timeout_ms"] = self.opts.input_timeout_ms
+        if self.opts.rss_limit_mb is not None:
+            extra["rss_limit_mb"] = self.opts.rss_limit_mb
+        if self.opts.malloc_limit_mb is not None:
+            extra["malloc_limit_mb"] = self.opts.malloc_limit_mb
+        return FuzzConfig(
+            engine=Engine.LIBFUZZER,
+            timeout_sec=max(1, self.opts.budget // max(1, n_groups)),
+            use_docker=self.opts.use_docker,
+            harness_dir=self.out / "build" / "bin",
+            output_dir=self.out,
+            image=self.opts.image or default_exec_image(system),
+            dockerfile=default_exec_dockerfile(system),
+            coverage=CoverageMode.NONE,   # 커버리지는 종료 후 최종 코퍼스 재생으로 측정
+            max_len=max(0, self.opts.max_len),
+            dict_dir=Path(self.opts.dict_dir) if self.opts.dict_dir else self.out / "dict",
+            **extra,
+        )
+
+    def _smoke_once(self, runner, entry, seeds):
+        """하네스 1개 dry-run. validation.run_smoke_test 판정 + check_coverage"""
+        from logosfuzz.config import LogicGroup
+        from logosfuzz.execute.seeds import seed_group_corpora
+        from logosfuzz.generate.contracts import HarnessArtifact
+        from logosfuzz.generate.validation import RunResult, check_coverage, run_smoke_test
+
+        [group] = seed_group_corpora(
+            [LogicGroup(name=entry["slug"], harness_path=Path(entry["binary"]))],
+            seeds, self.out / "smoke" / "corpus")
+
+        def via_isolation(_argv, timeout):  # 본 퍼징과 같은 격리(Docker/호스트)로 실행
+            proc = runner.run_smoke(group, self.opts.smoke_runs, int(timeout))
+            return RunResult(exit_code=proc.exit_code, timed_out=proc.timed_out,
+                             log=(proc.stdout or "") + "\n" + (proc.stderr or ""))
+
+        smoke = run_smoke_test(
+            HarnessArtifact(group_id=entry["slug"], harness_path=Path(entry["binary"])),
+            _smoke_test_config(self.opts), runner=via_isolation)
+        if not smoke.passed:
+            return smoke, smoke.reason, smoke.log
+        cov = check_coverage(smoke.coverage_edges, self.opts.smoke_min_edges)
+        return smoke, ("" if cov.passed else cov.reason), smoke.log
+
+    def _regenerate(self, entry, draft, source, reason, log):
+        """dry-run 실패 사유를 넣어 LLM 재생성 → HEAL 재빌드. 성공 시 (draft, source)"""
+        from logosfuzz.generate.llm import extract_code, truncate_middle
+        from logosfuzz.generate.models import HarnessDraft
+
+        prompt = (
+            f"{self._prompts.get(entry['slug'], '')}\n\n"
+            "# 이전 하네스 dry-run 실패 → 다시 작성\n"
+            f"아래 하네스는 컴파일은 됐지만 짧은 dry-run 에서 실패했다.\n사유: {reason}\n\n"
+            f"## 이전 하네스\n```c\n{source}\n```\n\n"
+            f"## dry-run 로그 (일부)\n```\n{truncate_middle(log, _SMOKE_LOG_CHARS)}\n```\n\n"
+            f"## 지켜야 할 규칙\n{_SMOKE_RULES}\n\n"
+            "수정한 전체 하네스 소스 파일 하나만 코드 블록으로 출력하라."
+        )
+        code = extract_code(self.llm.complete(prompt))
+        new_draft = HarnessDraft(logic_group=draft.logic_group, source=code,
+                                 project=draft.project, target_apis=list(draft.target_apis),
+                                 language=draft.language)
+        report = self._heal_loop.run(new_draft)
+        compiled = report.last_compile
+        if not (report.success and compiled):
+            return None
+        entry["binary"] = compiled.artifact_path
+        entry["source"] = str(self._heal_loop.compiler.adapter.emit_build_definition(
+            self._heal_loop.compiler.spec_for(new_draft), report.final_source))
+        return new_draft, report.final_source
+
+    def stage_smoke(self, built):
+        """GEN-03-04 dry-run 게이트. 통과한 하네스만 EXE 로 전달
+
+        걸러내는 두 경우: 시작 직후 크래시(타임아웃 포함), 크래시는 없지만
+        edge 커버리지가 ``smoke_min_edges`` 미만(대상 라이브러리 미도달).
+        실패 시 사유·로그를 넣어 최대 ``smoke_retries`` 회 재생성
+        모두 실패하면 크래시 없는 저커버리지 하네스만 남겨 EXE 진행(전부 크래시면 중단)
+        """
+        from logosfuzz.execute.docker_runner import DockerIsolationRunner
+        from logosfuzz.execute.errors import ExecuteError
+        from logosfuzz.execute.seeds import profile_seed_paths
+
+        with self._stage("SMOKE") as st:
+            runner = DockerIsolationRunner(self.fuzz_config(len(built)),
+                                           executor=self._smoke_executor)
+            if self.opts.use_docker and not self.opts.no_build and self._smoke_executor is None:
+                try:
+                    runner.ensure_image()
+                except ExecuteError as exc:
+                    raise StageFailed(f"격리 이미지 준비 실패: {exc}") from exc
+            seeds = profile_seed_paths(self.profile)
+            passed, low_cov = [], []
+            for entry, draft, source in built:
+                attempts = []
+                while True:
+                    smoke, reason, log = self._smoke_once(runner, entry, seeds)
+                    attempts.append({"passed": not reason, "reason": reason,
+                                     "crashed": smoke.crashed, "timed_out": smoke.timed_out,
+                                     "coverage_edges": smoke.coverage_edges})
+                    self._log(f"  {entry['slug']}: dry-run "
+                              f"{'통과' if not reason else '실패 - ' + reason} "
+                              f"(cov {smoke.coverage_edges})")
+                    if not reason or len(attempts) > self.opts.smoke_retries:
+                        break
+                    self._log(f"    -> 실패 사유를 넣어 재생성 ({len(attempts)}/{self.opts.smoke_retries})")
+                    regenerated = self._regenerate(entry, draft, source, reason, log)
+                    if regenerated is None:
+                        attempts[-1]["regenerate"] = "rebuild-failed"
+                        break
+                    draft, source = regenerated
+                last = attempts[-1]
+                entry["smoke"] = {"passed": last["passed"], "regenerated": len(attempts) - 1,
+                                  "attempts": attempts}
+                if last["passed"]:
+                    passed.append((entry, draft, source))
+                elif not (last["crashed"] or last["timed_out"]):
+                    low_cov.append((entry, draft, source))
+            kept = passed
+            if not kept and low_cov:
+                self._log("  [WARN] dry-run 통과 하네스가 없다 - 크래시 없는 저커버리지 하네스로 계속한다")
+                kept = low_cov
+            for entry, _, _ in built:
+                entry["smoke"]["used"] = any(entry is e for e, _, _ in kept)
+            st.detail.update(total=len(built), passed=len(passed),
+                             immediate_crash=sum(1 for e, _, _ in built
+                                                 if e["smoke"]["attempts"][0]["crashed"]),
+                             low_coverage=sum(1 for e, _, _ in built
+                                              if not e["smoke"]["attempts"][0]["passed"]
+                                              and not e["smoke"]["attempts"][0]["crashed"]),
+                             regenerated=sum(e["smoke"]["regenerated"] for e, _, _ in built),
+                             used=len(kept), min_edges=self.opts.smoke_min_edges)
+            if not kept:
+                raise StageFailed("모든 하네스가 dry-run 에서 즉시 크래시했다 (logs/<group>/smoke.stderr.log)")
+            return kept
 
     def stage_coverage_build(self, built, compiler) -> None:
         with self._stage("COVBIN") as st:
@@ -326,23 +512,12 @@ class GenericRun:
             st.detail.update(built=ok, total=len(built))
 
     def stage_exe(self, built, timeouts):
-        from logosfuzz.cli import default_exec_dockerfile, default_exec_image
-        from logosfuzz.config import CoverageMode, Engine, FuzzConfig, LogicGroup
+        from logosfuzz.config import LogicGroup
         from logosfuzz.execute.fuzz_session import FuzzSession
         from logosfuzz.execute.seeds import profile_seed_paths, seed_group_corpora
 
         with self._stage("EXE") as st:
-            system = self.profile.build.system
-            config = FuzzConfig(
-                engine=Engine.LIBFUZZER,
-                timeout_sec=max(1, self.opts.budget // max(1, len(built))),
-                use_docker=self.opts.use_docker,
-                harness_dir=self.out / "build" / "bin",
-                output_dir=self.out,
-                image=self.opts.image or default_exec_image(system),
-                dockerfile=default_exec_dockerfile(system),
-                coverage=CoverageMode.NONE,   # 커버리지는 종료 후 최종 코퍼스 재생으로 측정
-            )
+            config = self.fuzz_config(len(built))
             groups = [LogicGroup(name=e["slug"], harness_path=Path(e["binary"])) for e, _, _ in built]
             seeds = profile_seed_paths(self.profile)
             groups = seed_group_corpora(groups, seeds, self.out / "corpus")
@@ -438,6 +613,8 @@ class GenericRun:
             groups, group_map, schedule, timeouts = self.stage_sch()
             drivers = self.stage_gen(groups, group_map, schedule)
             built, compiler = self.stage_heal(drivers, group_map)
+            if self.opts.smoke:
+                built = self.stage_smoke(built)
             if self.opts.coverage:
                 try:
                     self.stage_coverage_build(built, compiler)
@@ -477,6 +654,10 @@ class GenericRun:
                 "groups": len(self.groups),
                 "harness_built": sum(1 for g in self.groups if g.get("binary")),
                 "llm_repaired": sum(1 for g in self.groups if g.get("binary") and g["llm_rounds"]),
+                "smoke_passed": sum(1 for g in self.groups if (g.get("smoke") or {}).get("passed")),
+                "smoke_immediate_crash": sum(
+                    1 for g in self.groups
+                    if g.get("smoke") and g["smoke"]["attempts"][0]["crashed"]),
                 "crashes": (fuzz_summary or {}).get("total_crashes", 0),
                 **({k: analysis["summary"][k] for k in ("true_positive", "false_positive",
                                                          "needs_review")
@@ -527,6 +708,24 @@ def add_run_parser(sub) -> None:
     r.add_argument("--no-build", action="store_true", help="격리 이미지 자동 빌드 생략")
     r.add_argument("--no-coverage", dest="coverage", action="store_false", default=True,
                    help="커버리지 빌드·재생 생략")
+    r.add_argument("--no-smoke", dest="smoke", action="store_false", default=True,
+                   help="HEAL 뒤 dry-run 스모크 테스트·재생성 생략")
+    r.add_argument("--smoke-retries", type=int, default=SMOKE_RETRIES,
+                   help=f"dry-run 실패 시 재생성 최대 횟수 (기본 {SMOKE_RETRIES})")
+    r.add_argument("--smoke-min-edges", type=int, default=SMOKE_MIN_EDGES,
+                   help=f"dry-run 통과 최소 edge 커버리지 (기본 {SMOKE_MIN_EDGES})")
+    r.add_argument("--smoke-runs", type=int, default=SMOKE_RUNS,
+                   help=f"dry-run 실행 횟수 -runs (기본 {SMOKE_RUNS})")
+    r.add_argument("--input-timeout-ms", type=int, default=None,
+                   help="입력 1건 실행 제한(ms, libFuzzer -timeout). 기본 EXE-04-03 값")
+    r.add_argument("--rss-limit-mb", type=int, default=None,
+                   help="libFuzzer -rss_limit_mb (기본 2048, 0 이면 생략)")
+    r.add_argument("--malloc-limit-mb", type=int, default=None,
+                   help="libFuzzer -malloc_limit_mb (기본 2048, 0 이면 생략)")
+    r.add_argument("--max-len", type=int, default=0,
+                   help="libFuzzer -max_len (기본 0 = libFuzzer 자동)")
+    r.add_argument("--dict-dir", type=Path, default=None,
+                   help="<그룹>.dict 탐색 디렉터리 (기본 <출력>/dict). 있으면 -dict= 자동 추가")
 
 
 def options_from_args(args) -> RunOptions:
@@ -540,7 +739,13 @@ def options_from_args(args) -> RunOptions:
     return RunOptions(profile=args.profile, budget=args.budget, output=output,
                       max_round=args.max_round, use_docker=args.docker, top=args.top,
                       model=args.model, image=args.image, no_build=args.no_build,
-                      coverage=args.coverage)
+                      coverage=args.coverage, smoke=args.smoke,
+                      smoke_retries=max(0, args.smoke_retries),
+                      smoke_min_edges=max(0, args.smoke_min_edges),
+                      smoke_runs=max(1, args.smoke_runs),
+                      input_timeout_ms=args.input_timeout_ms,
+                      rss_limit_mb=args.rss_limit_mb, malloc_limit_mb=args.malloc_limit_mb,
+                      max_len=max(0, args.max_len), dict_dir=args.dict_dir)
 
 
 def main_run(args) -> int:
