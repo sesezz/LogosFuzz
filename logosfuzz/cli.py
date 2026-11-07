@@ -108,6 +108,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="대상 빌드 시스템(이미지 자동 선택용). 기본: --profile 의 "
                         "build.system, 프로필이 없으면 bazel")
     f.add_argument("--no-build", action="store_true", help="이미지 자동 빌드 생략")
+    f.add_argument("--minimize-corpus", action="store_true", default=False,
+                   help="퍼징 후 libFuzzer -merge=1 로 코퍼스 최소화")
     f.add_argument("--no-symbolize", dest="symbolize", action="store_false", default=True,
                    help="크래시 후처리 심볼라이즈(EXE-04-02) 생략. 기본은 실행 후 "
                         "llvm-symbolizer로 스택의 파일:줄을 복원한다.")
@@ -286,6 +288,7 @@ def main(argv: list | None = None) -> int:
             coverage=CoverageMode.parse(args.coverage),
             symbolize_crashes=args.symbolize,
             fork_jobs=max(0, args.fork_jobs),
+            minimize_corpus=args.minimize_corpus,
         )
         groups = discover_groups(harness_dir, args.groups)
         if not groups:

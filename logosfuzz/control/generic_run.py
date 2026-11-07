@@ -75,6 +75,8 @@ class RunOptions:
     smoke_timeout: int = SMOKE_TIMEOUT_SEC
     smoke_min_edges: int = SMOKE_MIN_EDGES
     smoke_retries: int = SMOKE_RETRIES
+    # 캠페인 후 -merge=1 코퍼스 최소화
+    minimize_corpus: bool = False
     # libFuzzer 실행 옵션 (0/None 이면 FuzzConfig 기본값)
     input_timeout_ms: Optional[int] = None
     rss_limit_mb: Optional[int] = None
@@ -376,6 +378,7 @@ class GenericRun:
             image=self.opts.image or default_exec_image(system),
             dockerfile=default_exec_dockerfile(system),
             coverage=CoverageMode.NONE,   # 커버리지는 종료 후 최종 코퍼스 재생으로 측정
+            minimize_corpus=self.opts.minimize_corpus,
             max_len=max(0, self.opts.max_len),
             fork_jobs=max(0, self.opts.fork_jobs),
             dict_dir=Path(self.opts.dict_dir) if self.opts.dict_dir else self.out / "dict",
@@ -711,6 +714,8 @@ def add_run_parser(sub) -> None:
     r.add_argument("--no-build", action="store_true", help="격리 이미지 자동 빌드 생략")
     r.add_argument("--no-coverage", dest="coverage", action="store_false", default=True,
                    help="커버리지 빌드·재생 생략")
+    r.add_argument("--minimize-corpus", action="store_true", default=False,
+                   help="퍼징 후 libFuzzer -merge=1 로 코퍼스 최소화 (COV 재생 전)")
     r.add_argument("--no-smoke", dest="smoke", action="store_false", default=True,
                    help="HEAL 뒤 dry-run 스모크 테스트·재생성 생략")
     r.add_argument("--smoke-retries", type=int, default=SMOKE_RETRIES,
@@ -746,6 +751,7 @@ def options_from_args(args) -> RunOptions:
                       max_round=args.max_round, use_docker=args.docker, top=args.top,
                       model=args.model, image=args.image, no_build=args.no_build,
                       coverage=args.coverage, smoke=args.smoke,
+                      minimize_corpus=getattr(args, "minimize_corpus", False),
                       smoke_retries=max(0, args.smoke_retries),
                       smoke_min_edges=max(0, args.smoke_min_edges),
                       smoke_runs=max(1, args.smoke_runs),

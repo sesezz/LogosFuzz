@@ -162,6 +162,9 @@ class FuzzConfig:
     ignore_crashes: bool = True
     fork_replay_limit: int = 20
 
+    # 캠페인 후 코퍼스 최소화(-merge=1). 같은 커버리지를 내는 최소 입력 집합만 코퍼스에 유지
+    minimize_corpus: bool = False
+
     # 커버리지 계측 (EXE-04-04). 기본 NONE → 기존 동작 불변, 옵트인 시에만 활성.
     coverage: CoverageMode = CoverageMode.NONE
     coverage_subdir: str = "coverage"          # output_dir 하위 profraw/profdata 위치

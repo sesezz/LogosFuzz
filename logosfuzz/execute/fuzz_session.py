@@ -75,6 +75,8 @@ class SessionSummary:
                     "stderr_log": getattr(g, "stderr_log", None),
                     **({"timeout_sec": g.timeout_sec}
                        if getattr(g, "timeout_sec", None) is not None else {}),
+                    **({"corpus_minimized": g.corpus_minimized}
+                       if getattr(g, "corpus_minimized", None) else {}),
                 }
                 for g in self.groups
             ],
@@ -191,6 +193,10 @@ class FuzzSession:
             elif result.timed_out:
                 self._log(f"  - 타임아웃 도달, 다음 그룹으로 진행")
 
+            # 캠페인 후 코퍼스 최소화 (COV 재생 전 수행, 같은 커버리지 유지)
+            if self.config.minimize_corpus and group.corpus_dir and not result.failed_to_start:
+                self._minimize(group, result)
+
             summary.groups.append(result)
 
         summary.finished_at = time.time()
@@ -229,6 +235,20 @@ class FuzzSession:
                   f"재실행 → 결함 보고 {len(replayed)}건 확보")
         if replayed:
             result.sanitizer_findings = replayed
+
+    def _minimize(self, group: LogicGroup, result: GroupResult) -> None:
+        """-merge=1 코퍼스 최소화. 실패해도 캠페인 결과는 유지"""
+        try:
+            counts = self.runner.minimize_corpus(group)
+        except OSError as exc:
+            self._log(f"  - 코퍼스 최소화 실패({exc.__class__.__name__}), 기존 코퍼스 유지")
+            return
+        if counts is None:
+            self._log("  - 코퍼스 최소화 결과 없음, 기존 코퍼스 유지")
+            return
+        before, after = counts
+        result.corpus_minimized = {"before": before, "after": after}
+        self._log(f"  >>> [MERGE] 코퍼스 최소화 {before} → {after}개")
 
     def _symbolize(self, findings: list) -> None:
         """크래시 프레임의 파일:줄을 복원하고 결과를 한 줄로 보고한다.
