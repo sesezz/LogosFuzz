@@ -148,6 +148,11 @@ class FuzzSession:
             finally:
                 self.config.timeout_sec = default_timeout
             result.stats = stats
+            # 크래시 수집 (fork 모드 재실행 대상 확보 목적상 심볼라이즈 전 수행)
+            saved = self.collector.collect(group.name, self._crash_search_dirs(group))
+            result.crashes = saved
+            if self.config.fork_jobs > 0 and saved:
+                self._replay_fork_crashes(group, result)
             # EXE-04-02: 실행 중에는 symbolize=0 이라 프레임에 파일:줄이 없다.
             # 결함을 ANA 로 내보내기 "전에" 복원한다 - traceback 이 비면 크래시
             # 시그니처가 뭉개지고 정/오탐 판별이 근거를 잃는다.
@@ -176,9 +181,7 @@ class FuzzSession:
                 else:
                     self._log("  - 커버리지 산출물 없음(계측 미빌드 또는 도구 실패), 건너뜀")
 
-            # 크래시 수집 및 강조
-            saved = self.collector.collect(group.name, self._crash_search_dirs(group))
-            result.crashes = saved
+            # 크래시 강조
             if saved:
                 self._log(f"  >>> [CRASH] '{group.name}'에서 새 크래시 {len(saved)}건 저장: "
                           f"{self.config.crashes_dir / group.name}")
@@ -200,6 +203,32 @@ class FuzzSession:
             self._log(f"\n=== 완료: 그룹 {len(summary.groups)}개, "
                       f"총 크래시 {summary.total_crashes}건 → analyze 단계로 전달 ===")
         return summary
+
+    def _replay_fork_crashes(self, group: LogicGroup, result: GroupResult) -> None:
+        """fork 모드 크래시 입력 재실행으로 sanitizer 전체 보고(스택) 확보
+
+        fork 모드 부모 출력에는 자식 보고의 ERROR 한 줄만 남아 traceback 이 빈 상태.
+        발견 순서(수정 시각) 앞쪽부터 ``fork_replay_limit`` 건만 재실행하고,
+        재현된 결함으로 스트림 결함 목록 대체. 재현 0건이면 기존 목록 유지
+        """
+        limit = max(0, self.config.fork_replay_limit)
+        if limit == 0:
+            return
+
+        def _mtime(path: Path) -> float:
+            try:
+                return path.stat().st_mtime
+            except OSError:
+                return 0.0
+
+        targets = sorted(result.crashes, key=_mtime)[:limit]
+        replayed: list = []
+        for crash_file in targets:
+            replayed.extend(self.runner.replay_crash(group, crash_file))
+        self._log(f"  >>> [REPLAY] fork 모드 크래시 입력 {len(targets)}/{len(result.crashes)}건 "
+                  f"재실행 → 결함 보고 {len(replayed)}건 확보")
+        if replayed:
+            result.sanitizer_findings = replayed
 
     def _symbolize(self, findings: list) -> None:
         """크래시 프레임의 파일:줄을 복원하고 결과를 한 줄로 보고한다.

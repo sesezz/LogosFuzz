@@ -81,6 +81,8 @@ class RunOptions:
     malloc_limit_mb: Optional[int] = None
     max_len: int = 0
     dict_dir: Optional[Path] = None
+    # fork 모드 병렬 작업 수 (0 이면 단일 프로세스)
+    fork_jobs: int = 0
 
 
 @dataclass
@@ -375,6 +377,7 @@ class GenericRun:
             dockerfile=default_exec_dockerfile(system),
             coverage=CoverageMode.NONE,   # 커버리지는 종료 후 최종 코퍼스 재생으로 측정
             max_len=max(0, self.opts.max_len),
+            fork_jobs=max(0, self.opts.fork_jobs),
             dict_dir=Path(self.opts.dict_dir) if self.opts.dict_dir else self.out / "dict",
             **extra,
         )
@@ -726,6 +729,9 @@ def add_run_parser(sub) -> None:
                    help="libFuzzer -max_len (기본 0 = libFuzzer 자동)")
     r.add_argument("--dict-dir", type=Path, default=None,
                    help="<그룹>.dict 탐색 디렉터리 (기본 <출력>/dict). 있으면 -dict= 자동 추가")
+    r.add_argument("--fork", dest="fork_jobs", type=int, default=0,
+                   help="libFuzzer -fork=N -ignore_crashes=1 병렬 퍼징 (기본 0 = 단일 프로세스). "
+                        "Docker --cpus 는 N 이상으로 상향")
 
 
 def options_from_args(args) -> RunOptions:
@@ -745,7 +751,8 @@ def options_from_args(args) -> RunOptions:
                       smoke_runs=max(1, args.smoke_runs),
                       input_timeout_ms=args.input_timeout_ms,
                       rss_limit_mb=args.rss_limit_mb, malloc_limit_mb=args.malloc_limit_mb,
-                      max_len=max(0, args.max_len), dict_dir=args.dict_dir)
+                      max_len=max(0, args.max_len), dict_dir=args.dict_dir,
+                      fork_jobs=max(0, getattr(args, "fork_jobs", 0)))
 
 
 def main_run(args) -> int:

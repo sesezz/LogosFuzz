@@ -383,3 +383,75 @@ def test_run_smoke_in_docker_keeps_isolation(tmp_path):
     assert "logosfuzz-grp1-smoke" in argv
     assert "--network" in argv and "--cap-drop" in argv
     assert "-runs=10" in argv[-1] and "/out/smoke/grp1/" in argv[-1]
+
+
+def test_fork_mode_args_in_both_paths(tmp_path):
+    cfg = _config(tmp_path, fork_jobs=4)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    for argv in (runner.build_run_argv(grp), runner._local_argv(grp)):
+        joined = " ".join(argv)
+        assert "-fork=4" in joined
+        assert "-ignore_crashes=1" in joined
+
+
+def test_fork_mode_off_by_default(tmp_path):
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    joined = " ".join(runner.build_run_argv(grp))
+    assert "-fork=" not in joined
+    assert "-ignore_crashes" not in joined
+    assert runner.build_run_argv(grp)[runner.build_run_argv(grp).index("--cpus") + 1] == "1.0"
+
+
+def test_fork_mode_can_stop_on_first_crash(tmp_path):
+    cfg = _config(tmp_path, fork_jobs=2, ignore_crashes=False)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    joined = " ".join(runner._local_argv(grp))
+    assert "-fork=2" in joined
+    assert "-ignore_crashes" not in joined
+
+
+def test_fork_mode_raises_container_cpus(tmp_path):
+    cfg = _config(tmp_path, fork_jobs=4)
+    argv = DockerIsolationRunner(cfg).build_run_argv(_make_harness(cfg))
+    assert argv[argv.index("--cpus") + 1] == "4.0"
+    # 지정 cpus 가 더 크면 그대로 유지
+    cfg = _config(tmp_path, fork_jobs=2, cpus="6")
+    argv = DockerIsolationRunner(cfg).build_run_argv(_make_harness(cfg))
+    assert argv[argv.index("--cpus") + 1] == "6"
+
+
+def test_smoke_never_uses_fork(tmp_path):
+    cfg = _config(tmp_path, fork_jobs=4)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    for argv in (runner.build_run_argv(grp, smoke_runs=200),
+                 runner._local_argv(grp, smoke_runs=200)):
+        joined = " ".join(argv)
+        assert "-runs=200" in joined
+        assert "-fork=" not in joined
+
+
+def test_replay_argv_runs_single_crash_input(tmp_path):
+    cfg = _config(tmp_path, fork_jobs=2)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    crash = cfg.crashes_dir / grp.name / "crash-abc"
+    crash.parent.mkdir(parents=True)
+    crash.write_bytes(b"x")
+
+    docker_argv = runner.replay_argv(grp, crash)
+    inner = docker_argv[-1]
+    assert "--cap-drop" in docker_argv and "none" in docker_argv
+    assert f"logosfuzz-{grp.name}-replay" in docker_argv
+    assert "/out/crashes/grp1/crash-abc" in inner
+    assert "-fork=" not in inner and "-max_total_time" not in inner
+
+    cfg.use_docker = False
+    local = runner.replay_argv(grp, crash)
+    assert local[0] == "env"
+    assert any(a.startswith("ASAN_OPTIONS=") for a in local)
+    assert local[-1] == str(crash)

@@ -136,3 +136,62 @@ def test_reporting_marks_start_failure_as_failed_not_crashed(tmp_path):
 
     _, saved, _ = _run_one(tmp_path, executor)
     assert _status(saved["groups"][0]) == "failed"
+
+
+_ASAN_HEAD = ("==7==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x1 "
+              "at pc 0x2 bp 0x3 sp 0x4")
+
+
+def test_fork_mode_replays_crashes_for_full_reports(tmp_path):
+    """fork 모드 부모 출력의 ERROR 한 줄 결함을 재실행 보고로 대체"""
+    cfg = _cfg(tmp_path)
+    cfg.fork_jobs = 2
+    cfg.fork_replay_limit = 2
+    cfg.symbolize_crashes = False
+    grp = _harness(cfg, "grpF")
+    replays = []
+
+    def fake_executor(argv, timeout, on_line):
+        joined = " ".join(argv)
+        if "-replay" in joined:
+            replays.append(argv)
+            for line in (_ASAN_HEAD,
+                         "WRITE of size 17 at 0x1 thread T0",
+                         "    #0 0x5 in copy_label /src/a.c:13:5",
+                         "    #1 0x6 in LLVMFuzzerTestOneInput /src/h.c:19:5",
+                         "SUMMARY: AddressSanitizer: stack-buffer-overflow /src/a.c:13:5"):
+                on_line(line)
+            return ProcResult(exit_code=1, timed_out=False)
+        on_line(_ASAN_HEAD)
+        on_line("#20: cov: 3 ft: 3 corp: 1 exec/s: 0 oom/timeout/crash: 0/0/3 time: 0s")
+        cfg.crashes_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(3):
+            (cfg.crashes_dir / f"crash-{i}").write_bytes(bytes([i]))
+        return ProcResult(exit_code=1, timed_out=False)
+
+    runner = DockerIsolationRunner(cfg, executor=fake_executor)
+    session = FuzzSession(cfg, runner=runner, stream=io.StringIO())
+    summary = session.run([grp], ensure_image=False)
+
+    result = summary.groups[0]
+    assert len(result.crashes) == 3
+    assert len(replays) == 2
+    assert len(result.sanitizer_findings) == 2
+    assert all(f.traceback for f in result.sanitizer_findings)
+
+
+def test_single_process_mode_does_not_replay(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.symbolize_crashes = False
+    grp = _harness(cfg, "grpS")
+    calls = []
+
+    def fake_executor(argv, timeout, on_line):
+        calls.append(argv)
+        cfg.crashes_dir.mkdir(parents=True, exist_ok=True)
+        (cfg.crashes_dir / "crash-1").write_bytes(b"x")
+        return ProcResult(exit_code=1, timed_out=False)
+
+    runner = DockerIsolationRunner(cfg, executor=fake_executor)
+    FuzzSession(cfg, runner=runner, stream=io.StringIO()).run([grp], ensure_image=False)
+    assert len(calls) == 1

@@ -153,6 +153,14 @@ class FuzzConfig:
     malloc_limit_mb: int = 2048
     max_len: int = 0
     dict_dir: Path | None = None
+    # fork_jobs: 병렬 퍼징 작업 수(-fork=N). 0 이면 단일 프로세스(기존 동작)
+    # ignore_crashes: fork 모드에서 크래시 후 캠페인 지속 여부(-ignore_crashes=1).
+    #   끄면 첫 크래시에서 전체 종료
+    # Docker --cpus 는 cpus 와 fork_jobs 중 큰 값 적용(effective_cpus)
+    # fork_replay_limit: fork 모드 종료 후 스택 확보용 크래시 입력 재실행 최대 건수
+    fork_jobs: int = 0
+    ignore_crashes: bool = True
+    fork_replay_limit: int = 20
 
     # 커버리지 계측 (EXE-04-04). 기본 NONE → 기존 동작 불변, 옵트인 시에만 활성.
     coverage: CoverageMode = CoverageMode.NONE
@@ -162,6 +170,17 @@ class FuzzConfig:
     coverage_sources: tuple = ()               # llvm-cov export 소스 필터 (선택)
     llvm_profdata: str = "llvm-profdata"       # 병합 도구 경로/이름
     llvm_cov: str = "llvm-cov"                 # export 도구 경로/이름
+
+    @property
+    def effective_cpus(self) -> str:
+        """컨테이너 --cpus 값. fork 모드면 작업 수 이상으로 상향"""
+        try:
+            base = float(self.cpus)
+        except ValueError:
+            return self.cpus
+        if self.fork_jobs > base:
+            return f"{float(self.fork_jobs):.1f}"
+        return self.cpus
 
     @property
     def crashes_dir(self) -> Path:
