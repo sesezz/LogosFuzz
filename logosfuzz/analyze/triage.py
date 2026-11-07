@@ -19,6 +19,21 @@ from logosfuzz.analyze import contracts as _contracts
 from logosfuzz.analyze.models import CrashCluster, TriageResult, Verdict
 from logosfuzz.analyze.signature import application_frames, has_application_frame
 
+# 근거 수집 공급자(reachability·에러계약)가 던질 수 있는 예외
+# 파일 I/O, 값 해석, 레코드 구조 불일치, KB·공급자 사용 불가(RuntimeError)
+_CONTEXT_ERRORS: tuple[type[BaseException], ...] = (
+    OSError, ValueError, KeyError, IndexError, AttributeError, TypeError, RuntimeError,
+)
+
+# LLM 호출 예외: 클라이언트 설정 오류(RuntimeError), 네트워크·타임아웃(OSError), 응답 값 오류(ValueError)
+_LLM_CALL_ERRORS: tuple[type[BaseException], ...] = (RuntimeError, OSError, ValueError)
+try:  # openai 미설치 환경 대비 선택적 import
+    from openai import OpenAIError as _OpenAIError
+except ImportError:  # pragma: no cover - openai 미설치 시 기본 예외만 사용
+    pass
+else:
+    _LLM_CALL_ERRORS = _LLM_CALL_ERRORS + (_OpenAIError,)
+
 # 메모리 커럽션 계열: sanitizer 탐지 신뢰도가 높아 정탐 사전확률 높음
 _MEMORY_BUGS = {
     "use-after-free",
@@ -262,7 +277,7 @@ def _safe_context(provider, cluster):
         return None
     try:
         return provider(cluster)
-    except Exception:
+    except _CONTEXT_ERRORS:  # 근거 없이 판별 계속
         return None
 
 
@@ -399,7 +414,7 @@ class LLMTriager:
                                     profile=self.profile),
                 system=_TRIAGE_SYSTEM,
             )
-        except Exception:
+        except _LLM_CALL_ERRORS:  # 규칙 기반 판별기로 폴백
             return self._fallback(cluster, "llm-call-failed")
         parsed = parse_llm_verdict(raw)
         if parsed is None:

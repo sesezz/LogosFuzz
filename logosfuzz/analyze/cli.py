@@ -143,6 +143,8 @@ def _contract_dict(args: argparse.Namespace, cluster: CrashCluster) -> dict:
         return {"error": f"error-contract analysis failed (value): {exc}"}
     except (KeyError, IndexError, AttributeError, TypeError) as exc:  # KB·크래시 레코드 구조 불일치
         return {"error": f"error-contract analysis failed ({type(exc).__name__}): {exc}"}
+    except RuntimeError as exc:  # KB·계약 공급자 사용 불가
+        return {"error": f"error-contract analysis failed (runtime): {exc}"}
 
 
 # --------------------------------------------------------------------------- #
@@ -261,6 +263,8 @@ def _reachability_dict(provider, cluster: CrashCluster) -> dict | None:
         return {"error": f"reachability analysis failed (value): {exc}"}
     except (KeyError, IndexError, AttributeError, TypeError) as exc:  # 크래시 레코드 구조 불일치
         return {"error": f"reachability analysis failed ({type(exc).__name__}): {exc}"}
+    except RuntimeError as exc:  # 분석기 사용 불가
+        return {"error": f"reachability analysis failed (runtime): {exc}"}
 
 
 def _run_dedup(args: argparse.Namespace) -> int:
