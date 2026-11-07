@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import queue
 import shlex
@@ -38,6 +39,10 @@ from logosfuzz.execute.errors import (
 )
 from logosfuzz.execute.stats import LiveStats, StatsMonitor
 from logosfuzz.execute.sanitizer import SanitizerFinding, SanitizerMonitor
+from logosfuzz.execute.timeout_manager import DEFAULT_PER_INPUT_MS
+
+# 컨테이너 내부 딕셔너리 마운트 위치
+_CONTAINER_DICT = "/dict/fuzz.dict"
 
 
 # executor(argv, timeout, on_line) -> ProcResult
@@ -258,15 +263,64 @@ class DockerIsolationRunner:
         """
         return self.harness_binary_path(group).parent
 
+    # ---- libFuzzer 옵션 ------------------------------------------------
+    def per_input_timeout_sec(self) -> int:
+        """입력 1건 실행 제한(초, 올림, 최소 1초). 미지정 시 EXE-04-03 기본값"""
+        ms = self.config.per_input_timeout_ms or DEFAULT_PER_INPUT_MS
+        return max(1, math.ceil(ms / 1000))
+
+    def resolve_dict(self, group: LogicGroup) -> Optional[Path]:
+        """그룹 딕셔너리 경로 (명시 경로 → dict_dir/<name>.dict → <바이너리>.dict)"""
+        candidates = []
+        if group.dict_path is not None:
+            candidates.append(Path(group.dict_path))
+        if self.config.dict_dir is not None:
+            candidates.append(Path(self.config.dict_dir) / f"{group.name}.dict")
+        binary = self.harness_binary_path(group)
+        candidates.append(binary.with_name(binary.name + ".dict"))
+        for path in candidates:
+            if path.is_file():
+                return path.resolve()
+        return None
+
+    def libfuzzer_option_args(self, group: LogicGroup, *, in_docker: bool) -> list:
+        """-timeout / -rss_limit_mb / -malloc_limit_mb / -max_len / -dict 인자 목록"""
+        c = self.config
+        args = [f"-timeout={self.per_input_timeout_sec()}"]
+        if c.rss_limit_mb > 0:
+            args.append(f"-rss_limit_mb={c.rss_limit_mb}")
+        if c.malloc_limit_mb > 0:
+            args.append(f"-malloc_limit_mb={c.malloc_limit_mb}")
+        if c.max_len > 0:
+            args.append(f"-max_len={c.max_len}")
+        dict_path = self.resolve_dict(group)
+        if dict_path is not None:
+            args.append(f"-dict={_CONTAINER_DICT if in_docker else dict_path}")
+        return args
+
+    @staticmethod
+    def _run_limit_args(timeout_sec: int, smoke_runs: Optional[int]) -> list:
+        """본 퍼징은 -max_total_time, 스모크 테스트는 -runs 로 실행 횟수 제한"""
+        if smoke_runs is None:
+            return [f"-max_total_time={timeout_sec}"]
+        return [f"-runs={smoke_runs}", f"-max_total_time={timeout_sec}"]
+
+    def smoke_dir(self, group: LogicGroup) -> Path:
+        """스모크 테스트 크래시 산출물 위치 (본 퍼징 crashes/ 와 분리)"""
+        return self.config.output_dir / "smoke" / group.name
+
     # ---- 실행 커맨드 구성 ---------------------------------------------
-    def _in_container_cmd(self, group: LogicGroup) -> str:
+    def _in_container_cmd(self, group: LogicGroup, smoke_runs: Optional[int] = None) -> str:
         """컨테이너 내부 libFuzzer 실행 셸 명령 문자열"""
         harness = f"/harness/{group.harness_path.name}"
+        prefix = ("/out/crashes/" if smoke_runs is None
+                  else f"/out/smoke/{group.name}/")
         parts = [
             shlex.quote(harness),
-            f"-max_total_time={self.config.timeout_sec}",
-            "-artifact_prefix=/out/crashes/",
+            *self._run_limit_args(self.config.timeout_sec, smoke_runs),
+            f"-artifact_prefix={prefix}",
             "-print_final_stats=1",
+            *self.libfuzzer_option_args(group, in_docker=True),
         ]
         if group.corpus_dir:
             parts.append("/corpus")
@@ -280,11 +334,12 @@ class DockerIsolationRunner:
             return None
         return f"{getuid()}:{getgid()}"
 
-    def build_run_argv(self, group: LogicGroup) -> list:
+    def build_run_argv(self, group: LogicGroup, smoke_runs: Optional[int] = None) -> list:
         c = self.config
+        suffix = "" if smoke_runs is None else "-smoke"
         argv = [
             self.docker_bin, "run", "--rm",
-            "--name", f"logosfuzz-{group.name}",
+            "--name", f"logosfuzz-{group.name}{suffix}",
             "--network", c.network,
             "--memory", c.memory_limit,
             "--cpus", c.cpus,
@@ -308,6 +363,9 @@ class DockerIsolationRunner:
         if group.corpus_dir:
             # 쓰기 가능 마운트 (최종 코퍼스를 커버리지 바이너리로 재생하기 위함)
             argv += ["-v", f"{group.corpus_dir.resolve()}:/corpus"]
+        dict_path = self.resolve_dict(group)
+        if dict_path is not None:
+            argv += ["-v", f"{dict_path}:{_CONTAINER_DICT}:ro"]
         argv += [
             "-e", f"ASAN_OPTIONS={c.asan_options}",
             "-e", f"TSAN_OPTIONS={c.tsan_options}",
@@ -317,7 +375,7 @@ class DockerIsolationRunner:
             argv += ["-e", f"{k}={v}"]
         argv += [
             c.image,
-            "bash", "-lc", self._in_container_cmd(group),
+            "bash", "-lc", self._in_container_cmd(group, smoke_runs),
         ]
         return argv
 
@@ -328,12 +386,14 @@ class DockerIsolationRunner:
 
         return profile_env(group, self.config, in_docker=in_docker)
 
-    def _local_argv(self, group: LogicGroup) -> list:
+    def _local_argv(self, group: LogicGroup, smoke_runs: Optional[int] = None) -> list:
         """Docker 미사용 시 호스트 직접 실행 커맨드"""
         harness = str(self.harness_binary_path(group))
-        argv = [harness, f"-max_total_time={self.config.timeout_sec}",
-                f"-artifact_prefix={self.config.crashes_dir}/",
-                "-print_final_stats=1"]
+        prefix = self.config.crashes_dir if smoke_runs is None else self.smoke_dir(group)
+        argv = [harness, *self._run_limit_args(self.config.timeout_sec, smoke_runs),
+                f"-artifact_prefix={prefix}/",
+                "-print_final_stats=1",
+                *self.libfuzzer_option_args(group, in_docker=False)]
         if group.corpus_dir:
             argv.append(str(group.corpus_dir))
         # 호스트 실행에서는 env 프리픽스로 환경변수를 주입한다(기본 executor
@@ -352,6 +412,29 @@ class DockerIsolationRunner:
         }
         argv = ["env", *[f"{k}={v}" for k, v in pairs.items()], *argv]
         return argv
+
+    # ---- 스모크 테스트 (GEN-03-04 dry-run) -----------------------------
+    def run_smoke(self, group: LogicGroup, runs: int, timeout_sec: int) -> ProcResult:
+        """본 퍼징 전 짧은 dry-run (``-runs=N``). 본 퍼징과 같은 격리·옵션 사용
+
+        크래시 산출물은 ``smoke/<group>/`` 에 남기고, 로그는
+        ``logs/<group>/smoke.*.log`` 로 저장
+        """
+        harness_file = self.harness_binary_path(group)
+        if not harness_file.exists():
+            raise HarnessNotFoundError(f"하네스 없음: {harness_file}")
+        self.config.ensure_dirs()
+        self.smoke_dir(group).mkdir(parents=True, exist_ok=True)
+        saved = self.config.timeout_sec
+        self.config.timeout_sec = max(1, int(timeout_sec))
+        try:
+            argv = (self.build_run_argv(group, smoke_runs=runs) if self.config.use_docker
+                    else self._local_argv(group, smoke_runs=runs))
+        finally:
+            self.config.timeout_sec = saved
+        result = self.executor(argv, timeout_sec + 30, lambda _line: None)
+        self._write_run_logs(group, result, stem="smoke")
+        return result
 
     # ---- 그룹 1개 실행 ------------------------------------------------
     def run_group(self, group: LogicGroup, monitor: Optional[StatsMonitor] = None,
@@ -394,7 +477,7 @@ class DockerIsolationRunner:
             stderr_log=stderr_log,
         )
 
-    def _write_run_logs(self, group: LogicGroup, result: "ProcResult"
+    def _write_run_logs(self, group: LogicGroup, result: "ProcResult", stem: str = "run"
                         ) -> tuple[Optional[str], Optional[str]]:
         """표준 출력/표준 오류 전문을 그룹별 로그 파일로 남긴다.
 
@@ -406,8 +489,8 @@ class DockerIsolationRunner:
         log_dir = self.config.logs_dir / group.name
         try:
             log_dir.mkdir(parents=True, exist_ok=True)
-            stdout_path = log_dir / "run.stdout.log"
-            stderr_path = log_dir / "run.stderr.log"
+            stdout_path = log_dir / f"{stem}.stdout.log"
+            stderr_path = log_dir / f"{stem}.stderr.log"
             stdout_path.write_text(result.stdout, encoding="utf-8")
             stderr_path.write_text(result.stderr, encoding="utf-8")
             return str(stdout_path), str(stderr_path)

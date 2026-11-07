@@ -63,16 +63,21 @@ class LogicGroup:
 
     harness_path: GEN 단계에서 생성/컴파일한 퍼징 하네스 실행 파일
     corpus_dir:   시드 코퍼스 디렉토리 (없으면 빈 코퍼스로 시작)
+    dict_path:    libFuzzer 딕셔너리 파일 (없으면 ``FuzzConfig.dict_dir`` 의
+                  ``<name>.dict``, 하네스 옆 ``<바이너리>.dict`` 순으로 탐색)
     """
 
     name: str
     harness_path: Path
     corpus_dir: Path | None = None
+    dict_path: Path | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "harness_path", Path(self.harness_path))
         if self.corpus_dir is not None:
             object.__setattr__(self, "corpus_dir", Path(self.corpus_dir))
+        if self.dict_path is not None:
+            object.__setattr__(self, "dict_path", Path(self.dict_path))
 
 
 @dataclass
@@ -134,6 +139,20 @@ class FuzzConfig:
     # 한쪽에 도구가 없으면 다른 쪽으로 한 번 넘어간다(symbolize.py 참조).
     symbolize_in_docker: bool = False
     llvm_symbolizer: str = "llvm-symbolizer"   # 심볼라이저 경로/이름
+
+    # libFuzzer 실행 옵션
+    # per_input_timeout_ms: 입력 1건 실행 제한(-timeout). None 이면 EXE-04-03
+    #   TimeoutManager 기본값(DEFAULT_PER_INPUT_MS) 사용
+    # rss_limit_mb / malloc_limit_mb: 메모리 상한(-rss_limit_mb / -malloc_limit_mb).
+    #   컨테이너 --memory 보다 낮게 두어, 헤더 값만 믿고 거대 할당을 하는 입력이
+    #   컨테이너 OOM-kill(원인 불명 종료) 대신 libFuzzer OOM 보고로 남도록 함. 0 이면 생략
+    # max_len: 입력 최대 길이(-max_len). 0 이면 생략(libFuzzer 자동 결정)
+    # dict_dir: ``<그룹 이름>.dict`` 탐색 디렉토리. 있으면 -dict= 자동 추가
+    per_input_timeout_ms: int | None = None
+    rss_limit_mb: int = 2048
+    malloc_limit_mb: int = 2048
+    max_len: int = 0
+    dict_dir: Path | None = None
 
     # 커버리지 계측 (EXE-04-04). 기본 NONE → 기존 동작 불변, 옵트인 시에만 활성.
     coverage: CoverageMode = CoverageMode.NONE
