@@ -137,8 +137,12 @@ def _contract_provider_for_args(args: argparse.Namespace):
 def _contract_dict(args: argparse.Namespace, cluster: CrashCluster) -> dict:
     try:
         return _contract_provider_for_args(args)(cluster).to_dict()
-    except Exception as exc:  # 근거 수집 실패가 출력 전체를 막지 않도록 처리
-        return {"error": f"error-contract analysis failed: {exc}"}
+    except OSError as exc:  # KB·프로필·소스 파일 읽기 실패
+        return {"error": f"error-contract analysis failed (io): {exc}"}
+    except ValueError as exc:  # JSON 파싱 실패, ProfileError, 미지원 KB 버전·계약 종류
+        return {"error": f"error-contract analysis failed (value): {exc}"}
+    except (KeyError, IndexError, AttributeError, TypeError) as exc:  # KB·크래시 레코드 구조 불일치
+        return {"error": f"error-contract analysis failed ({type(exc).__name__}): {exc}"}
 
 
 # --------------------------------------------------------------------------- #
@@ -251,8 +255,12 @@ def _reachability_dict(provider, cluster: CrashCluster) -> dict | None:
         return None
     try:
         return provider(cluster).to_dict()
-    except Exception as exc:  # 분석 실패가 판별 전체를 막지 않도록 처리
-        return {"error": f"reachability analysis failed: {exc}"}
+    except OSError as exc:  # 소스·하네스 파일 읽기 실패
+        return {"error": f"reachability analysis failed (io): {exc}"}
+    except ValueError as exc:  # 경로·라인 값 해석 실패(UnicodeDecodeError 포함)
+        return {"error": f"reachability analysis failed (value): {exc}"}
+    except (KeyError, IndexError, AttributeError, TypeError) as exc:  # 크래시 레코드 구조 불일치
+        return {"error": f"reachability analysis failed ({type(exc).__name__}): {exc}"}
 
 
 def _run_dedup(args: argparse.Namespace) -> int:

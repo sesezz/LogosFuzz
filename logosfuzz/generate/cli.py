@@ -66,7 +66,9 @@ def _cmd_generate(args: argparse.Namespace) -> int:
         try:
             from ..control.hitl import HITLManager, HITLPolicy
             hitl = HITLManager.create(policy=HITLPolicy.default())
-        except Exception as e:
+        except ImportError as e:  # HITL 모듈 로드 실패
+            print(f"HITL 연결 실패(무시, 모듈 로드): {e}", file=sys.stderr)
+        except (OSError, ValueError) as e:  # 리뷰 저장소 경로·정책 값 오류
             print(f"HITL 연결 실패(무시): {e}", file=sys.stderr)
 
     loop = SelfHealLoop(
