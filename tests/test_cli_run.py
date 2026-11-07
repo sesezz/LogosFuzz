@@ -322,6 +322,17 @@ def test_low_coverage_only_harness_still_fuzzes_as_fallback(tmp_path):
     assert len(FakeSession.seen["groups"]) == 1
 
 
+def test_smoke_threshold_scales_down_for_tiny_targets():
+    from logosfuzz.control.generic_run import smoke_threshold
+
+    tiny = "INFO: Loaded 1 modules   (9 inline 8-bit counters): 9 [0x1, 0x2)\n#6 INITED cov: 5"
+    big = "INFO: Loaded 1 modules   (25000 inline 8-bit counters): 25000 [0x1, 0x2)"
+    assert smoke_threshold(tiny, 30) == 3        # 9 * 0.3 올림
+    assert smoke_threshold(big, 30) == 30
+    assert smoke_threshold("no info", 30) == 30
+    assert smoke_threshold(tiny, 0) == 0
+
+
 def test_no_smoke_skips_stage(tmp_path):
     smoke = FakeSmoke()
     run, rc, out, _ = _fake_run(tmp_path, smoke_exec=smoke, smoke=False)
@@ -391,3 +402,43 @@ def test_unexpected_llm_error_still_writes_summary(tmp_path):
     assert summary["ok"] is False
     assert summary["stages"][-1] == {**summary["stages"][-1], "stage": "GEN", "ok": False}
     assert "Connection error" in summary["stages"][-1]["error"]
+
+
+VULN_HARNESS = """#include <stdint.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#include "can_label.h"
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+    char *s = malloc(size + 1);
+    if (!s) return 0;
+    memcpy(s, data, size);
+    s[size] = 0;
+    copy_can_label(s);
+    free(s);
+    return 0;
+}
+"""
+
+
+def test_real_e2e_vuln_overflow_finds_stack_overflow(tmp_path):
+    if not _toolchain_ready(tmp_path):
+        pytest.skip("clang + compiler-rt(libFuzzer/ASan) + cmake + llvm 도구가 필요하다")
+    src = tmp_path / "vuln_overflow"
+    shutil.copytree(REPO / "examples" / "vuln_overflow", src,
+                    ignore=shutil.ignore_patterns("build*"))
+    data = json.loads((REPO / "targets" / "vuln_overflow.json").read_text(encoding="utf-8"))
+    data["build"]["source_root"] = str(src)
+    profile = tmp_path / "vuln_overflow.json"
+    profile.write_text(json.dumps(data), encoding="utf-8")
+    out = tmp_path / "out"
+
+    rc = GenericRun(RunOptions(profile=profile, budget=30, output=out, use_docker=False),
+                    llm=HarnessLLM(VULN_HARNESS)).run()
+
+    assert rc == 0
+    [group] = json.loads((out / "run_summary.json").read_text())["groups"]
+    assert group["smoke"]["passed"]                       # 작은 대상도 비율 임계치로 통과
+    assert group["crashes"] >= 1
+    analysis = json.loads((out / "analysis.json").read_text())
+    assert analysis["summary"]["true_positive"] >= 1

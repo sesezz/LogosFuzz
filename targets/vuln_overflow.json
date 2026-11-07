@@ -1,0 +1,26 @@
+{
+  "_comment": "의도적 취약 예제(examples/vuln_overflow). copy_can_label 이 NUL 종료 문자열을 16바이트 스택 버퍼에 strcpy 하는 CWE-121 스택 오버플로가 의도적으로 1건 있다. 크래시 증거 확보용.",
+  "name": "vuln-overflow",
+  "version": "0.1.0",
+  "language": "c",
+  "domain": "generic",
+  "build": {
+    "system": "cmake",
+    "source_root": "examples/vuln_overflow",
+    "build_dir": "build-fuzz",
+    "configure_args": [],
+    "libraries": ["build-fuzz/libcanlabel.a"],
+    "include_dirs": ["."],
+    "link_flags": [],
+    "compile_commands": "build-fuzz/compile_commands.json",
+    "bazel": null
+  },
+  "apis": ["copy_can_label"],
+  "error_contract": "c_return_code",
+  "embedded": {
+    "strip_flags": [],
+    "stub_undefined": false,
+    "stub_allowlist": []
+  },
+  "seeds": ["seeds"]
+}
