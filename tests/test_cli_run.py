@@ -304,14 +304,17 @@ def test_low_coverage_harness_is_regenerated(tmp_path):
     assert group["smoke"]["passed"]
 
 
-def test_crashing_harness_is_dropped_after_retries(tmp_path):
+def test_all_crashing_harnesses_still_fuzz_with_last_regeneration(tmp_path):
     run, rc, out, _ = _fake_run(tmp_path, top=1, smoke_exec=FakeSmoke(CRASH), smoke_retries=1)
-    assert rc == 1
+    assert rc == 0
     summary = json.loads((out / "run_summary.json").read_text())
-    assert summary["stages"][-1]["stage"] == "SMOKE" and not summary["stages"][-1]["ok"]
-    assert summary["groups"][0]["smoke"]["regenerated"] == 1
+    smoke = next(s for s in summary["stages"] if s["stage"] == "SMOKE")
+    assert smoke["ok"] and smoke["fallback_crashed"] == 1
+    [group] = summary["groups"]
+    assert group["smoke"]["regenerated"] == 1 and not group["smoke"]["passed"]
+    assert group["smoke"]["used"]
     assert summary["totals"]["smoke_immediate_crash"] == 1
-    assert not (out / "fuzz_summary.json").exists()
+    assert len(FakeSession.seen["groups"]) == 1
 
 
 TARGET_BUG = ProcResult(1, False, stderr="#1 INITED cov: 40\n"

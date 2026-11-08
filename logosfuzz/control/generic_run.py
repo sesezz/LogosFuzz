@@ -513,7 +513,7 @@ class GenericRun:
         걸러내는 두 경우: 시작 직후 크래시(타임아웃 포함), 크래시는 없지만
         edge 커버리지가 ``smoke_min_edges`` 미만(대상 라이브러리 미도달).
         실패 시 사유·로그를 넣어 최대 ``smoke_retries`` 회 재생성
-        모두 실패하면 크래시 없는 저커버리지 하네스만 남겨 EXE 진행(전부 크래시면 중단)
+        모두 실패하면 크래시 없는 저커버리지 하네스만 남겨 EXE 진행(전부 크래시면 마지막 재생성본으로 진행)
         """
         from logosfuzz.execute.docker_runner import DockerIsolationRunner
         from logosfuzz.execute.errors import ExecuteError
@@ -528,7 +528,7 @@ class GenericRun:
                 except ExecuteError as exc:
                     raise StageFailed(f"격리 이미지 준비 실패: {exc}") from exc
             seeds = profile_seed_paths(self.profile)
-            passed, low_cov = [], []
+            passed, low_cov, failed = [], [], []
             for entry, draft, source in built:
                 attempts = []
                 while True:
@@ -554,10 +554,17 @@ class GenericRun:
                     passed.append((entry, draft, source))
                 elif not (last["crashed"] or last["timed_out"]):
                     low_cov.append((entry, draft, source))
+                else:
+                    failed.append((entry, draft, source))   # 마지막 재생성본 보관
             kept = passed
             if not kept and low_cov:
                 self._log("  [WARN] dry-run 통과 하네스가 없다 - 크래시 없는 저커버리지 하네스로 계속한다")
                 kept = low_cov
+            if not kept and failed:
+                # 전부 탈락 시 실행 중단 대신 마지막 재생성본으로 퍼징 계속 (결과 기록 보장)
+                self._log("  [WARN] 모든 하네스가 dry-run 에서 크래시 - 마지막 재생성본으로 퍼징 계속")
+                kept = failed
+                st.detail["fallback_crashed"] = len(failed)
             for entry, _, _ in built:
                 entry["smoke"]["used"] = any(entry is e for e, _, _ in kept)
             st.detail.update(total=len(built), passed=len(passed),
