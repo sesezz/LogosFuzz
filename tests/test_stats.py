@@ -44,3 +44,22 @@ def test_rate_is_zero_without_execs_or_time():
     assert s.rate(elapsed_sec=5.0) == 0.0
     s.update_from_line("#10 NEW exec/s: 0")
     assert s.rate(elapsed_sec=0.0) == 0.0
+
+
+def test_fork_mode_line_is_parsed():
+    """fork 모드(-fork=N) 진행 라인 형식 "#N: ..." 파싱"""
+    s = LiveStats(group="g")
+    line = ("#786307: cov: 6 ft: 6 corp: 1 exec/s: 117236 "
+            "oom/timeout/crash: 1/2/649 time: 8s job: 651 dft_time: 0")
+    assert s.update_from_line(line)
+    assert s.execs == 786307
+    assert s.coverage == 6
+    assert s.exec_per_sec == 117236
+    assert s.crashes == 652
+
+
+def test_fork_mode_crash_count_does_not_decrease():
+    s = LiveStats(group="g")
+    s.update_from_line("#10: cov: 3 ft: 3 corp: 1 exec/s: 0 oom/timeout/crash: 0/0/5 time: 0s")
+    s.update_from_line("#20: cov: 3 ft: 3 corp: 1 exec/s: 0 oom/timeout/crash: 0/0/2 time: 0s")
+    assert s.crashes == 5

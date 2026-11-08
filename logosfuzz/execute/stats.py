@@ -13,8 +13,11 @@ from dataclasses import dataclass
 
 
 # libFuzzer 진행 라인 예: "#1024 pulse cov: 231 ft: 512 exec/s: 512 ..."
+# fork 모드(-fork=N) 라인 예: "#1201: cov: 6 ft: 6 corp: 1 exec/s: 0 oom/timeout/crash: 0/0/1 ..."
 # 라인마다 필드가 가변적이므로 필드별 독립 검색
-_LF_EXECS = re.compile(r"^#(\d+)\s+\w+")
+_LF_EXECS = re.compile(r"^#(\d+):?\s+\w+")
+# fork 모드 누적 결함 수 (oom/timeout/crash)
+_LF_FORK_FAULTS = re.compile(r"\boom/timeout/crash:\s*(\d+)/(\d+)/(\d+)")
 _LF_COV = re.compile(r"\bcov:\s*(\d+)", re.IGNORECASE)
 _LF_EPS = re.compile(r"\bexec/s:\s*(\d+)", re.IGNORECASE)
 # AFL++ status 라인 일부 예: "corpus count : 120", "exec speed : 900/sec"
@@ -48,6 +51,10 @@ class LiveStats:
             me = _LF_EPS.search(stripped)
             if me:
                 self.exec_per_sec = float(me.group(1))
+            mf = _LF_FORK_FAULTS.search(stripped)
+            if mf:
+                total = sum(int(g) for g in mf.groups())
+                self.crashes = max(self.crashes, total)
 
         m = _AFL_EXEC_SPEED.search(line)
         if m:

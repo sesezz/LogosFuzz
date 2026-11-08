@@ -298,12 +298,19 @@ class DockerIsolationRunner:
             args.append(f"-dict={_CONTAINER_DICT if in_docker else dict_path}")
         return args
 
-    @staticmethod
-    def _run_limit_args(timeout_sec: int, smoke_runs: Optional[int]) -> list:
-        """본 퍼징은 -max_total_time, 스모크 테스트는 -runs 로 실행 횟수 제한"""
-        if smoke_runs is None:
-            return [f"-max_total_time={timeout_sec}"]
-        return [f"-runs={smoke_runs}", f"-max_total_time={timeout_sec}"]
+    def _run_limit_args(self, timeout_sec: int, smoke_runs: Optional[int]) -> list:
+        """본 퍼징은 -max_total_time(+ fork 모드 인자), 스모크 테스트는 -runs 로 실행 횟수 제한
+
+        스모크 테스트는 단일 프로세스 고정 (-runs 와 -fork 동시 사용 시 -runs 미적용)
+        """
+        if smoke_runs is not None:
+            return [f"-runs={smoke_runs}", f"-max_total_time={timeout_sec}"]
+        args = [f"-max_total_time={timeout_sec}"]
+        if self.config.fork_jobs > 0:
+            args.append(f"-fork={self.config.fork_jobs}")
+            if self.config.ignore_crashes:
+                args.append("-ignore_crashes=1")
+        return args
 
     def smoke_dir(self, group: LogicGroup) -> Path:
         """스모크 테스트 크래시 산출물 위치 (본 퍼징 crashes/ 와 분리)"""
@@ -334,15 +341,18 @@ class DockerIsolationRunner:
             return None
         return f"{getuid()}:{getgid()}"
 
-    def build_run_argv(self, group: LogicGroup, smoke_runs: Optional[int] = None) -> list:
+    def build_run_argv(self, group: LogicGroup, smoke_runs: Optional[int] = None,
+                       inner_cmd: Optional[str] = None, suffix: Optional[str] = None) -> list:
+        """docker run 인자 목록. inner_cmd 지정 시 컨테이너 내부 명령 대체(크래시 재실행용)"""
         c = self.config
-        suffix = "" if smoke_runs is None else "-smoke"
+        if suffix is None:
+            suffix = "" if smoke_runs is None else "-smoke"
         argv = [
             self.docker_bin, "run", "--rm",
             "--name", f"logosfuzz-{group.name}{suffix}",
             "--network", c.network,
             "--memory", c.memory_limit,
-            "--cpus", c.cpus,
+            "--cpus", c.effective_cpus,
             "--pids-limit", str(c.pids_limit),
         ]
         if c.drop_all_caps:
@@ -375,7 +385,7 @@ class DockerIsolationRunner:
             argv += ["-e", f"{k}={v}"]
         argv += [
             c.image,
-            "bash", "-lc", self._in_container_cmd(group, smoke_runs),
+            "bash", "-lc", inner_cmd or self._in_container_cmd(group, smoke_runs),
         ]
         return argv
 
@@ -412,6 +422,37 @@ class DockerIsolationRunner:
         }
         argv = ["env", *[f"{k}={v}" for k, v in pairs.items()], *argv]
         return argv
+
+    # ---- fork 모드 크래시 재실행 ---------------------------------------
+    def replay_argv(self, group: LogicGroup, crash_file: Path) -> list:
+        """크래시 입력 1건 단독 재실행 커맨드 (본 퍼징과 같은 격리·sanitizer 옵션)
+
+        fork 모드의 부모 프로세스는 자식 sanitizer 보고 중 ERROR 한 줄만 출력하므로
+        스택 복원용 전체 보고 확보 목적
+        """
+        opts = [f"-timeout={self.per_input_timeout_sec()}"]
+        if self.config.rss_limit_mb > 0:
+            opts.append(f"-rss_limit_mb={self.config.rss_limit_mb}")
+        if self.config.malloc_limit_mb > 0:
+            opts.append(f"-malloc_limit_mb={self.config.malloc_limit_mb}")
+        if self.config.use_docker:
+            rel = Path(crash_file).resolve().relative_to(self.config.output_dir.resolve())
+            harness = f"/harness/{group.harness_path.name}"
+            inner = "chmod +x %s 2>/dev/null; %s %s %s" % (
+                shlex.quote(harness), shlex.quote(harness), " ".join(opts),
+                shlex.quote(f"/out/{rel.as_posix()}"))
+            return self.build_run_argv(group, inner_cmd=inner, suffix="-replay")
+        pairs = {"ASAN_OPTIONS": self.config.asan_options,
+                 "TSAN_OPTIONS": self.config.tsan_options}
+        return ["env", *[f"{k}={v}" for k, v in pairs.items()],
+                str(self.harness_binary_path(group)), *opts, str(crash_file)]
+
+    def replay_crash(self, group: LogicGroup, crash_file: Path) -> list:
+        """크래시 입력 1건 재실행 후 sanitizer 결함 목록 반환 (재현 실패 시 빈 목록)"""
+        monitor = SanitizerMonitor()
+        timeout = self.per_input_timeout_sec() + 30
+        self.executor(self.replay_argv(group, crash_file), timeout, monitor.feed)
+        return monitor.finish()
 
     # ---- 스모크 테스트 (GEN-03-04 dry-run) -----------------------------
     def run_smoke(self, group: LogicGroup, runs: int, timeout_sec: int) -> ProcResult:

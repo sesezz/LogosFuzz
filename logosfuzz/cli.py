@@ -114,6 +114,9 @@ def _build_parser() -> argparse.ArgumentParser:
     f.add_argument("--coverage", default="none",
                    help="커버리지 계측(EXE-04-04): none | llvm-cov | sancov (기본 none). "
                         "하네스가 해당 계측 플래그로 빌드돼 있어야 수집된다.")
+    f.add_argument("--fork", dest="fork_jobs", type=int, default=0,
+                   help="libFuzzer -fork=N -ignore_crashes=1 병렬 퍼징 (기본 0 = 단일 프로세스). "
+                        "Docker --cpus 는 N 이상으로 상향")
 
     # ANA 단계(Step 5/6): 크래시 중복 제거(ANA-05-04) → 정/오탐 판별(ANA-05-01)
     a = sub.add_parser("analyze",
@@ -282,6 +285,7 @@ def main(argv: list | None = None) -> int:
             dockerfile=default_exec_dockerfile(build_system),
             coverage=CoverageMode.parse(args.coverage),
             symbolize_crashes=args.symbolize,
+            fork_jobs=max(0, args.fork_jobs),
         )
         groups = discover_groups(harness_dir, args.groups)
         if not groups:
