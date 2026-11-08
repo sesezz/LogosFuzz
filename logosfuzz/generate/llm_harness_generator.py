@@ -530,7 +530,8 @@ STRICT RULES:
 """
     if domain != "automotive":
         old_rule_8 = ("8. Do NOT invent or call any function not explicitly listed above.\n")
-        assert old_rule_8 in prompt
+        if old_rule_8 not in prompt:  # 기본 규칙 문구 변경 시 범용 규칙 누락 방지
+            raise RuntimeError("C 프롬프트 규칙 8 문구 불일치로 범용 대상 규칙 적용 불가")
         prompt = prompt.replace(old_rule_8, _C_GENERIC_RULE_8) + _C_GENERIC_EXTRA_RULES
     return prompt
 
