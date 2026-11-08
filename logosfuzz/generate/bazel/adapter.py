@@ -135,16 +135,14 @@ class BazelAdapter:
         있으면 디렉터리를 정리한다.
         """
         pkg = self.package_dir(spec)
-        if not pkg.is_dir():
-            return
-        for name in self._manifest(pkg):
+        for name in self._manifest(pkg):    # 디렉터리 사전 확인 없이 진행(없으면 빈 목록)
             try:
                 safe_join(pkg, name).unlink()
             except (FileNotFoundError, UnsafePathError):
                 pass
         try:
             (pkg / MANIFEST_NAME).unlink()
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):  # pkg 부재·비디렉터리 시 무시
             pass
         try:
             pkg.rmdir()                     # 비어 있을 때만 지워진다
