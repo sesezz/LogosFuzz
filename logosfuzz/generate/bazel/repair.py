@@ -15,11 +15,17 @@ D 파트의 `generate/build_errors.py` 가 맡는다.
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
 from .build_file import FuzzTargetSpec, parse_label
+
+_LOG = logging.getLogger(__name__)
+
+# D 분류기와 처방 변환에서 입력이 예상과 다를 때 나는 예외(라벨 형식 오류는 parse_label 의 ValueError)
+_CLASSIFY_ERRORS = (ValueError, KeyError, IndexError, TypeError, AttributeError)
 
 # no such target '//score/json:jsonn': target 'jsonn' not declared in
 # package 'score/json' ... (did you mean json?)
@@ -270,11 +276,14 @@ def classify_with_bazel_errors(log: str, spec: FuzzTargetSpec) -> Optional[Build
         from logosfuzz.generate.bazel_errors import classify as d_classify
     except ImportError:
         return None
+    # 로그 형식이 예상과 다르거나(분류기 내부의 인덱스·키·속성 접근), 라벨을 해석하지 못하는 경우(ValueError)만
+    # 폴백한다. 그 밖의 예외는 숨기지 않고 그대로 올려 버그가 드러나게 한다.
     try:
         report = d_classify(log or "", requested_target=spec.bin_label)
-    except Exception:
+        return fix_from_report(report, spec)
+    except _CLASSIFY_ERRORS as exc:
+        _LOG.warning("D 분류기 결과를 쓰지 못해 내장 분류기로 폴백한다: %s: %s", type(exc).__name__, exc)
         return None
-    return fix_from_report(report, spec)
 
 
 def default_classifier(
