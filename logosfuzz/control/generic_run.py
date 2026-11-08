@@ -466,8 +466,11 @@ class GenericRun:
         return smoke, ("" if cov.passed else cov.reason), smoke.log
 
     def _crash_in_harness(self, log: str, entry) -> bool:
-        """dry-run 크래시의 첫 소스 프레임이 하네스 파일인지 여부 (위치 불명 시 False)"""
-        from logosfuzz.execute.sanitizer import SanitizerMonitor
+        """dry-run 크래시의 첫 소스 프레임 또는 넘친 메모리의 할당 위치가 하네스 파일인지 여부
+
+        하네스 콜백이 꼬리 호출로 스택에서 빠져도 할당 위치(하네스의 malloc)로 판별. 위치 불명 시 False
+        """
+        from logosfuzz.execute.sanitizer import SanitizerMonitor, source_locations
         from logosfuzz.execute.symbolize import CrashSymbolizer
 
         monitor = SanitizerMonitor()
@@ -477,8 +480,12 @@ class GenericRun:
         if not findings:
             return False
         CrashSymbolizer(self.fuzz_config(1)).symbolize(findings)   # 프레임 파일:줄 복원
-        frames = findings[0].traceback
-        return bool(frames) and Path(frames[0].file).stem == Path(entry["binary"]).name
+        raw = findings[0].raw_log
+        alloc = next((i for i, line in enumerate(raw) if "allocated by thread" in line), None)
+        alloc_frames = source_locations(raw[alloc + 1:]) if alloc is not None else []
+        harness = Path(entry["binary"]).name
+        return any(frames and Path(frames[0].file).stem == harness
+                   for frames in (findings[0].traceback, alloc_frames))
 
     def _regenerate(self, entry, draft, source, reason, log):
         """dry-run 실패 사유를 넣어 LLM 재생성 → HEAL 재빌드. 성공 시 (draft, source)"""
