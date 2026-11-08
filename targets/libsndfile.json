@@ -39,5 +39,7 @@
     "stub_allowlist": []
   },
   "_seeds": "WAV, AIFF, AU 정상 소리 파일 6개 (각 400바이트 이하, 실제 libsndfile 열기·읽기 확인)",
-  "seeds": ["../../targets/seeds/libsndfile"]
+  "seeds": ["../../targets/seeds/libsndfile"],
+  "_dictionary": "libFuzzer 사전: src/ 의 MAKE_MARKER 형식 매직·청크 ID (RIFF, WAVE, FORM, AIFF, caff ...) + NIST·VOC 헤더 문자열",
+  "dictionary": "../../targets/dicts/libsndfile.dict"
 }

@@ -21,14 +21,15 @@ EXT/KB, GEN 빌드 어댑터, EXE, ANA 공용 (:func:`load_profile`), 필드 변
       "apis": [...],
       "error_contract": "none" | "c_return_code" | "score_result",
       "embedded": {"strip_flags": [...], "stub_undefined": false, "stub_allowlist": [...]},
-      "seeds": [...]
+      "seeds": [...],
+      "dictionary": "../../targets/dicts/libsndfile.dict"
     }
 
 경로 규칙:
     * ``build.source_root`` 상대경로는 ``load_profile(path, base_dir=...)`` 의
       ``base_dir``(기본: 현재 작업 디렉터리 = 저장소 루트) 기준 해석
     * 나머지 ``build.*`` 경로(build_dir, libraries, include_dirs, compile_commands,
-      bazel.workspace)와 ``seeds`` 는 source_root 기준 상대경로,
+      bazel.workspace)와 ``seeds``, ``dictionary`` 는 source_root 기준 상대경로,
       :meth:`TargetProfile.abs` 로 절대경로 획득
 
 ``_`` 로 시작하는 키는 주석으로 무시, 그 밖의 미지 키는 :class:`ProfileError`
@@ -48,7 +49,7 @@ ERROR_CONTRACTS = ("none", "c_return_code", "score_result")
 
 _TOP_KEYS = {
     "name", "version", "language", "domain", "build", "apis",
-    "error_contract", "embedded", "seeds",
+    "error_contract", "embedded", "seeds", "dictionary",
 }
 _BUILD_KEYS = {
     "system", "source_root", "build_dir", "configure_args", "libraries",
@@ -116,6 +117,8 @@ class TargetProfile:
     apis: Tuple[str, ...] = ()
     embedded: EmbeddedSpec = field(default_factory=EmbeddedSpec)
     seeds: Tuple[str, ...] = ()
+    # libFuzzer 사전 파일 경로 (선택, 비어 있으면 사전 미사용)
+    dictionary: str = ""
     # source_root 해석 절대경로 (abs() 기준점)
     root: Path = field(default=Path("."), compare=False)
     # 프로필 파일 경로 (로그/리포트용, 직접 생성 시 None)
@@ -166,6 +169,8 @@ class TargetProfile:
                 "stub_allowlist": list(self.embedded.stub_allowlist),
             },
             "seeds": list(self.seeds),
+            # 사전 미지정 프로필은 기존 형태 그대로 유지
+            **({"dictionary": self.dictionary} if self.dictionary else {}),
         }
 
 
@@ -313,6 +318,7 @@ def parse_profile(
         error_contract=_enum(data, "error_contract", ERROR_CONTRACTS, "profile"),
         embedded=_parse_embedded(_mapping(data, "embedded", "profile", required=False)),
         seeds=_str_list(data, "seeds", "profile", allow_single=True),
+        dictionary=_opt_str(data, "dictionary", "profile"),
         root=root.resolve(),
         path=path,
     )
