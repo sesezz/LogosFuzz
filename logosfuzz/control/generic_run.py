@@ -33,7 +33,7 @@ import re
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
@@ -56,7 +56,7 @@ MIN_GROUP_SEC = 30
 DEFAULT_MODEL = "gpt-4o-mini"
 
 #: 스모크 테스트 기본값 (dry-run 실행 횟수, 시간 상한(초), 최소 edge 커버리지, 재생성 횟수)
-SMOKE_RUNS = 200
+SMOKE_RUNS = 5000  # 시드에서는 바로 반환되고 변형 입력 수천 건 뒤에 죽는 하네스까지 검출
 SMOKE_TIMEOUT_SEC = 30
 SMOKE_MIN_EDGES = 30
 SMOKE_RETRIES = 2
@@ -64,6 +64,23 @@ SMOKE_RETRIES = 2
 SMOKE_MIN_RATIO = 0.3
 
 _COUNTERS_RE = re.compile(r"\((\d+) inline 8-bit counters\)")
+
+#: dry-run 크래시 중 대상 코드 결함으로 보는 ASan 오류 유형 (SEGV·보고 없는 종료는 하네스 결함 유지)
+_TARGET_BUG_KINDS = (
+    "heap-buffer-overflow", "stack-buffer-overflow", "stack-buffer-underflow",
+    "global-buffer-overflow", "dynamic-stack-buffer-overflow", "container-overflow",
+    "heap-use-after-free", "stack-use-after-return", "stack-use-after-scope",
+    "use-after-poison", "attempting double-free", "double-free", "alloc-dealloc-mismatch",
+)
+_ASAN_ERROR_RE = re.compile(r"ERROR: AddressSanitizer: ([a-z-]+(?: [a-z-]+)?)")
+
+
+def smoke_target_bug(log: str) -> str:
+    """dry-run 크래시 로그의 대상 코드 결함 유형 (하네스 결함 의심이면 빈 문자열)"""
+    match = _ASAN_ERROR_RE.search(log or "")
+    if not match:
+        return ""
+    return next((k for k in _TARGET_BUG_KINDS if match.group(1).startswith(k)), "")
 
 #: 재생성 프롬프트에 넣을 dry-run 로그 최대 길이(자)
 _SMOKE_LOG_CHARS = 4000
@@ -437,7 +454,12 @@ class GenericRun:
             HarnessArtifact(group_id=entry["slug"], harness_path=Path(entry["binary"])),
             _smoke_test_config(self.opts), runner=via_isolation)
         if not smoke.passed:
-            return smoke, smoke.reason, smoke.log
+            bug = smoke_target_bug(smoke.log) if smoke.crashed else ""
+            if not bug:
+                return smoke, smoke.reason, smoke.log
+            # 대상 코드 결함 의심 크래시: 하네스 결함이 아니므로 재생성 없이 통과
+            self._log(f"    대상 코드 결함 의심 크래시({bug}) - 하네스 유지")
+            return replace(smoke, passed=True, crashed=False, reason=""), "", smoke.log
         cov = check_coverage(smoke.coverage_edges, smoke_threshold(smoke.log, self.opts.smoke_min_edges))
         return smoke, ("" if cov.passed else cov.reason), smoke.log
 

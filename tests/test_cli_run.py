@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from logosfuzz import cli
-from logosfuzz.control.generic_run import GenericRun, RunOptions, split_budget
+from logosfuzz.control.generic_run import SMOKE_RUNS, GenericRun, RunOptions, split_budget
 from logosfuzz.execute.coverage import CmdResult
 from logosfuzz.execute.docker_runner import ProcResult
 from logosfuzz.generate.build.base import BuildResult
@@ -279,7 +279,7 @@ def test_smoke_argv_uses_runs_and_libfuzzer_options(tmp_path):
     smoke = FakeSmoke()
     _fake_run(tmp_path, top=1, smoke_exec=smoke, max_len=1024)
     argv = " ".join(smoke.calls[0])
-    assert "-runs=200" in argv and "-max_len=1024" in argv
+    assert f"-runs={SMOKE_RUNS}" in argv and "-max_len=1024" in argv
     assert "-timeout=1" in argv and "-rss_limit_mb=2048" in argv
     assert "/smoke/" in argv                     # 본 퍼징 crashes/ 와 분리
 
@@ -312,6 +312,33 @@ def test_crashing_harness_is_dropped_after_retries(tmp_path):
     assert summary["groups"][0]["smoke"]["regenerated"] == 1
     assert summary["totals"]["smoke_immediate_crash"] == 1
     assert not (out / "fuzz_summary.json").exists()
+
+
+TARGET_BUG = ProcResult(1, False, stderr="#1 INITED cov: 40\n"
+                        "==1==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x1")
+
+
+def test_target_bug_crash_in_smoke_keeps_harness(tmp_path):
+    smoke = FakeSmoke(TARGET_BUG)
+    run, rc, out, _ = _fake_run(tmp_path, top=1, smoke_exec=smoke)
+    assert rc == 0
+    summary = json.loads((out / "run_summary.json").read_text())
+    [group] = summary["groups"]
+    assert group["smoke"]["passed"] and group["smoke"]["regenerated"] == 0
+    assert summary["totals"]["smoke_immediate_crash"] == 0
+    assert len(FakeSession.seen["groups"]) == 1
+
+
+@pytest.mark.parametrize("log, expected", [
+    ("==1==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x1", "heap-buffer-overflow"),
+    ("==1==ERROR: AddressSanitizer: attempting double-free on 0x1", "attempting double-free"),
+    ("==1==ERROR: AddressSanitizer: SEGV on unknown address (pc 0x1)", ""),
+    ("==1== ERROR: libFuzzer: deadly signal", ""),
+    ("", ""),
+])
+def test_smoke_target_bug_classification(log, expected):
+    from logosfuzz.control.generic_run import smoke_target_bug
+    assert smoke_target_bug(log) == expected
 
 
 def test_low_coverage_only_harness_still_fuzzes_as_fallback(tmp_path):
