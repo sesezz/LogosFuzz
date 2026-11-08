@@ -153,7 +153,8 @@ def _kb_lookup(kb, function: str):
         return None
     try:
         return kb.api(function)
-    except Exception:
+    except (OSError, ValueError, KeyError, IndexError, AttributeError, TypeError):
+        # KB 미탑재·레코드 구조 불일치: 계약 근거 없이 판별 계속
         return None
 
 

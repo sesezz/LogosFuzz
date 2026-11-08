@@ -145,7 +145,8 @@ def analyze_with_clang(path, clang_args=None, language=None):
     try:
         index = cindex.Index.create()
         tu = index.parse(path, args=clang_args)
-    except Exception as e:
+    except (cindex.LibclangError, cindex.TranslationUnitLoadError,
+            OSError, ValueError, AttributeError) as e:  # libclang 미탐지·파싱 실패
         logger.warning(
             "libclang을 사용할 수 없어 정규식 폴백으로 전환합니다 (%s: %s). "
             "이 폴백은 'nodes'/'FUNCTION_DECL' 스키마를 만들지 않으므로 "
@@ -207,14 +208,14 @@ def analyze_with_clang(path, clang_args=None, language=None):
                     None if node.kind.name == "CONSTRUCTOR"
                     else node.result_type.spelling
                 )
-            except Exception:
+            except (AssertionError, AttributeError, ValueError):  # 반환 타입 해석 불가
                 entry['return_type'] = None
             try:
                 entry['params'] = [
                     {'name': a.spelling or '', 'type': a.type.spelling}
                     for a in node.get_arguments()
                 ]
-            except Exception:
+            except (AssertionError, AttributeError, ValueError, TypeError):  # 인자 목록 해석 불가
                 entry['params'] = []
             # get_arguments()에 없는 가변인자(`...`) 별도 표시
             # (누락 시 헤더 선언과 conflicting types)
@@ -224,7 +225,7 @@ def analyze_with_clang(path, clang_args=None, language=None):
                 entry['is_variadic'] = False
             try:
                 entry['is_static'] = (node.storage_class == cindex.StorageClass.STATIC)
-            except Exception:
+            except (AssertionError, AttributeError, ValueError):  # 저장 클래스 해석 불가
                 entry['is_static'] = False
             entry['is_definition'] = is_definition(node)
             entry['callable_kind'] = node.kind.name

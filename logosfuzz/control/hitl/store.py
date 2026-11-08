@@ -112,16 +112,20 @@ class JsonReviewStore(ReviewStore):
         # 고정 이름(.tmp)을 쓰면 두 프로세스가 같은 임시 파일을 덮어쓴다.
         fd, tmp_name = tempfile.mkstemp(prefix=self.path.name + ".", suffix=".tmp",
                                         dir=str(self.path.parent))
+        replaced = False
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(json.dumps(data, ensure_ascii=False, indent=2))
                 fh.flush()
                 os.fsync(fh.fileno())
             os.replace(tmp_name, self.path)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_name)
-            raise
+            replaced = True
+        finally:
+            # 교체 전에 빠져나간 모든 경로(예외·인터럽트)에서 임시 파일 정리.
+            # 예외는 그대로 올라가고 승인 기록은 기존대로 호출자가 실패로 본다.
+            if not replaced:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_name)
 
     def _flush(self) -> None:
         self._write_disk()

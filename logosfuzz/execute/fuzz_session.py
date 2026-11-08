@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -258,7 +259,9 @@ class FuzzSession:
         """
         try:
             report = self.symbolizer.symbolize(findings)
-        except Exception as exc:  # 도구 출력 형식 변화 등 예상 못한 실패
+        except (OSError, subprocess.SubprocessError, RuntimeError, ValueError,
+                KeyError, IndexError, AttributeError, TypeError) as exc:
+            # 심볼라이저 실행 실패·출력 형식 변화
             self._log(f"  - 심볼라이즈 실패({exc.__class__.__name__}), 원문 그대로 둠")
             return
         if not report.attempted:

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -23,6 +24,20 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from logosfuzz.generate.contracts import FeedbackPayload, HarnessArtifact, RegenerateCallback
+
+#: 재생성/재컴파일 콜백이 던질 수 있는 예외
+#: LLM·툴체인 호출 실패(RuntimeError·OSError·SubprocessError), 응답 값 오류(ValueError),
+#: 콜백 계약 불일치(TypeError·AttributeError·KeyError·IndexError)
+_REGENERATE_ERRORS: tuple[type[BaseException], ...] = (
+    RuntimeError, OSError, subprocess.SubprocessError, ValueError,
+    TypeError, AttributeError, KeyError, IndexError,
+)
+try:  # openai 미설치 환경 대비 선택적 import
+    from openai import OpenAIError as _OpenAIError
+except ImportError:  # pragma: no cover - openai 미설치 시 기본 예외만 사용
+    pass
+else:
+    _REGENERATE_ERRORS = _REGENERATE_ERRORS + (_OpenAIError,)
 from logosfuzz.generate.llm_review import StaticReviewer
 from logosfuzz.generate.validation import (
     Runner,
@@ -173,7 +188,7 @@ def validate_with_retry(
         feedback = _make_feedback(current, round_no, report)
         try:
             current = regenerate_fn(current, feedback)
-        except Exception as e:  # noqa: BLE001 — 재진입점 실패는 재시도 중단 사유로만 처리
+        except _REGENERATE_ERRORS as e:  # 재진입점 실패는 재시도 중단 사유로만 처리
             _log(f"  [{current.group_id}] 재생성/재컴파일 콜백 실패: {e} — 재시도 중단")
             break
 
