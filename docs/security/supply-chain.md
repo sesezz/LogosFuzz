@@ -8,7 +8,7 @@
 
 | 구성요소 | 위치 | 고정 값 | 검증 방식 |
 | --- | --- | --- | --- |
-| ubuntu:24.04 베이스 | `docker/Dockerfile`, `docker/Dockerfile.selfheal` | `sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac` (multi-arch index, 2026-10-26 조회) | `FROM ...@sha256:` (Docker 가 digest 불일치 시 거부) |
+| ubuntu:24.04 베이스 | `docker/Dockerfile`, `docker/Dockerfile.generic`, `docker/Dockerfile.selfheal` | `sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac` (multi-arch index, 2026-10-26 조회) | `FROM ...@sha256:` (Docker 가 digest 불일치 시 거부) |
 | Bazelisk v1.25.0 linux-amd64 | 위와 같음 | `fd8fdff418a1758887520fa42da7e6ae39aefc788cf5e7f7bb8db6934d279fc4` | `sha256sum -c` (불일치·빈 값이면 빌드 실패) |
 | Bazelisk v1.25.0 linux-arm64 | `docker/Dockerfile` | `4c8d966e40ac2c4efcc7f1a5a5cceef2c0a2f16b957e791fa7a867cce31e8fcb` | 위와 같음 |
 | CI 스캐너 | `.github/workflows/security-checks.yml` | bandit 1.8.6, pip-audit 2.9.0 | pip 버전 고정 |
