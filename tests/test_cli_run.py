@@ -329,6 +329,22 @@ def test_target_bug_crash_in_smoke_keeps_harness(tmp_path):
     assert len(FakeSession.seen["groups"]) == 1
 
 
+HARNESS_BUG = ProcResult(1, False, stderr=(
+    "#1 INITED cov: 40\n"
+    "==1==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x1\n"
+    "    #0 0x1 in __asan_memcpy\n"
+    "    #1 0x2 in mem_read /tmp/out/build/harness/lg_proto_ctx_t.c:32:5\n"
+    "    #2 0x3 in psf_fread /src/file_io.c:349:10\n"))
+
+
+def test_memory_error_inside_harness_code_is_regenerated(tmp_path):
+    smoke = FakeSmoke(HARNESS_BUG, GOOD)
+    run, rc, out, _ = _fake_run(tmp_path, top=1, smoke_exec=smoke)
+    [group] = json.loads((out / "run_summary.json").read_text())["groups"]
+    assert group["smoke"]["regenerated"] == 1
+    assert group["smoke"]["attempts"][0]["crashed"]
+
+
 @pytest.mark.parametrize("log, expected", [
     ("==1==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x1", "heap-buffer-overflow"),
     ("==1==ERROR: AddressSanitizer: attempting double-free on 0x1", "attempting double-free"),

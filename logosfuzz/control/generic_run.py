@@ -455,6 +455,8 @@ class GenericRun:
             _smoke_test_config(self.opts), runner=via_isolation)
         if not smoke.passed:
             bug = smoke_target_bug(smoke.log) if smoke.crashed else ""
+            if bug and self._crash_in_harness(smoke.log, entry):
+                bug = ""                                     # 하네스 자체 코드의 메모리 오류
             if not bug:
                 return smoke, smoke.reason, smoke.log
             # 대상 코드 결함 의심 크래시: 하네스 결함이 아니므로 재생성 없이 통과
@@ -462,6 +464,21 @@ class GenericRun:
             return replace(smoke, passed=True, crashed=False, reason=""), "", smoke.log
         cov = check_coverage(smoke.coverage_edges, smoke_threshold(smoke.log, self.opts.smoke_min_edges))
         return smoke, ("" if cov.passed else cov.reason), smoke.log
+
+    def _crash_in_harness(self, log: str, entry) -> bool:
+        """dry-run 크래시의 첫 소스 프레임이 하네스 파일인지 여부 (위치 불명 시 False)"""
+        from logosfuzz.execute.sanitizer import SanitizerMonitor
+        from logosfuzz.execute.symbolize import CrashSymbolizer
+
+        monitor = SanitizerMonitor()
+        for line in (log or "").splitlines():
+            monitor.feed(line)
+        findings = [f for f in monitor.finish() if f.sanitizer == "ASAN"][:1]
+        if not findings:
+            return False
+        CrashSymbolizer(self.fuzz_config(1)).symbolize(findings)   # 프레임 파일:줄 복원
+        frames = findings[0].traceback
+        return bool(frames) and Path(frames[0].file).stem == Path(entry["binary"]).name
 
     def _regenerate(self, entry, draft, source, reason, log):
         """dry-run 실패 사유를 넣어 LLM 재생성 → HEAL 재빌드. 성공 시 (draft, source)"""
