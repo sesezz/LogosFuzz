@@ -56,7 +56,7 @@ MIN_GROUP_SEC = 30
 DEFAULT_MODEL = "gpt-4o-mini"
 
 #: 스모크 테스트 기본값 (dry-run 실행 횟수, 시간 상한(초), 최소 edge 커버리지, 재생성 횟수)
-SMOKE_RUNS = 5000  # 시드에서는 바로 반환되고 변형 입력 수천 건 뒤에 죽는 하네스까지 검출
+SMOKE_RUNS = 50000  # 변형 입력 수천~수만 건 뒤에 죽는 하네스까지 검출 (-max_total_time 로 시간 상한)
 SMOKE_TIMEOUT_SEC = 30
 SMOKE_MIN_EDGES = 30
 SMOKE_RETRIES = 2
