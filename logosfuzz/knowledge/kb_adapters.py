@@ -107,7 +107,7 @@ def _synergy_classes():
         from logosfuzz.schedule.sch_02_02_synergy_scheduler import ApiMetadata, Constraint
 
         return ApiMetadata, Constraint
-    except Exception:  # pragma: no cover - B 모듈이 없는 환경용 대체
+    except ImportError:  # pragma: no cover - B 모듈이 없는 환경용 대체
         from dataclasses import dataclass, field
 
         @dataclass

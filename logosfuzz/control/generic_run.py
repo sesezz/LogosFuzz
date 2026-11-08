@@ -30,12 +30,25 @@ from __future__ import annotations
 import json
 import math
 import re
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
+
+#: 실행 중단 시에도 요약을 남길 예외: 설정·값 오류, 파일·네트워크 오류, 외부 도구 실패, 구조 불일치
+_RUN_ERRORS: tuple[type[BaseException], ...] = (
+    ValueError, OSError, RuntimeError, subprocess.SubprocessError,
+    KeyError, IndexError, TypeError, AttributeError, ImportError,
+)
+try:  # openai 미설치 환경 대비 선택적 import
+    from openai import OpenAIError as _OpenAIError
+except ImportError:  # pragma: no cover - openai 미설치 시 기본 예외만 사용
+    pass
+else:
+    _RUN_ERRORS = _RUN_ERRORS + (_OpenAIError,)
 
 #: 그룹별 최소 퍼징 시간(초) (SCH 0초 배정 그룹도 최소한 실행)
 MIN_GROUP_SEC = 30
@@ -618,7 +631,7 @@ class GenericRun:
         started = datetime.now().isoformat()
         try:
             self.load_profile()
-        except Exception as exc:  # ProfileError 등
+        except (ValueError, OSError) as exc:  # ProfileError(ValueError)·파일 읽기 실패
             self._log(f"[프로필 오류] {exc}")
             return 2
         if self.profile.is_bazel:
@@ -652,7 +665,7 @@ class GenericRun:
         except StageFailed as exc:
             self._log(f"\n[중단] {exc}")
             rc = 1
-        except Exception as exc:  # 예상 못 한 실패(LLM 연결 오류 등)에도 요약 기록
+        except _RUN_ERRORS as exc:  # LLM 연결·외부 도구·파일 오류에도 요약 기록
             self._log(f"\n[중단] {type(exc).__name__}: {exc}")
             rc = 1
 
@@ -764,7 +777,7 @@ def options_from_args(args) -> RunOptions:
         try:
             from logosfuzz.common.target_profile import load_profile
             output = Path("out") / load_profile(args.profile).name
-        except Exception:
+        except (ValueError, OSError):  # 프로필 로드 실패 시 파일 이름 사용
             output = Path("out") / Path(args.profile).stem
     return RunOptions(profile=args.profile, budget=args.budget, output=output,
                       max_round=args.max_round, use_docker=args.docker, top=args.top,

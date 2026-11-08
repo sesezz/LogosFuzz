@@ -406,7 +406,7 @@ def _heal_details(heal) -> dict:
     if callable(digest):
         try:
             details["error_digest"] = digest()
-        except Exception as exc:
+        except (AttributeError, TypeError, ValueError, IndexError) as exc:  # 컴파일 결과 구조 불일치
             logger.debug("error_digest 계산 실패: %s", exc)
     rounds = []
     for item in getattr(heal, "rounds", None) or []:

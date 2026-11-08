@@ -208,7 +208,7 @@ class DenseIndex:
     def available() -> bool:
         try:
             import sentence_transformers  # noqa: F401
-        except Exception:
+        except (ImportError, OSError, RuntimeError):  # 미설치·의존 라이브러리 로드 실패
             return False
         return True
 

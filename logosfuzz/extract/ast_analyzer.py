@@ -28,7 +28,7 @@ ANALYZABLE_SUFFIXES = CXX_SUFFIXES | C_HEADER_SUFFIXES | {".c"}
 try:
     from clang import cindex
     HAVE_CLANG = True
-except Exception:
+except ImportError:  # clang 바인딩 미설치
     HAVE_CLANG = False
 
 _libclang_resolved = False
@@ -47,7 +47,7 @@ def _resolve_libclang():
     try:
         cindex.Index.create()
         return  # 기본 탐색 성공 시 유지
-    except Exception as exc:
+    except cindex.LibclangError as exc:  # 기본 경로에서 libclang 미탐지
         logger.debug("libclang 기본 탐색 실패, 패키지 경로 탐색: %s", exc)
 
     try:
@@ -58,7 +58,7 @@ def _resolve_libclang():
             if os.path.exists(candidate):
                 cindex.Config.set_library_file(candidate)
                 return
-    except Exception as exc:
+    except (ImportError, AttributeError, OSError) as exc:  # 동봉 패키지 부재·경로 오류
         logger.debug("libclang 패키지 경로 탐색 실패: %s", exc)
 
 
@@ -139,7 +139,7 @@ def analyze_with_clang(path, clang_args=None, language=None):
                 inc = f"-I{resource_dir}/include"
                 if inc not in clang_args:
                     clang_args = list(clang_args) + [inc]
-        except Exception as exc:
+        except (OSError, subprocess.SubprocessError) as exc:  # clang 실행 실패·비정상 종료
             logger.debug("clang resource-dir 조회 실패: %s", exc)
 
     try:
@@ -166,7 +166,7 @@ def analyze_with_clang(path, clang_args=None, language=None):
     def is_definition(node):
         try:
             defined = bool(node.is_definition())
-        except Exception:
+        except (AttributeError, ValueError):  # 커서 종류 해석 불가
             defined = False
         if defined or node.kind.name != "FUNCTION_TEMPLATE":
             return defined
@@ -175,14 +175,14 @@ def analyze_with_clang(path, clang_args=None, language=None):
         try:
             if any(token.spelling == "{" for token in node.get_tokens()):
                 return True
-        except Exception as exc:
+        except (AttributeError, ValueError) as exc:  # 토큰 범위 해석 불가
             logger.debug("토큰 조회 실패: %s", exc)
         if source_text:
             try:
                 head = source_text[:node.extent.end.offset].rstrip()
                 tail = source_text[node.extent.end.offset:].lstrip()
                 return head.endswith("{") or tail.startswith("{")
-            except Exception as exc:
+            except (AttributeError, ValueError, TypeError) as exc:  # 범위 오프셋 해석 불가
                 logger.debug("소스 범위 확인 실패: %s", exc)
         return False
 
@@ -190,7 +190,7 @@ def analyze_with_clang(path, clang_args=None, language=None):
         loc = None
         try:
             loc = f"{node.location.file}:{node.location.line}" if node.location.file else None
-        except Exception:
+        except (AttributeError, ValueError):  # 위치 정보 해석 불가
             loc = None
         entry = {'kind': node.kind.name, 'spelling': node.spelling or '', 'location': loc}
 
@@ -220,7 +220,7 @@ def analyze_with_clang(path, clang_args=None, language=None):
             # (누락 시 헤더 선언과 conflicting types)
             try:
                 entry['is_variadic'] = bool(node.type.is_function_variadic())
-            except Exception:
+            except (AssertionError, AttributeError, ValueError):  # 함수 원형이 아닌 타입
                 entry['is_variadic'] = False
             try:
                 entry['is_static'] = (node.storage_class == cindex.StorageClass.STATIC)
