@@ -436,6 +436,18 @@ class GenericRun:
             **extra,
         )
 
+    def install_dictionary(self, built) -> Dict[str, str]:
+        """프로필 사전의 그룹별 ``<dict_dir>/<group>.dict`` 배치 (SMOKE·EXE 의 -dict= 입력)"""
+        from logosfuzz.execute.dictionary import install_profile_dictionary
+
+        dict_dir = Path(self.opts.dict_dir) if self.opts.dict_dir else self.out / "dict"
+        try:
+            return install_profile_dictionary(self.profile, [e["slug"] for e, _, _ in built],
+                                              dict_dir, log=self._log)
+        except OSError as exc:  # 사전 복사 실패는 퍼징 중단 사유 아님
+            self._log(f"  [WARN] 사전 배치 실패: {exc} - 사전 없이 계속한다")
+            return {}
+
     def _smoke_once(self, runner, entry, seeds):
         """하네스 1개 dry-run. validation.run_smoke_test 판정 + check_coverage"""
         from logosfuzz.config import LogicGroup
@@ -706,6 +718,7 @@ class GenericRun:
             groups, group_map, schedule, timeouts = self.stage_sch()
             drivers = self.stage_gen(groups, group_map, schedule)
             built, compiler = self.stage_heal(drivers, group_map)
+            self.install_dictionary(built)
             if self.opts.smoke:
                 built = self.stage_smoke(built)
             if self.opts.coverage:

@@ -189,8 +189,8 @@ LOW_COV = ProcResult(0, False, stderr="#2 INITED cov: 8 ft: 9\nDone 200 runs")
 GOOD = ProcResult(0, False, stderr="#2 INITED cov: 450 ft: 900\nDone 200 runs")
 
 
-def _fake_run(tmp_path, *, fail_link=False, llm=None, smoke_exec=None, **opts):
-    profile = _embedded_profile(tmp_path)
+def _fake_run(tmp_path, *, fail_link=False, llm=None, smoke_exec=None, profile_overrides=None, **opts):
+    profile = _embedded_profile(tmp_path, **(profile_overrides or {}))
     out = tmp_path / "out"
     adapters = []
 
@@ -231,6 +231,38 @@ def test_seeds_are_copied_and_sch_time_is_passed_to_exe(tmp_path):
     assert sum(seen["timeouts"].values()) == 100
     assert set(seen["timeouts"]) == {g.name for g in seen["groups"]}
     assert seen["config"].image == "logosfuzz-exec:generic"
+
+
+def test_profile_dictionary_is_installed_per_group_and_resolved_by_runner(tmp_path):
+    from logosfuzz.execute.docker_runner import DockerIsolationRunner
+
+    dict_file = tmp_path / "proto.dict"
+    dict_file.write_text('# 프로토콜 헤더\nmagic="\\xAA\\x55"\n"CMD"\n', encoding="utf-8")
+    run, rc, out, _ = _fake_run(tmp_path, profile_overrides={"dictionary": str(dict_file)})
+    assert rc == 0
+    seen = FakeSession.seen
+    assert seen["config"].dict_dir == out / "dict"
+    runner = DockerIsolationRunner(seen["config"])
+    for group in seen["groups"]:
+        installed = out / "dict" / f"{group.name}.dict"
+        assert installed.read_bytes() == dict_file.read_bytes()
+        assert runner.resolve_dict(group) == installed.resolve()
+        assert f"-dict={installed.resolve()}" in runner.libfuzzer_option_args(group, in_docker=False)
+
+
+def test_run_without_dictionary_creates_no_dict_files(tmp_path):
+    run, rc, out, _ = _fake_run(tmp_path)
+    assert rc == 0
+    assert not (out / "dict").exists()
+
+
+def test_invalid_profile_dictionary_warns_and_run_continues(tmp_path):
+    dict_file = tmp_path / "bad.dict"
+    dict_file.write_text('"ok"\nnot a dict line\n', encoding="utf-8")
+    run, rc, out, _ = _fake_run(tmp_path, profile_overrides={"dictionary": str(dict_file)})
+    assert rc == 0
+    assert not (out / "dict").exists()
+    assert FakeSession.seen["groups"]
 
 
 def test_generic_domain_prompt_has_no_automotive_wording(tmp_path):

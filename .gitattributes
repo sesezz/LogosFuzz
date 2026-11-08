@@ -15,3 +15,6 @@ docker/entrypoint.sh text eol=lf
 tests/fixtures/bazel_errors/**    text eol=lf
 tests/fixtures/sanitizer_logs/**  text eol=lf
 tests/fixtures/bazel_repro/**     text eol=lf
+
+# libFuzzer 사전 — 줄 끝 CR 문자가 항목 값에 섞이지 않도록 LF 고정
+*.dict          text eol=lf
