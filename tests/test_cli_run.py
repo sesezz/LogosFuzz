@@ -73,6 +73,15 @@ def test_split_budget_never_exceeds_budget():
         assert sum(out.values()) == budget
 
 
+def test_rebalance_budget_gives_dropped_group_time_to_remaining():
+    from logosfuzz.control.generic_run import rebalance_budget
+    assert rebalance_budget({"b": 30}, 3600) == {"b": 3600}          # 큰 그룹 제외 시 전부 회수
+    out = rebalance_budget({"a": 100, "b": 300}, 1000)
+    assert sum(out.values()) == 1000 and out["b"] > out["a"]          # 기존 비율 유지
+    assert rebalance_budget({"a": 600}, 600) == {"a": 600}           # 제외 없음
+    assert rebalance_budget({}, 600) == {}
+
+
 def test_run_parser_accepts_spec_flags(tmp_path):
     args = cli._build_parser().parse_args(
         ["run", "--profile", "targets/libsndfile.json", "--budget", "600",

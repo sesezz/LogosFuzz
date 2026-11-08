@@ -166,6 +166,18 @@ def split_budget(schedule: Sequence[Any], budget: int, *, floor: int = MIN_GROUP
     return out
 
 
+def rebalance_budget(kept: Dict[str, int], total: int) -> Dict[str, int]:
+    """스모크에서 빠진 그룹 몫을 남은 그룹에 기존 비율대로 재배분 (합계 ``total`` 유지)"""
+    spare = total - sum(kept.values())
+    if spare <= 0 or not kept:
+        return dict(kept)
+    base = sum(kept.values())
+    names = list(kept)
+    out = {n: kept[n] + ((spare * kept[n] // base) if base else spare // len(names)) for n in names}
+    out[max(names, key=lambda n: kept[n])] += total - sum(out.values())   # 나머지는 최대 그룹에 배정
+    return out
+
+
 def smoke_threshold(log: str, min_edges: int) -> int:
     """dry-run 통과 최소 edge 수
 
@@ -630,7 +642,12 @@ class GenericRun:
             groups = seed_group_corpora(groups, seeds, self.out / "corpus")
             slug_timeouts = {e["slug"]: timeouts.get(e["group"], config.timeout_sec)
                              for e, _, _ in built}
-            session = (self._session_factory or FuzzSession)(config)
+            planned = sum(timeouts.values())
+            if 0 < sum(slug_timeouts.values()) < planned:      # 스모크 제외 그룹 시간 회수
+                slug_timeouts = rebalance_budget(slug_timeouts, planned)
+                self._log(f"  [EXE] 제외된 그룹 몫 재배분: {slug_timeouts}")
+                st.detail["rebalanced_sec"] = slug_timeouts
+            session =(self._session_factory or FuzzSession)(config)
             summary = session.run(groups, ensure_image=not self.opts.no_build, timeouts=slug_timeouts)
             data = summary.to_dict()
             by_slug = {g["group"]: g for g in data["groups"]}
