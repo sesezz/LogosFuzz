@@ -1,3 +1,4 @@
+from pathlib import Path
 import sys
 import time
 
@@ -455,3 +456,64 @@ def test_replay_argv_runs_single_crash_input(tmp_path):
     assert local[0] == "env"
     assert any(a.startswith("ASAN_OPTIONS=") for a in local)
     assert local[-1] == str(crash)
+
+
+def _corpus_group(cfg, tmp_path, n=3):
+    grp = _make_harness(cfg)
+    corpus = tmp_path / "corpus" / grp.name
+    corpus.mkdir(parents=True)
+    for i in range(n):
+        (corpus / f"in{i}").write_bytes(bytes([i]))
+    return LogicGroup(name=grp.name, harness_path=grp.harness_path, corpus_dir=corpus)
+
+
+def test_merge_argv_in_both_paths(tmp_path):
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg)
+    grp = _corpus_group(cfg, tmp_path)
+    docker_argv = runner.merge_argv(grp)
+    inner = docker_argv[-1]
+    assert f"logosfuzz-{grp.name}-merge" in docker_argv
+    assert "--cap-drop" in docker_argv
+    assert "-merge=1" in inner and inner.endswith("/out/corpus_merge/grp1 /corpus")
+    assert "-max_total_time" not in inner
+
+    cfg.use_docker = False
+    local = runner.merge_argv(grp)
+    assert "-merge=1" in local
+    assert local[-2:] == [str(runner.merge_dir(grp)), str(grp.corpus_dir)]
+
+
+def test_minimize_corpus_replaces_corpus_with_merged_inputs(tmp_path):
+    cfg = _config(tmp_path, use_docker=False)
+
+    def fake_executor(argv, timeout, on_line):
+        merged = Path(argv[-2])
+        (merged / "kept").write_bytes(b"k")
+        return ProcResult(exit_code=0, timed_out=False)
+
+    runner = DockerIsolationRunner(cfg, executor=fake_executor)
+    grp = _corpus_group(cfg, tmp_path)
+    assert runner.minimize_corpus(grp) == (3, 1)
+    assert sorted(p.name for p in grp.corpus_dir.iterdir()) == ["kept"]
+    assert not runner.merge_dir(grp).exists()
+    assert (cfg.logs_dir / grp.name / "merge.stderr.log").exists()
+
+
+def test_minimize_corpus_keeps_corpus_on_failure(tmp_path):
+    cfg = _config(tmp_path, use_docker=False)
+    runner = DockerIsolationRunner(
+        cfg, executor=lambda argv, timeout, on_line: ProcResult(exit_code=1, timed_out=False))
+    grp = _corpus_group(cfg, tmp_path)
+    assert runner.minimize_corpus(grp) is None
+    assert len(list(grp.corpus_dir.iterdir())) == 3
+
+
+def test_minimize_corpus_skips_empty_corpus(tmp_path):
+    cfg = _config(tmp_path, use_docker=False)
+    calls = []
+    runner = DockerIsolationRunner(
+        cfg, executor=lambda *a: calls.append(a) or ProcResult(exit_code=0, timed_out=False))
+    grp = _corpus_group(cfg, tmp_path, n=0)
+    assert runner.minimize_corpus(grp) is None
+    assert calls == []

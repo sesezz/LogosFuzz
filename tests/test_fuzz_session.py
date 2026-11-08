@@ -195,3 +195,42 @@ def test_single_process_mode_does_not_replay(tmp_path):
     runner = DockerIsolationRunner(cfg, executor=fake_executor)
     FuzzSession(cfg, runner=runner, stream=io.StringIO()).run([grp], ensure_image=False)
     assert len(calls) == 1
+
+
+def test_session_minimizes_corpus_when_enabled(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.minimize_corpus = True
+    grp = _harness(cfg, "grpM")
+    corpus = tmp_path / "corpus" / "grpM"
+    corpus.mkdir(parents=True)
+    for i in range(4):
+        (corpus / f"c{i}").write_bytes(bytes([i]))
+    grp = LogicGroup(name=grp.name, harness_path=grp.harness_path, corpus_dir=corpus)
+
+    def fake_executor(argv, timeout, on_line):
+        if "-merge" in " ".join(argv):
+            (cfg.output_dir / "corpus_merge" / "grpM" / "m").write_bytes(b"m")
+        else:
+            on_line("#100 pulse cov: 10 exec/s: 50")
+        return ProcResult(exit_code=0, timed_out=False)
+
+    runner = DockerIsolationRunner(cfg, executor=fake_executor)
+    out = io.StringIO()
+    summary = FuzzSession(cfg, runner=runner, stream=out).run([grp], ensure_image=False)
+    assert summary.to_dict()["groups"][0]["corpus_minimized"] == {"before": 4, "after": 1}
+    assert "[MERGE] 코퍼스 최소화 4 → 1개" in out.getvalue()
+
+
+def test_session_skips_minimize_by_default(tmp_path):
+    cfg = _cfg(tmp_path)
+    grp = _harness(cfg, "grpN")
+    calls = []
+
+    def fake_executor(argv, timeout, on_line):
+        calls.append(argv)
+        return ProcResult(exit_code=0, timed_out=False)
+
+    runner = DockerIsolationRunner(cfg, executor=fake_executor)
+    summary = FuzzSession(cfg, runner=runner, stream=io.StringIO()).run([grp], ensure_image=False)
+    assert len(calls) == 1
+    assert "corpus_minimized" not in summary.to_dict()["groups"][0]

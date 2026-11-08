@@ -77,6 +77,7 @@ class GroupResult:
     stdout_log: Optional[str] = None  # 표준 출력 로그 파일 경로(저장 실패 시 None)
     stderr_log: Optional[str] = None  # 표준 오류 로그 파일 경로
     timeout_sec: Optional[int] = None  # 그룹별 퍼징 시간 (run 의 SCH 배분)
+    corpus_minimized: Optional[dict] = None  # -merge=1 결과 {"before": n, "after": m}
 
     @property
     def failed_to_start(self) -> bool:
@@ -343,7 +344,7 @@ class DockerIsolationRunner:
 
     def build_run_argv(self, group: LogicGroup, smoke_runs: Optional[int] = None,
                        inner_cmd: Optional[str] = None, suffix: Optional[str] = None) -> list:
-        """docker run 인자 목록. inner_cmd 지정 시 컨테이너 내부 명령 대체(크래시 재실행용)"""
+        """docker run 인자 목록. inner_cmd 지정 시 컨테이너 내부 명령 대체(크래시 재실행·코퍼스 최소화)"""
         c = self.config
         if suffix is None:
             suffix = "" if smoke_runs is None else "-smoke"
@@ -453,6 +454,59 @@ class DockerIsolationRunner:
         timeout = self.per_input_timeout_sec() + 30
         self.executor(self.replay_argv(group, crash_file), timeout, monitor.feed)
         return monitor.finish()
+
+    # ---- 코퍼스 최소화 (-merge=1) --------------------------------------
+    def merge_dir(self, group: LogicGroup) -> Path:
+        """최소화 결과 임시 위치 (출력 디렉토리 하위, 컨테이너에서는 /out 하위)"""
+        return self.config.output_dir / "corpus_merge" / group.name
+
+    def merge_argv(self, group: LogicGroup) -> list:
+        """코퍼스 최소화 커맨드. ``-merge=1 <새 디렉토리> <기존 코퍼스>``"""
+        opts = [f"-timeout={self.per_input_timeout_sec()}"]
+        if self.config.rss_limit_mb > 0:
+            opts.append(f"-rss_limit_mb={self.config.rss_limit_mb}")
+        if self.config.malloc_limit_mb > 0:
+            opts.append(f"-malloc_limit_mb={self.config.malloc_limit_mb}")
+        if self.config.use_docker:
+            rel = self.merge_dir(group).resolve().relative_to(self.config.output_dir.resolve())
+            harness = f"/harness/{group.harness_path.name}"
+            inner = "chmod +x %s 2>/dev/null; %s -merge=1 %s %s /corpus" % (
+                shlex.quote(harness), shlex.quote(harness), " ".join(opts),
+                shlex.quote(f"/out/{rel.as_posix()}"))
+            return self.build_run_argv(group, inner_cmd=inner, suffix="-merge")
+        pairs = {"ASAN_OPTIONS": self.config.asan_options,
+                 "TSAN_OPTIONS": self.config.tsan_options}
+        return ["env", *[f"{k}={v}" for k, v in pairs.items()],
+                str(self.harness_binary_path(group)), "-merge=1", *opts,
+                str(self.merge_dir(group)), str(group.corpus_dir)]
+
+    def minimize_corpus(self, group: LogicGroup) -> Optional[tuple]:
+        """그룹 코퍼스 최소화 후 (이전 개수, 이후 개수) 반환
+
+        최소화 실패(비정상 종료, 결과 0건) 시 기존 코퍼스 유지 후 None 반환
+        """
+        corpus = Path(group.corpus_dir) if group.corpus_dir else None
+        if corpus is None or not corpus.is_dir():
+            return None
+        before = [f for f in corpus.iterdir() if f.is_file()]
+        if not before:
+            return None
+        merged = self.merge_dir(group)
+        shutil.rmtree(merged, ignore_errors=True)
+        merged.mkdir(parents=True, exist_ok=True)
+        hard_timeout = self.config.timeout_sec + 30
+        result = self.executor(self.merge_argv(group), hard_timeout, lambda _line: None)
+        self._write_run_logs(group, result, stem="merge")
+        kept = [f for f in merged.iterdir() if f.is_file()]
+        if result.exit_code != 0 or result.timed_out or not kept:
+            shutil.rmtree(merged, ignore_errors=True)
+            return None
+        for f in before:
+            f.unlink()
+        for f in kept:
+            shutil.move(str(f), corpus / f.name)
+        shutil.rmtree(merged, ignore_errors=True)
+        return len(before), len(kept)
 
     # ---- 스모크 테스트 (GEN-03-04 dry-run) -----------------------------
     def run_smoke(self, group: LogicGroup, runs: int, timeout_sec: int) -> ProcResult:
