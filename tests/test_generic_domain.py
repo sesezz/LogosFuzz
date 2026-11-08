@@ -93,6 +93,29 @@ def test_c_prompt_generic_adds_handle_and_callback_rules():
     assert "STRICT RULES:" in generic and generic.index("STRICT RULES:") < generic.index("13. NEVER")
 
 
+def test_c_prompt_generic_has_virtual_io_rule_and_example():
+    """실측 결함 방지: 콜백 표를 0 으로 두거나 입력 바이트로 채워 파일이 열리지 않는 하네스."""
+    automotive = build_prompt("g", [CTX], language="c")
+    generic = build_prompt("g", [CTX], language="c", domain="generic")
+    flat = " ".join(generic.split())
+
+    assert "27. NEVER build a pointer" in generic
+    assert "never leave such a table zero-filled" in flat
+    assert "Set EVERY callback field explicitly" in flat
+    assert "sf_open_virtual(&io, SFM_READ, &info, &mf)" in generic     # 메모리 가상 I/O 예시
+    for field in (".get_filelen", ".seek", ".read", ".write", ".tell"):      # 콜백을 하나도 빼놓지 않음
+        assert field in generic
+    assert "sf_open_virtual" not in automotive                          # automotive 프롬프트는 그대로
+
+
+def test_gen_default_model_is_unified():
+    from logosfuzz.control.generic_run import DEFAULT_MODEL as run_model
+    from logosfuzz.generate.llm import DEFAULT_GEN_MODEL
+    from logosfuzz.generate.llm_harness_generator import DEFAULT_MODEL as gen_model
+
+    assert gen_model == run_model == DEFAULT_GEN_MODEL == "gpt-4o"
+
+
 def test_c_prompt_embedded_uses_the_same_generic_rules():
     assert build_prompt("g", [CTX], language="c", domain="embedded") == \
         build_prompt("g", [CTX], language="c", domain="generic")

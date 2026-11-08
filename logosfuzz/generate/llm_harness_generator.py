@@ -49,7 +49,10 @@ LANG_CPP = "cpp"
 LANG_C = "c"
 SUPPORTED_LANGUAGES = (LANG_CPP, LANG_C)
 
-DEFAULT_MODEL = "gpt-4o-mini"
+from logosfuzz.generate.llm import DEFAULT_GEN_MODEL
+
+# 시연과 최종 측정에 쓰는 모델과 같음 (gpt-4o-mini 는 하네스 결함이 반복되어 기본값에서 제외함)
+DEFAULT_MODEL = DEFAULT_GEN_MODEL
 
 # 1주차 수동 하네스 = C++ 프롬프트의 few-shot 예시.
 REFERENCE_HARNESS_PATH = (
@@ -402,6 +405,50 @@ _C_GENERIC_EXTRA_RULES = """\
     maximum the header documents) and pass the REMAINING bytes as the data to
     process. NEVER derive the capacity from the data length (proto_create(size)):
     a size-versus-capacity mismatch, the classic overflow, then can never happen.
+27. NEVER build a pointer, a function pointer or a struct that contains them by
+    memcpy()-ing fuzzer input bytes into it, and never leave such a table
+    zero-filled: a zeroed callback table makes the open call fail on every input.
+    Set EVERY callback field explicitly to your own static function, then open
+    the handle with the library's callback/in-memory open function (for example
+    sf_open_virtual) using the context struct as the user-data pointer. Return
+    right away when the open call fails.
+
+EXAMPLE of an in-memory file for a callback-based open function (the names are
+illustrative; use the exact types and functions of the headers above, and ignore
+this example when the target declares no callback table):
+
+typedef struct { const uint8_t *data; size_t size; size_t pos; } MemFile;
+static sf_count_t mem_len(void *u) { return (sf_count_t)((MemFile *)u)->size; }
+static sf_count_t mem_seek(sf_count_t off, int whence, void *u) {
+    MemFile *m = (MemFile *)u;
+    sf_count_t base = whence == SEEK_CUR ? (sf_count_t)m->pos
+                    : whence == SEEK_END ? (sf_count_t)m->size : 0;
+    sf_count_t pos = base + off;
+    if (pos < 0 || pos > (sf_count_t)m->size) return -1;
+    m->pos = (size_t)pos;
+    return pos;
+}
+static sf_count_t mem_read(void *ptr, sf_count_t n, void *u) {
+    MemFile *m = (MemFile *)u;
+    size_t left = m->size - m->pos;
+    size_t count = (n > 0 && (size_t)n < left) ? (size_t)n : (n > 0 ? left : 0);
+    memcpy(ptr, m->data + m->pos, count);
+    m->pos += count;
+    return (sf_count_t)count;
+}
+static sf_count_t mem_write(const void *ptr, sf_count_t n, void *u) {
+    (void)ptr; (void)n; (void)u;
+    return 0;
+}
+static sf_count_t mem_tell(void *u) { return (sf_count_t)((MemFile *)u)->pos; }
+
+MemFile mf = { data, size, 0 };
+SF_VIRTUAL_IO io = { .get_filelen = mem_len, .seek = mem_seek, .read = mem_read,
+                     .write = mem_write, .tell = mem_tell };
+SF_INFO info;
+memset(&info, 0, sizeof info);
+SNDFILE *file = sf_open_virtual(&io, SFM_READ, &info, &mf);
+if (!file) return 0;
 """
 
 
