@@ -37,8 +37,12 @@ def copy_seeds(seed_paths: Sequence[Path], dest: Path) -> int:
     copied = 0
     for src in _seed_files(seed_paths):
         target = dest / src.name
-        if target.exists():
-            if target.read_bytes() == src.read_bytes():
+        try:
+            existing = target.read_bytes()  # 존재 확인 없이 바로 읽기(검사-사용 경쟁조건 방지)
+        except FileNotFoundError:
+            existing = None                 # 같은 이름 파일 없음
+        if existing is not None:
+            if existing == src.read_bytes():
                 continue
             digest = hashlib.sha256(src.read_bytes()).hexdigest()[:12]
             target = dest / f"{src.name}-{digest}"

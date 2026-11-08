@@ -216,9 +216,10 @@ class RegressionRunner:
 
     def _previous_failed(self) -> set[str]:
         path = self.output_dir / "regression-summary.json"
-        if not path.exists():
-            return set()
-        previous = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))  # 존재 확인 없이 바로 읽기
+        except FileNotFoundError:
+            return set()                    # 이전 요약 없음
         return {item["name"] for item in previous.get("groups", [])
                 if not item.get("matched_expected", False)}
 

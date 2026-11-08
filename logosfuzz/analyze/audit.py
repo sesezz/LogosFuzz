@@ -31,8 +31,12 @@ class AuditTrailStore:
     def _ensure_loaded(self) -> None:
         if self._loaded:
             return
-        if self.path.exists():
-            self._entries = json.loads(self.path.read_text(encoding="utf-8") or "[]")
+        try:
+            text = self.path.read_text(encoding="utf-8")  # 존재 확인 없이 바로 읽기
+        except FileNotFoundError:
+            text = None                     # 파일 없으면 기존 목록 유지
+        if text is not None:
+            self._entries = json.loads(text or "[]")
         self._loaded = True
 
     def _flush(self) -> None:
