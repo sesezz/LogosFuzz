@@ -28,6 +28,8 @@ Bazel 프로필 미지원 (자동차 대상은 ``ctr_06_01_controller --mode baz
 from __future__ import annotations
 
 import json
+import math
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -45,6 +47,10 @@ SMOKE_RUNS = 200
 SMOKE_TIMEOUT_SEC = 30
 SMOKE_MIN_EDGES = 30
 SMOKE_RETRIES = 2
+#: 계측 edge 총수 대비 최소 비율. 대상이 작아 총수가 적으면 SMOKE_MIN_EDGES 대신 이 비율 적용
+SMOKE_MIN_RATIO = 0.3
+
+_COUNTERS_RE = re.compile(r"\((\d+) inline 8-bit counters\)")
 
 #: 재생성 프롬프트에 넣을 dry-run 로그 최대 길이(자)
 _SMOKE_LOG_CHARS = 4000
@@ -122,6 +128,19 @@ def split_budget(schedule: Sequence[Any], budget: int, *, floor: int = MIN_GROUP
     # 정수 나눗셈 나머지는 첫 그룹(최우선)에 배정
     out[names[0]] += budget - sum(out.values())
     return out
+
+
+def smoke_threshold(log: str, min_edges: int) -> int:
+    """dry-run 통과 최소 edge 수
+
+    libFuzzer 가 출력한 계측 edge 총수(``N inline 8-bit counters``)의
+    ``SMOKE_MIN_RATIO`` 와 ``min_edges`` 중 작은 값. 총수를 모르면 ``min_edges``
+    (작은 예제 대상이 고정 임계치에 걸려 불필요하게 재생성되는 문제 방지)
+    """
+    totals = [int(n) for n in _COUNTERS_RE.findall(log or "")]
+    if not totals or min_edges <= 0:
+        return min_edges
+    return max(1, min(min_edges, math.ceil(sum(totals) * SMOKE_MIN_RATIO)))
 
 
 def _smoke_test_config(opts: "RunOptions"):
@@ -400,7 +419,7 @@ class GenericRun:
             _smoke_test_config(self.opts), runner=via_isolation)
         if not smoke.passed:
             return smoke, smoke.reason, smoke.log
-        cov = check_coverage(smoke.coverage_edges, self.opts.smoke_min_edges)
+        cov = check_coverage(smoke.coverage_edges, smoke_threshold(smoke.log, self.opts.smoke_min_edges))
         return smoke, ("" if cov.passed else cov.reason), smoke.log
 
     def _regenerate(self, entry, draft, source, reason, log):

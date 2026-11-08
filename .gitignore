@@ -89,3 +89,5 @@ third_party/
 
 # GENERIC-C 임베디드 샘플 빌드 산출물
 examples/embedded/build-fuzz*/
+examples/vuln_overflow/build-fuzz*/
+examples/vuln_overflow/build/

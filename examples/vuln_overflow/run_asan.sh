@@ -7,7 +7,7 @@ out_dir="${script_dir}/build"
 mkdir -p "${out_dir}"
 
 clang -g -O1 -fno-omit-frame-pointer -fsanitize=address \
-  "${script_dir}/stack_overflow.c" -o "${out_dir}/stack_overflow_asan"
+  "${script_dir}/stack_overflow.c" "${script_dir}/can_label.c" -o "${out_dir}/stack_overflow_asan"
 
 # 16바이트 + 종료 NUL로 16바이트 스택 버퍼 오버플로 유발
 ASAN_OPTIONS=halt_on_error=1 "${out_dir}/stack_overflow_asan" "0123456789ABCDEF"
