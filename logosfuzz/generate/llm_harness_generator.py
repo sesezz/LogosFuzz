@@ -49,7 +49,10 @@ LANG_CPP = "cpp"
 LANG_C = "c"
 SUPPORTED_LANGUAGES = (LANG_CPP, LANG_C)
 
-DEFAULT_MODEL = "gpt-4o-mini"
+from logosfuzz.generate.llm import DEFAULT_GEN_MODEL
+
+# 시연과 최종 측정에 쓰는 모델과 같음 (gpt-4o-mini 는 하네스 결함이 반복되어 기본값에서 제외함)
+DEFAULT_MODEL = DEFAULT_GEN_MODEL
 
 # 1주차 수동 하네스 = C++ 프롬프트의 few-shot 예시.
 REFERENCE_HARNESS_PATH = (
@@ -162,7 +165,8 @@ def build_prompt(group_name: str, contexts: list[ApiContext],
     if language == LANG_C:
         return _build_c_prompt(group_name, contexts,
                                header_content=header_content,
-                               header_filenames=header_filenames)
+                               header_filenames=header_filenames,
+                               domain=domain)
     if language != LANG_CPP:
         raise ValueError(f"지원하지 않는 언어: {language!r} (지원: {SUPPORTED_LANGUAGES})")
     return build_cpp_prompt(
@@ -340,9 +344,118 @@ STRICT RULES:
 """
 
 
+# 자동차 외 도메인(generic / embedded)의 C 프롬프트에 덧붙이는 규칙.
+# 실측(libsndfile): 핸들을 열지 않고 NULL 로 API 를 부르거나, 콜백(함수 포인터) 구조체를
+# 입력 바이트로 채워 첫 실행에서 SEGV 가 나는 하네스가 만들어졌음
+_C_GENERIC_RULE_8 = (
+    "8. Do NOT invent functions. You MAY call any function that is declared in the\n"
+    "   included headers and is needed to create, open, initialise or release the\n"
+    "   objects the listed APIs work on (for example open/create/init/close).\n"
+)
+_C_GENERIC_EXTRA_RULES = """\
+13. NEVER pass a NULL or uninitialised handle to an API. Obtain every handle by
+    calling the library's own open/create/init function, check the result, and
+    `return 0;` when it failed. Never write "assume it is initialised elsewhere".
+14. NEVER fill a struct that holds function pointers or callbacks (virtual I/O
+    tables, ops/vtable structs) from the fuzzer input. Use that struct type
+    EXACTLY as declared in the included headers (never redeclare or retype it)
+    and give every callback the exact parameter and return types the header
+    declares for that field. Define static callbacks that work on a small
+    context struct {const uint8_t *data; size_t size; size_t pos;} passed as
+    the user-data pointer, and never read, seek or tell outside [0, size].
+15. Prefer an in-memory or callback-based open function. If the library only
+    opens files by path, write the input to a fixed temporary path with
+    fopen/fwrite, open that path, and remove it before returning.
+16. Zero-initialise every info/config struct with memset() before use, and
+    release or close every handle that was opened on every return path.
+17. Feed the fuzzer input to the library as DATA (file contents, packet bytes,
+    stream) so that the real parsing code runs; do not spend the input only on
+    scalar arguments of calls that fail immediately.
+18. When an API takes a command code, mode or option, choose it from the input
+    (for example data[0] % N over the valid values declared in the headers)
+    instead of a fixed placeholder such as 0.
+19. NEVER pass the fuzzer input (or a pointer into it) as a `char *` string:
+    it has no NUL terminator, so strlen() reads past the end of the buffer. If an
+    API needs a path or a C string, build a NUL-terminated copy yourself, and for
+    a path write the input to a temporary file and pass that file's path.
+20. A mkstemp() template must end with exactly XXXXXX. If the path needs a
+    suffix such as ".wav", use mkstemps(template, suffix_length) instead, and
+    never ignore a failure silently in a way that skips all library calls.
+21. Size every output buffer you pass to the library from the values the
+    library itself reports (for example an info struct filled by the open call:
+    channels, frames, sample size), following the API documentation. A call that
+    reads N "frames" writes N x channels items, so allocate that many items.
+22. NEVER use a value reported by the library or taken from the input as a
+    divisor or modulus (`x % info.frames`) without first checking it is not
+    zero; a zero value crashes the harness itself with a division error.
+23. Release every handle you open with the matching release function declared
+    in the headers (close/free/destroy), on every return path. That function is
+    available even when it is not in the API list above; never leave the call
+    commented out.
+24. Do not "test boundary values" by passing 0 as the number of items or frames
+    to read: that makes every read call a no-op. After a successful open, read
+    real data with a count derived from the input and capped by what the library
+    reported (for example data[1] % 64 + 1 frames, never more than the info
+    struct's frame count), and read until the call returns 0 at most a few times.
+25. When an API takes a command or option code, pick it from the valid values
+    listed in the header excerpt (for example an array of those constants indexed
+    by data[0] % N), never from a raw byte range such as data[0] % 256.
+26. When a creator or open function takes a size, capacity or limit argument,
+    take it from separate input bytes (for example data[0] % MAX + 1, within the
+    maximum the header documents) and pass the REMAINING bytes as the data to
+    process. NEVER derive the capacity from the data length (proto_create(size)):
+    a size-versus-capacity mismatch, the classic overflow, then can never happen.
+27. NEVER build a pointer, a function pointer or a struct that contains them by
+    memcpy()-ing fuzzer input bytes into it, and never leave such a table
+    zero-filled: a zeroed callback table makes the open call fail on every input.
+    Set EVERY callback field explicitly to your own static function, then open
+    the handle with the library's callback/in-memory open function (for example
+    sf_open_virtual) using the context struct as the user-data pointer. Return
+    right away when the open call fails.
+
+EXAMPLE of an in-memory file for a callback-based open function (the names are
+illustrative; use the exact types and functions of the headers above, and ignore
+this example when the target declares no callback table):
+
+typedef struct { const uint8_t *data; size_t size; size_t pos; } MemFile;
+static sf_count_t mem_len(void *u) { return (sf_count_t)((MemFile *)u)->size; }
+static sf_count_t mem_seek(sf_count_t off, int whence, void *u) {
+    MemFile *m = (MemFile *)u;
+    sf_count_t base = whence == SEEK_CUR ? (sf_count_t)m->pos
+                    : whence == SEEK_END ? (sf_count_t)m->size : 0;
+    sf_count_t pos = base + off;
+    if (pos < 0 || pos > (sf_count_t)m->size) return -1;
+    m->pos = (size_t)pos;
+    return pos;
+}
+static sf_count_t mem_read(void *ptr, sf_count_t n, void *u) {
+    MemFile *m = (MemFile *)u;
+    size_t left = m->size - m->pos;
+    size_t count = (n > 0 && (size_t)n < left) ? (size_t)n : (n > 0 ? left : 0);
+    memcpy(ptr, m->data + m->pos, count);
+    m->pos += count;
+    return (sf_count_t)count;
+}
+static sf_count_t mem_write(const void *ptr, sf_count_t n, void *u) {
+    (void)ptr; (void)n; (void)u;
+    return 0;
+}
+static sf_count_t mem_tell(void *u) { return (sf_count_t)((MemFile *)u)->pos; }
+
+MemFile mf = { data, size, 0 };
+SF_VIRTUAL_IO io = { .get_filelen = mem_len, .seek = mem_seek, .read = mem_read,
+                     .write = mem_write, .tell = mem_tell };
+SF_INFO info;
+memset(&info, 0, sizeof info);
+SNDFILE *file = sf_open_virtual(&io, SFM_READ, &info, &mf);
+if (!file) return 0;
+"""
+
+
 def _build_c_prompt(group_name: str, contexts: list[ApiContext],
                     header_content: str = "",
-                    header_filenames: list[str] | None = None) -> str:
+                    header_filenames: list[str] | None = None,
+                    domain: str = "automotive") -> str:
 
     api_block = ""
     extern_decls = ""
@@ -415,6 +528,10 @@ STRICT RULES:
     Direct const-cast causes libFuzzer to abort with
     "fuzz target overwrites its const input".
 """
+    if domain != "automotive":
+        old_rule_8 = ("8. Do NOT invent or call any function not explicitly listed above.\n")
+        assert old_rule_8 in prompt
+        prompt = prompt.replace(old_rule_8, _C_GENERIC_RULE_8) + _C_GENERIC_EXTRA_RULES
     return prompt
 
 

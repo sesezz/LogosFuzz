@@ -375,6 +375,26 @@ def test_classify_with_bazel_errors_is_none_without_d_module(monkeypatch):
     assert classify_with_bazel_errors(LOG_MISSING_HEADER, _spec_with_deps("//a:b")) is None
 
 
+def test_classify_with_bazel_errors_falls_back_on_expected_errors_only(monkeypatch, caplog):
+    import logosfuzz.generate.bazel_errors as d_module
+    spec = _spec_with_deps("//a:b")
+
+    def malformed(log, requested_target=None):
+        raise ValueError("Bazel 라벨 형식이 아니다")
+
+    monkeypatch.setattr(d_module, "classify", malformed)
+    with caplog.at_level("WARNING"):
+        assert classify_with_bazel_errors(LOG_MISSING_HEADER, spec) is None
+    assert "ValueError" in caplog.text                       # 조용히 삼키지 않고 기록함
+
+    def unexpected(log, requested_target=None):
+        raise RuntimeError("예상하지 못한 오류")
+
+    monkeypatch.setattr(d_module, "classify", unexpected)
+    with pytest.raises(RuntimeError):                        # 예상 밖의 예외는 숨기지 않음
+        classify_with_bazel_errors(LOG_MISSING_HEADER, spec)
+
+
 # --------------------------------------------------------------------------- #
 # 소스(.cc) 컴파일 에러 자가치유 연결 (D 의 SelfHealLoop 자리에 가짜 루프 주입)
 # --------------------------------------------------------------------------- #

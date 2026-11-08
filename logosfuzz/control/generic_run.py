@@ -53,7 +53,9 @@ else:
 #: 그룹별 최소 퍼징 시간(초) (SCH 0초 배정 그룹도 최소한 실행)
 MIN_GROUP_SEC = 30
 
-DEFAULT_MODEL = "gpt-4o-mini"
+from logosfuzz.generate.llm import DEFAULT_GEN_MODEL
+
+DEFAULT_MODEL = DEFAULT_GEN_MODEL   # GEN 기본 모델과 통일함
 
 #: 스모크 테스트 기본값 (dry-run 실행 횟수, 시간 상한(초), 최소 edge 커버리지, 재생성 횟수)
 SMOKE_RUNS = 50000  # 변형 입력 수천~수만 건 뒤에 죽는 하네스까지 검출 (-max_total_time 로 시간 상한)

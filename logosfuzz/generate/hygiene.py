@@ -2,6 +2,7 @@
 
 - 헤더 include 후 대상 함수 재선언 제거 (프롬프트 금지만으로는 재발, ``conflicting types`` 유발)
 - ``SelfHealLoop(sanitize=...)`` 로 초안과 모든 수정 라운드에 적용 필요
+- ``mkstemp`` 템플릿이 ``XXXXXX`` 로 끝나지 않으면 ``mkstemps`` 로 교정 (항상 실패해 라이브러리를 호출하지 못함)
 - 하네스 언어(C/C++) 판별 (SCH 는 언어 미구분)
 
 표준 라이브러리만 사용
@@ -39,6 +40,28 @@ def strip_redundant_declarations(source: str, target_apis: Sequence[str]) -> str
     return pattern.sub("", source)
 
 
+_TEMPLATE_DECL_RE = re.compile(
+    r'(?P<decl>char[ \t]+(?P<name>\w+)[ \t]*\[[ \t]*\][ \t]*=[ \t]*"[^"\n]*XXXXXX)(?P<suffix>[^"\n]+)"')
+
+
+def fix_mkstemp_suffix(source: str) -> str:
+    """접미사가 붙은 임시 파일 템플릿에 ``mkstemp`` 를 쓴 호출을 ``mkstemps`` 로 교정
+
+    ``mkstemp`` 는 템플릿이 정확히 ``XXXXXX`` 로 끝나야 한다. ``"/tmp/x_XXXXXX.wav"`` 처럼 접미사가
+    있으면 항상 -1 을 돌려주고, 하네스가 ``if (fd == -1) return 0;`` 으로 즉시 반환하면
+    라이브러리를 한 번도 호출하지 못한 채 초당 수십만 번 도는 것으로 보인다(libsndfile 실측: cov 2).
+
+    >>> src = 'char t[] = "/tmp/a_XXXXXX.wav"; int fd = mkstemp(t);'
+    >>> "mkstemps(t, 4)" in fix_mkstemp_suffix(src)
+    True
+    """
+    for match in _TEMPLATE_DECL_RE.finditer(source):
+        name, suffix = match.group("name"), match.group("suffix")
+        source = re.sub(rf"\bmkstemp\s*\(\s*{re.escape(name)}\s*\)",
+                        f"mkstemps({name}, {len(suffix)})", source)
+    return source
+
+
 def infer_language(paths: Iterable[str]) -> str:
     """대상 파일/헤더 경로로 하네스 언어 결정 (``"c"`` 또는 ``"cpp"``)"""
     for path in paths:
@@ -58,7 +81,7 @@ def sanitize_harness(source: str, draft: Optional[HarnessDraft] = None,
     ``SelfHealLoop(sanitize=sanitize_harness)`` 주입 시 초안과 모든 수정 라운드에 적용
     """
     apis = list(target_apis or (draft.target_apis if draft else []))
-    return strip_redundant_declarations(source, apis)
+    return fix_mkstemp_suffix(strip_redundant_declarations(source, apis))
 
 
 def harness_source_name(draft: HarnessDraft) -> str:
