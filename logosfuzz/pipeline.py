@@ -200,7 +200,7 @@ def run_pipeline(source_path: str, output_path: str, budget_sec: int = 3600,
             try:
                 parts.append(f"// --- {h.name} ---\n" + h.read_text(encoding="utf-8", errors="replace"))
                 header_filenames.append(h.name)
-            except Exception as exc:
+            except OSError as exc:  # 헤더 파일 읽기 실패
                 logger.warning("헤더 읽기 실패, 건너뜀: %s (%s)", h, exc)
         header_content = "\n".join(parts)
         print(f"  헤더 {len(header_files)}개 주입: {[h.name for h in header_files]}")

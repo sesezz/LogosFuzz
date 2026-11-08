@@ -65,12 +65,12 @@ def clang_ground_truth(paths: Sequence[str],
     """libclang 기반 함수 '정의' 수집 (사용 불가 시 예외)"""
     try:
         from clang import cindex
-    except Exception as exc:  # pragma: no cover - 바인딩 자체가 없는 환경
+    except ImportError as exc:  # pragma: no cover - 바인딩 자체가 없는 환경
         raise GroundTruthUnavailable(f"clang 바인딩 없음: {exc}") from exc
 
     try:
         index = cindex.Index.create()
-    except Exception as exc:
+    except cindex.LibclangError as exc:  # libclang 바이너리 미탐지
         raise GroundTruthUnavailable(f"libclang 바이너리 없음: {exc}") from exc
 
     apis: Dict[str, dict] = {}
@@ -85,7 +85,7 @@ def clang_ground_truth(paths: Sequence[str],
             source_text = ""
         try:
             unit = index.parse(source, args=args)
-        except Exception as exc:
+        except (cindex.TranslationUnitLoadError, cindex.LibclangError) as exc:  # 번역 단위 생성 실패
             logger.warning("파싱 실패, 건너뜀: %s (%s)", source, exc)
             continue
         parsed += 1
@@ -111,14 +111,14 @@ def clang_ground_truth(paths: Sequence[str],
                         is_definition = any(
                             token.spelling == "{" for token in cursor.get_tokens()
                         )
-                    except Exception as exc:
+                    except (AttributeError, ValueError) as exc:  # 토큰 범위 해석 불가
                         logger.debug("토큰 조회 실패: %s", exc)
                 if not is_definition and source_text:
                     try:
                         head = source_text[:cursor.extent.end.offset].rstrip()
                         tail = source_text[cursor.extent.end.offset:].lstrip()
                         is_definition = head.endswith("{") or tail.startswith("{")
-                    except Exception as exc:
+                    except (AttributeError, ValueError, TypeError) as exc:  # 범위 오프셋 해석 불가
                         logger.debug("소스 범위 확인 실패: %s", exc)
             if not is_definition:
                 continue
@@ -134,7 +134,7 @@ def clang_ground_truth(paths: Sequence[str],
                     "" if cursor.kind.name == "CONSTRUCTOR"
                     else cursor.result_type.spelling
                 )
-            except Exception:
+            except (AttributeError, ValueError):  # 반환 타입 해석 불가
                 return_type = ""
             apis.setdefault(name, {
                 "name": cursor.spelling,

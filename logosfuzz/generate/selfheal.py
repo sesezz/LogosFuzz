@@ -112,7 +112,7 @@ class SelfHealLoop:
             return source
         try:
             return self.sanitize(source, draft)
-        except Exception:
+        except (ValueError, TypeError, AttributeError, IndexError, RuntimeError):  # 후처리 규칙 적용 실패
             return source
 
     def _requested_target(self, draft: HarnessDraft) -> Optional[str]:

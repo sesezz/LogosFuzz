@@ -513,7 +513,7 @@ def attach_priorities(groups: Sequence[GroupInfo], kb: KnowledgeBase) -> bool:
         )
 
         from logosfuzz.knowledge.kb_adapters import to_synergy_inputs
-    except Exception:
+    except ImportError:  # SCH 모듈 임포트 불가
         return False
 
     apis, constraints = to_synergy_inputs(kb)

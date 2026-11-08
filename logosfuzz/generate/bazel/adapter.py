@@ -68,7 +68,7 @@ class BazelAdapter:
             return None
         try:
             return classify(log or "", requested_target=bin_label)
-        except Exception:
+        except (ValueError, TypeError, AttributeError, IndexError, KeyError):  # 로그 분류 실패
             return None
 
     # ------------------------------------------------------------------ #
