@@ -480,9 +480,9 @@ class GenericRun:
         return smoke, ("" if cov.passed else cov.reason), smoke.log
 
     def _crash_in_harness(self, log: str, entry) -> bool:
-        """dry-run 크래시의 첫 소스 프레임 또는 넘친 메모리의 할당 위치가 하네스 파일인지 여부
+        """dry-run 크래시의 첫 소스 프레임 또는 넘친 메모리의 위치(힙 할당·스택 프레임)가 하네스 파일인지 여부
 
-        하네스 콜백이 꼬리 호출로 스택에서 빠져도 할당 위치(하네스의 malloc)로 판별. 위치 불명 시 False
+        하네스 콜백이 꼬리 호출로 스택에서 빠지거나 라이브러리가 하네스의 작은 버퍼에 쓰는 경우도 판별. 위치 불명 시 False
         """
         from logosfuzz.execute.sanitizer import SanitizerMonitor, source_locations
         from logosfuzz.execute.symbolize import CrashSymbolizer
@@ -495,7 +495,9 @@ class GenericRun:
             return False
         CrashSymbolizer(self.fuzz_config(1)).symbolize(findings)   # 프레임 파일:줄 복원
         raw = findings[0].raw_log
-        alloc = next((i for i, line in enumerate(raw) if "allocated by thread" in line), None)
+        # 넘친 메모리의 위치 정보: 힙은 할당 스택, 스택 변수는 소속 프레임
+        alloc = next((i for i, line in enumerate(raw)
+                      if "allocated by thread" in line or "is located in stack of thread" in line), None)
         alloc_frames = source_locations(raw[alloc + 1:]) if alloc is not None else []
         harness = Path(entry["binary"]).name
         return any(frames and Path(frames[0].file).stem == harness

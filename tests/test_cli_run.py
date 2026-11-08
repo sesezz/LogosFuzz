@@ -390,6 +390,23 @@ HARNESS_ALLOC_BUG = ProcResult(1, False, stderr=(
     "    #1 0x4 in LLVMFuzzerTestOneInput /tmp/out/build/harness/lg_proto_ctx_t.c:66:23\n"))
 
 
+HARNESS_STACK_BUG = ProcResult(1, False, stderr=(
+    "#1 INITED cov: 0\n"
+    "==1==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x1\n"
+    "    #0 0x1 in __asan_memset\n"
+    "    #1 0x2 in psf_memset /src/common.c:1297:3\n"
+    "    #2 0x3 in sf_readf_float /src/sndfile.c:2039:4\n"
+    "Address 0x1 is located in stack of thread T0 at offset 2160 in frame\n"
+    "    #0 0x4 in LLVMFuzzerTestOneInput /tmp/out/build/harness/lg_proto_ctx_t.c:42\n"))
+
+
+def test_overflow_of_harness_stack_buffer_is_regenerated(tmp_path):
+    smoke = FakeSmoke(HARNESS_STACK_BUG, GOOD)
+    run, rc, out, _ = _fake_run(tmp_path, top=1, smoke_exec=smoke)
+    [group] = json.loads((out / "run_summary.json").read_text())["groups"]
+    assert group["smoke"]["regenerated"] == 1
+
+
 def test_overflow_of_harness_allocated_buffer_is_regenerated(tmp_path):
     smoke = FakeSmoke(HARNESS_ALLOC_BUG, GOOD)
     run, rc, out, _ = _fake_run(tmp_path, top=1, smoke_exec=smoke)
