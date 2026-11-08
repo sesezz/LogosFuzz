@@ -9,7 +9,10 @@
 #
 # 베이스 이미지 = ubuntu:24.04
 #   호스트 빌드 바이너리의 glibc 요구 버전(2.38 이상) 대응
-FROM ubuntu:24.04
+# 베이스 이미지는 태그가 아니라 digest 로 고정한다(태그는 같은 이름으로 내용이 바뀔 수 있다).
+# 갱신 절차: 새 digest 를 확인(`docker buildx imagetools inspect ubuntu:24.04`)한 뒤 이 줄과
+# docs/security/supply-chain.md 의 기록을 함께 바꾼다.
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Seoul \
@@ -39,13 +42,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Bazel 버전은 대상 저장소 .bazelversion 기준 (bazelisk 가 자동 다운로드)
 ARG BAZELISK_VERSION=1.25.0
 ARG TARGETARCH=amd64
-# 공급망 검증용 sha256 (빈 값이면 검증 생략)
-ARG BAZELISK_SHA256=""
-RUN curl -fsSL -o /usr/local/bin/bazelisk \
+# 공급망 검증(필수). 다운로드한 바이너리의 sha256 이 아래 값과 다르면 빌드를 실패시킨다.
+# 값이 비어 있어도 실패한다 - 검증 없이 조용히 넘어가지 않는다.
+# 버전을 올릴 때는 두 값을 함께 바꾸고 docs/security/supply-chain.md 에 기록한다.
+ARG BAZELISK_SHA256_AMD64=fd8fdff418a1758887520fa42da7e6ae39aefc788cf5e7f7bb8db6934d279fc4
+ARG BAZELISK_SHA256_ARM64=4c8d966e40ac2c4efcc7f1a5a5cceef2c0a2f16b957e791fa7a867cce31e8fcb
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+        amd64) expected="${BAZELISK_SHA256_AMD64}" ;; \
+        arm64) expected="${BAZELISK_SHA256_ARM64}" ;; \
+        *) echo "지원하지 않는 아키텍처: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    if [ -z "${expected}" ]; then echo "bazelisk sha256 이 비어 있다" >&2; exit 1; fi; \
+    curl -fsSL -o /usr/local/bin/bazelisk \
         "https://github.com/bazelbuild/bazelisk/releases/download/v${BAZELISK_VERSION}/bazelisk-linux-${TARGETARCH}" \
-    && if [ -n "${BAZELISK_SHA256}" ]; then \
-           echo "${BAZELISK_SHA256}  /usr/local/bin/bazelisk" | sha256sum -c -; \
-       fi \
+    && echo "${expected}  /usr/local/bin/bazelisk" | sha256sum -c - \
     && chmod +x /usr/local/bin/bazelisk \
     && ln -sf /usr/local/bin/bazelisk /usr/local/bin/bazel
 
