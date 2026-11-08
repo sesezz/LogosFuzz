@@ -332,7 +332,8 @@ def load_profile(path: PathLike, *, base_dir: Optional[PathLike] = None) -> Targ
     try:
         text = p.read_text(encoding="utf-8")
     except OSError as exc:
-        raise ProfileError(f"프로필을 읽을 수 없다: {p} ({exc})") from exc
+        # OSError 원문 대신 OS 오류 설명(strerror)만 포함
+        raise ProfileError(f"프로필을 읽을 수 없다: {p} ({exc.strerror or type(exc).__name__})") from exc
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:

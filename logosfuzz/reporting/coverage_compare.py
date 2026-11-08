@@ -41,12 +41,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+
+from logosfuzz.common.logging import error_kind
+
+logger = logging.getLogger(__name__)  # 예외 상세의 디버그 로그 기록용
 
 COVERAGE_COMPARE_SCHEMA_VERSION = "1.0"
 UNASSIGNED_UNIT = "(unassigned)"
@@ -575,7 +580,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.build:
             units = units_from_build_summary(json.loads(args.build.read_text(encoding="utf-8")))
     except (CoverageCompareError, OSError, json.JSONDecodeError) as exc:
-        print(f"[COVERAGE 오류] {exc}", file=sys.stderr)
+        logger.debug("커버리지 입력 로드 실패 상세", exc_info=True)
+        # 예외 원문 대신 상황 설명과 오류 분류명만 출력
+        print("[COVERAGE 오류] 커버리지 입력 로드 실패: --unit-test/--fuzz/--build 파일 존재·"
+              f"lcov/JSON 형식 확인 필요 ({error_kind(exc)})", file=sys.stderr)
         return 1
 
     exclude = tuple(args.exclude) if args.no_default_exclude \

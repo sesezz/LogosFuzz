@@ -28,6 +28,16 @@ class AnalyzeInputError(Exception):
     """
 
 
+def input_error_reason(exc: AnalyzeInputError) -> str:
+    """CLI 출력용 사유 문구 (예외 원문 대신 원인 예외의 안전한 필드로 구성)"""
+    cause = exc.__cause__
+    if isinstance(cause, json.JSONDecodeError):
+        return f"JSON 이 아닙니다 (줄 {cause.lineno}, 열 {cause.colno})"
+    if isinstance(cause, OSError):
+        return f"읽을 수 없습니다 ({cause.strerror or type(cause).__name__})"
+    return "입력 경로가 없습니다"
+
+
 def load_jsonl_findings(path: str | Path, group: str = "") -> list[CrashRecord]:
     """단일 JSONL 파일에서 레코드 목록을 읽는다."""
     p = Path(path)
@@ -83,7 +93,8 @@ def load_fuzz_summary(path: str | Path) -> list[CrashRecord]:
     except OSError as exc:
         raise AnalyzeInputError(f"세션 요약을 읽을 수 없습니다: {p} ({exc.strerror})") from exc
     except json.JSONDecodeError as exc:
-        raise AnalyzeInputError(f"세션 요약이 JSON 이 아닙니다: {p} ({exc})") from exc
+        # JSONDecodeError 원문 대신 위치 필드만 포함
+        raise AnalyzeInputError(f"세션 요약이 JSON 이 아닙니다: {p} ({exc.lineno}:{exc.colno})") from exc
     records: list[CrashRecord] = []
 
     def visit(node, group_hint: str = "") -> None:

@@ -29,3 +29,12 @@ def get_logger(feature_code: str) -> logging.Logger:
         logger.setLevel(logging.INFO)
         logger.propagate = False
     return logger
+
+
+def error_kind(exc: BaseException) -> str:
+    """사용자 출력용 오류 분류명 (예외 원문 대신 원인 예외의 타입명)
+
+    ``raise X from cause`` 로 감싼 경우 원인(예: FileNotFoundError, JSONDecodeError) 우선
+    """
+    cause = exc.__cause__
+    return type(cause if cause is not None else exc).__name__

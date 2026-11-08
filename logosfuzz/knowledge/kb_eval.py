@@ -66,12 +66,14 @@ def clang_ground_truth(paths: Sequence[str],
     try:
         from clang import cindex
     except ImportError as exc:  # pragma: no cover - 바인딩 자체가 없는 환경
-        raise GroundTruthUnavailable(f"clang 바인딩 없음: {exc}") from exc
+        logger.debug("clang 바인딩 import 실패 상세", exc_info=True)
+        raise GroundTruthUnavailable("clang 바인딩 없음") from exc  # 예외 원문 미포함
 
     try:
         index = cindex.Index.create()
     except cindex.LibclangError as exc:  # libclang 바이너리 미탐지
-        raise GroundTruthUnavailable(f"libclang 바이너리 없음: {exc}") from exc
+        logger.debug("libclang 바이너리 탐지 실패 상세", exc_info=True)
+        raise GroundTruthUnavailable("libclang 바이너리 없음") from exc  # 예외 원문 미포함
 
     apis: Dict[str, dict] = {}
     parsed = 0
