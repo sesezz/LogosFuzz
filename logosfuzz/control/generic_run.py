@@ -92,7 +92,9 @@ _SMOKE_RULES = """\
 - 상태 핸들은 대상 라이브러리의 생성 API(open/create 계열)로 열고, 열기 실패 시 바로 return 0
 - 파일 형식 라이브러리는 퍼징 입력을 메모리 버퍼로 감싼 가상 I/O(길이·seek·read·tell 콜백)로 열기
 - 콜백 구조체는 모든 필드를 실제 함수로 채우기 (0 으로 비워 두지 않기)
-- 퍼징 입력(data, size)이 대상 API 의 실제 처리 경로까지 전달되게 하기"""
+- 퍼징 입력(data, size)이 대상 API 의 실제 처리 경로까지 전달되게 하기
+- 읽기 함수에 넘기는 출력 버퍼는 열기 후 라이브러리가 알려 준 값(채널 수 × 프레임 수 등)으로 크기를 정해 malloc, 고정 크기 스택 배열 금지
+- 입력 버퍼를 문자열(char *)로 넘기지 않기 (NUL 종료 없음, 필요하면 NUL 종료 복사본 사용)"""
 
 
 @dataclass
@@ -163,6 +165,18 @@ def split_budget(schedule: Sequence[Any], budget: int, *, floor: int = MIN_GROUP
         out[name] = floor + share
     # 정수 나눗셈 나머지는 첫 그룹(최우선)에 배정
     out[names[0]] += budget - sum(out.values())
+    return out
+
+
+def rebalance_budget(kept: Dict[str, int], total: int) -> Dict[str, int]:
+    """스모크에서 빠진 그룹 몫을 남은 그룹에 기존 비율대로 재배분 (합계 ``total`` 유지)"""
+    spare = total - sum(kept.values())
+    if spare <= 0 or not kept:
+        return dict(kept)
+    base = sum(kept.values())
+    names = list(kept)
+    out = {n: kept[n] + ((spare * kept[n] // base) if base else spare // len(names)) for n in names}
+    out[max(names, key=lambda n: kept[n])] += total - sum(out.values())   # 나머지는 최대 그룹에 배정
     return out
 
 
@@ -480,9 +494,9 @@ class GenericRun:
         return smoke, ("" if cov.passed else cov.reason), smoke.log
 
     def _crash_in_harness(self, log: str, entry) -> bool:
-        """dry-run 크래시의 첫 소스 프레임 또는 넘친 메모리의 할당 위치가 하네스 파일인지 여부
+        """dry-run 크래시의 첫 소스 프레임 또는 넘친 메모리의 위치(힙 할당·스택 프레임)가 하네스 파일인지 여부
 
-        하네스 콜백이 꼬리 호출로 스택에서 빠져도 할당 위치(하네스의 malloc)로 판별. 위치 불명 시 False
+        하네스 콜백이 꼬리 호출로 스택에서 빠지거나 라이브러리가 하네스의 작은 버퍼에 쓰는 경우도 판별. 위치 불명 시 False
         """
         from logosfuzz.execute.sanitizer import SanitizerMonitor, source_locations
         from logosfuzz.execute.symbolize import CrashSymbolizer
@@ -495,7 +509,9 @@ class GenericRun:
             return False
         CrashSymbolizer(self.fuzz_config(1)).symbolize(findings)   # 프레임 파일:줄 복원
         raw = findings[0].raw_log
-        alloc = next((i for i, line in enumerate(raw) if "allocated by thread" in line), None)
+        # 넘친 메모리의 위치 정보: 힙은 할당 스택, 스택 변수는 소속 프레임
+        alloc = next((i for i, line in enumerate(raw)
+                      if "allocated by thread" in line or "is located in stack of thread" in line), None)
         alloc_frames = source_locations(raw[alloc + 1:]) if alloc is not None else []
         harness = Path(entry["binary"]).name
         return any(frames and Path(frames[0].file).stem == harness
@@ -628,7 +644,12 @@ class GenericRun:
             groups = seed_group_corpora(groups, seeds, self.out / "corpus")
             slug_timeouts = {e["slug"]: timeouts.get(e["group"], config.timeout_sec)
                              for e, _, _ in built}
-            session = (self._session_factory or FuzzSession)(config)
+            planned = sum(timeouts.values())
+            if 0 < sum(slug_timeouts.values()) < planned:      # 스모크 제외 그룹 시간 회수
+                slug_timeouts = rebalance_budget(slug_timeouts, planned)
+                self._log(f"  [EXE] 제외된 그룹 몫 재배분: {slug_timeouts}")
+                st.detail["rebalanced_sec"] = slug_timeouts
+            session =(self._session_factory or FuzzSession)(config)
             summary = session.run(groups, ensure_image=not self.opts.no_build, timeouts=slug_timeouts)
             data = summary.to_dict()
             by_slug = {g["group"]: g for g in data["groups"]}

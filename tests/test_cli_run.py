@@ -73,6 +73,15 @@ def test_split_budget_never_exceeds_budget():
         assert sum(out.values()) == budget
 
 
+def test_rebalance_budget_gives_dropped_group_time_to_remaining():
+    from logosfuzz.control.generic_run import rebalance_budget
+    assert rebalance_budget({"b": 30}, 3600) == {"b": 3600}          # 큰 그룹 제외 시 전부 회수
+    out = rebalance_budget({"a": 100, "b": 300}, 1000)
+    assert sum(out.values()) == 1000 and out["b"] > out["a"]          # 기존 비율 유지
+    assert rebalance_budget({"a": 600}, 600) == {"a": 600}           # 제외 없음
+    assert rebalance_budget({}, 600) == {}
+
+
 def test_run_parser_accepts_spec_flags(tmp_path):
     args = cli._build_parser().parse_args(
         ["run", "--profile", "targets/libsndfile.json", "--budget", "600",
@@ -388,6 +397,23 @@ HARNESS_ALLOC_BUG = ProcResult(1, False, stderr=(
     "allocated by thread T0 here:\n"
     "    #0 0x3 in malloc\n"
     "    #1 0x4 in LLVMFuzzerTestOneInput /tmp/out/build/harness/lg_proto_ctx_t.c:66:23\n"))
+
+
+HARNESS_STACK_BUG = ProcResult(1, False, stderr=(
+    "#1 INITED cov: 0\n"
+    "==1==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x1\n"
+    "    #0 0x1 in __asan_memset\n"
+    "    #1 0x2 in psf_memset /src/common.c:1297:3\n"
+    "    #2 0x3 in sf_readf_float /src/sndfile.c:2039:4\n"
+    "Address 0x1 is located in stack of thread T0 at offset 2160 in frame\n"
+    "    #0 0x4 in LLVMFuzzerTestOneInput /tmp/out/build/harness/lg_proto_ctx_t.c:42\n"))
+
+
+def test_overflow_of_harness_stack_buffer_is_regenerated(tmp_path):
+    smoke = FakeSmoke(HARNESS_STACK_BUG, GOOD)
+    run, rc, out, _ = _fake_run(tmp_path, top=1, smoke_exec=smoke)
+    [group] = json.loads((out / "run_summary.json").read_text())["groups"]
+    assert group["smoke"]["regenerated"] == 1
 
 
 def test_overflow_of_harness_allocated_buffer_is_regenerated(tmp_path):
