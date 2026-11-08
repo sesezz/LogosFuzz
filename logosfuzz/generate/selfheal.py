@@ -23,6 +23,7 @@ GEN-03-02 컴파일 에러 자가 치유 루프 ★
 """
 from __future__ import annotations
 
+import subprocess
 import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
@@ -32,6 +33,26 @@ from .compiler import Compiler
 from .errors import BazelErrorKind, BazelErrorReport, classify_toolchain_log
 from .stubs import StubPolicy, parse_undefined_symbols, plan_stubs
 from .llm import LLMClient, RepairPromptBuilder, extract_code, extract_note
+#: 빌드 로그 분류기가 던질 수 있는 예외(로그 형식·분류기 구현 불일치·분류기 내부 실패)
+_CLASSIFY_ERRORS: tuple[type[BaseException], ...] = (
+    ValueError, KeyError, IndexError, AttributeError, OSError, RuntimeError,
+)
+
+#: 컴파일러 백엔드가 던질 수 있는 예외(툴체인 실행 실패·설정 오류)
+_COMPILE_ERRORS: tuple[type[BaseException], ...] = (
+    OSError, subprocess.SubprocessError, RuntimeError, ValueError,
+    TypeError, AttributeError, KeyError, IndexError,
+)
+
+#: LLM 호출 예외: 클라이언트 설정 오류(RuntimeError), 네트워크·타임아웃(OSError), 응답 값 오류(ValueError)
+_LLM_CALL_ERRORS: tuple[type[BaseException], ...] = (RuntimeError, OSError, ValueError)
+try:  # openai 미설치 환경 대비 선택적 import
+    from openai import OpenAIError as _OpenAIError
+except ImportError:  # pragma: no cover - openai 미설치 시 기본 예외만 사용
+    pass
+else:
+    _LLM_CALL_ERRORS = _LLM_CALL_ERRORS + (_OpenAIError,)
+
 from .models import (
     GenerateReport,
     HarnessDraft,
@@ -143,11 +164,11 @@ class SelfHealLoop:
             except TypeError:
                 # 타깃 인자를 받지 않는 분류기를 끼운 경우. 인자 없이 다시 시도
                 pass
-            except Exception:
+            except _CLASSIFY_ERRORS:  # 힌트 없이 로그 원문만으로 진행
                 return None
         try:
             return self.classifier(log)
-        except Exception:
+        except _CLASSIFY_ERRORS:  # 힌트 없이 로그 원문만으로 진행
             return None
 
     def _blocked_reason(self, report: Optional[BazelErrorReport]) -> str:
@@ -196,7 +217,7 @@ class SelfHealLoop:
             self.compiler.apply_stubs(plan.stub)
             try:
                 result = self.compiler.compile(draft, source)
-            except Exception as e:
+            except _COMPILE_ERRORS as e:
                 return result, f"스텁 재빌드 중 컴파일러 예외: {e}"
             report = None if result.ok else self._classify(result.log, draft)
             rounds.append(HealRound(index=index, source=source, compile_result=result,
@@ -223,7 +244,7 @@ class SelfHealLoop:
         # 라운드 0: 초안 컴파일
         try:
             result = self.compiler.compile(draft, source)
-        except Exception as e:  # 컴파일러 백엔드 예외
+        except _COMPILE_ERRORS as e:  # 컴파일러 백엔드 예외
             return self._error_report(draft, rounds, start, f"컴파일러 예외: {e}")
 
         report = None if result.ok else self._classify(result.log, draft)
@@ -259,7 +280,7 @@ class SelfHealLoop:
                 response = self.llm.complete(
                     prompt, system=self.prompt_builder.system_prompt()
                 )
-            except Exception as e:
+            except _LLM_CALL_ERRORS as e:  # 치유 중단, 실패 보고서로 종료
                 return self._error_report(draft, rounds, start, f"LLM 예외: {e}")
 
             fixed = extract_code(response)
@@ -274,7 +295,7 @@ class SelfHealLoop:
 
             try:
                 result = self.compiler.compile(draft, source)
-            except Exception as e:
+            except _COMPILE_ERRORS as e:
                 return self._error_report(draft, rounds, start, f"컴파일러 예외: {e}")
 
             report = None if result.ok else self._classify(result.log, draft)
@@ -362,7 +383,7 @@ class SelfHealLoop:
             return
         try:
             from ..control.hitl.models import Checkpoint  # 지연 import(순환 방지)
-        except Exception:
+        except ImportError:  # HITL 모듈 미탑재 환경
             return
         last = report.last_compile
         # 마지막 라운드의 분류 결과도 함께 전달. 검토자가 로그를 처음부터 읽지

@@ -120,7 +120,8 @@ def _kb_document(kb, name: str) -> Optional[dict]:
         return None
     try:
         return kb.api(name)
-    except Exception:
+    except (OSError, ValueError, KeyError, IndexError, AttributeError, TypeError):
+        # KB 미탑재·레코드 구조 불일치: 기본 시그니처로 스텁 생성
         return None
 
 

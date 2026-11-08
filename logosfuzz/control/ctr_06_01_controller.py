@@ -242,7 +242,8 @@ class AutoPipeline:
             result.error = "Pipeline timed out"
             print(f"  [TIMEOUT] Pipeline exceeded budget {budget}s")
 
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError, ValueError) as e:
+            # 파이프라인 실행 불가·비정상 종료, 산출물 읽기 실패(디코딩 포함)
             result.success = False
             result.error = str(e)
             print(f"  [ERROR] {e}")

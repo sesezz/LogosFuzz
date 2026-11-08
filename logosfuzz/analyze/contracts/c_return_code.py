@@ -127,7 +127,8 @@ def _kb_contracts(kb, function: str) -> list[str]:
         return []
     try:
         document = kb.api(function)
-    except Exception:
+    except (OSError, ValueError, KeyError, IndexError, AttributeError, TypeError):
+        # KB 미탑재·레코드 구조 불일치: 계약 근거 없이 판별 계속
         return []
     if not document:
         return []

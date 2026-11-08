@@ -59,7 +59,7 @@ def embed_text(text: str) -> Optional[List[float]]:
     global _MODEL
     try:
         from sentence_transformers import SentenceTransformer
-    except Exception:
+    except (ImportError, OSError):  # 패키지 미설치·네이티브 라이브러리 적재 실패
         return None
     if _MODEL is None:
         _MODEL = SentenceTransformer("all-MiniLM-L6-v2")
