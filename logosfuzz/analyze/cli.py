@@ -27,12 +27,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
 from logosfuzz.analyze.dedup import CrashDeduplicator
 from logosfuzz.analyze.error_contract import KnowledgeBaseContractProvider
-from logosfuzz.analyze.loader import AnalyzeInputError, load_records
+from logosfuzz.analyze.loader import AnalyzeInputError, input_error_reason, load_records
 from logosfuzz.analyze.models import CrashCluster
 from logosfuzz.analyze.reachability import SourceReachabilityProvider
 from logosfuzz.analyze.triage import (
@@ -41,6 +42,8 @@ from logosfuzz.analyze.triage import (
     summarize,
     triage_clusters,
 )
+
+logger = logging.getLogger(__name__)  # 예외 상세의 디버그 로그 기록용
 
 
 def _write(path: str | None, payload: dict) -> None:
@@ -134,17 +137,23 @@ def _contract_provider_for_args(args: argparse.Namespace):
     return provider
 
 
+def _analysis_error(stage: str, kind: str, exc: BaseException) -> dict:
+    """결과 JSON 용 오류 항목 (예외 원문 대신 단계·분류만 기록, 상세는 디버그 로그)"""
+    logger.debug("%s analysis failed (%s)", stage, kind, exc_info=exc)
+    return {"error": f"{stage} analysis failed ({kind})"}
+
+
 def _contract_dict(args: argparse.Namespace, cluster: CrashCluster) -> dict:
     try:
         return _contract_provider_for_args(args)(cluster).to_dict()
     except OSError as exc:  # KB·프로필·소스 파일 읽기 실패
-        return {"error": f"error-contract analysis failed (io): {exc}"}
+        return _analysis_error("error-contract", "io", exc)
     except ValueError as exc:  # JSON 파싱 실패, ProfileError, 미지원 KB 버전·계약 종류
-        return {"error": f"error-contract analysis failed (value): {exc}"}
+        return _analysis_error("error-contract", "value", exc)
     except (KeyError, IndexError, AttributeError, TypeError) as exc:  # KB·크래시 레코드 구조 불일치
-        return {"error": f"error-contract analysis failed ({type(exc).__name__}): {exc}"}
+        return _analysis_error("error-contract", type(exc).__name__, exc)
     except RuntimeError as exc:  # KB·계약 공급자 사용 불가
-        return {"error": f"error-contract analysis failed (runtime): {exc}"}
+        return _analysis_error("error-contract", "runtime", exc)
 
 
 # --------------------------------------------------------------------------- #
@@ -258,13 +267,13 @@ def _reachability_dict(provider, cluster: CrashCluster) -> dict | None:
     try:
         return provider(cluster).to_dict()
     except OSError as exc:  # 소스·하네스 파일 읽기 실패
-        return {"error": f"reachability analysis failed (io): {exc}"}
+        return _analysis_error("reachability", "io", exc)
     except ValueError as exc:  # 경로·라인 값 해석 실패(UnicodeDecodeError 포함)
-        return {"error": f"reachability analysis failed (value): {exc}"}
+        return _analysis_error("reachability", "value", exc)
     except (KeyError, IndexError, AttributeError, TypeError) as exc:  # 크래시 레코드 구조 불일치
-        return {"error": f"reachability analysis failed ({type(exc).__name__}): {exc}"}
+        return _analysis_error("reachability", type(exc).__name__, exc)
     except RuntimeError as exc:  # 분석기 사용 불가
-        return {"error": f"reachability analysis failed (runtime): {exc}"}
+        return _analysis_error("reachability", "runtime", exc)
 
 
 def _run_dedup(args: argparse.Namespace) -> int:
@@ -448,7 +457,11 @@ def main(argv: list | None = None) -> int:
     try:
         return args.func(args)
     except AnalyzeInputError as e:
-        print(f"[ANA 오류] {e}", file=sys.stderr)
+        logger.debug("분석 입력 로드 실패 상세", exc_info=True)
+        # 예외 원문 대신 사용자 입력 경로와 사유 문구만 출력
+        inputs = ", ".join(str(i) for i in args.inputs)
+        print(f"[ANA 오류] 분석 입력 로드 실패: {inputs} — {input_error_reason(e)}",
+              file=sys.stderr)
         return 1
 
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import logging
 import os
 import shlex
 import sys
@@ -28,8 +29,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence
 
+from logosfuzz.common.logging import error_kind
+
 if TYPE_CHECKING:  # pragma: no cover
     from logosfuzz.common.target_profile import TargetProfile
+
+
+logger = logging.getLogger(__name__)  # 예외 상세의 디버그 로그 기록용
 
 
 class CompileDbError(RuntimeError):
@@ -258,7 +264,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             data = {f: fl.to_dict() for f, fl in sorted(flags_by_file(db, strip).items())}
     except CompileDbError as exc:
-        print(f"[ERROR] {exc}", file=sys.stderr)
+        logger.debug("compile_commands.json 플래그 추출 실패 상세", exc_info=True)
+        # 예외 원문 대신 대상 경로와 오류 분류명만 출력
+        target = args.profile or args.compile_db
+        print(f"[ERROR] compile_commands.json 플래그 추출 실패: {target} — 파일 존재·JSON 배열 "
+              f"형식 확인 필요 ({error_kind(exc)})", file=sys.stderr)
         return 1
 
     text = json.dumps(data, indent=2, ensure_ascii=False)

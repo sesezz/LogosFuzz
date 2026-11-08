@@ -19,6 +19,7 @@ CTR-06-02 HITL 인터페이스 - CLI (`logosfuzz review`)
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from typing import List, Optional
 
@@ -26,6 +27,8 @@ from .gate import HITLManager
 from .models import Checkpoint, DecisionType, ReviewItem, ReviewStatus
 from .policy import HITLPolicy
 from .store import JsonReviewStore
+
+logger = logging.getLogger(__name__)  # 예외 상세의 디버그 로그 기록용
 
 
 # --------------------------------------------------------------------------- #
@@ -101,12 +104,22 @@ def _cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_decide_error(item_id: str, exc: Exception) -> None:
+    """결정 실패 안내 (예외 원문 대신 항목 번호와 상황 설명만 출력, 상세는 디버그 로그)"""
+    logger.debug("리뷰 항목 결정 실패 상세: %s", item_id, exc_info=exc)
+    if isinstance(exc, KeyError):
+        print(f"오류: 리뷰 항목을 찾을 수 없음: {item_id}", file=sys.stderr)
+    else:
+        print(f"오류: 리뷰 항목 #{item_id} 처리 불가 — 이미 처리된 항목 또는 잘못된 입력값",
+              file=sys.stderr)
+
+
 def _decide(args: argparse.Namespace, dtype: DecisionType) -> int:
     m = _manager(args)
     try:
         it = m.decide(args.id, dtype, comment=getattr(args, "message", "") or "")
     except (KeyError, ValueError) as e:
-        print(f"오류: {e}", file=sys.stderr)
+        _print_decide_error(args.id, e)
         return 1
     print(f"#{it.id} → {it.status.value}")
     return 0
@@ -130,7 +143,7 @@ def _cmd_edit(args: argparse.Namespace) -> int:
         it = m.decide(args.id, DecisionType.EDIT, comment=args.message or "",
                       edited_payload=edited)
     except (KeyError, ValueError) as e:
-        print(f"오류: {e}", file=sys.stderr)
+        _print_decide_error(args.id, e)
         return 1
     print(f"#{it.id} → {it.status.value}")
     return 0

@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
+from logosfuzz.common.logging import error_kind
 from logosfuzz.config import CoverageMode, Engine, FuzzConfig, LogicGroup
 from logosfuzz.execute.errors import ExecuteError
 from logosfuzz.execute.fuzz_session import FuzzSession
@@ -27,6 +29,8 @@ from logosfuzz.reporting.summary import (
     render_build_units_markdown,
     write_validation_summary,
 )
+
+logger = logging.getLogger(__name__)  # 예외 상세의 디버그 로그 기록용
 
 
 # 빌드 시스템별 기본 격리 이미지 태그
@@ -206,7 +210,10 @@ def main(argv: list | None = None) -> int:
                 args.markdown.write_text(render_build_units_markdown(result),
                                          encoding="utf-8")
         except (OSError, ValidationSummaryError) as e:
-            print(f"[SUMMARY 오류] {e}", file=sys.stderr)
+            logger.debug("검증 요약 생성 실패 상세", exc_info=True)
+            # 예외 원문 대신 상황 설명과 오류 분류명만 출력
+            print(f"[SUMMARY 오류] 검증 요약 생성 실패: 입력 JSON 존재·형식 또는 "
+                  f"출력 경로 확인 필요 ({error_kind(e)})", file=sys.stderr)
             return 1
         print(
             f"[SUMMARY] 그룹 {result['metrics']['groups']}개 | "
@@ -233,11 +240,15 @@ def main(argv: list | None = None) -> int:
     if args.command == "analyze":
         # ANA 파트 위임 (analyze 명령)
         from logosfuzz.analyze.cli import _run_analyze
-        from logosfuzz.analyze.loader import AnalyzeInputError
+        from logosfuzz.analyze.loader import AnalyzeInputError, input_error_reason
         try:
             return _run_analyze(args)
         except AnalyzeInputError as e:
-            print(f"[ANA 오류] {e}", file=sys.stderr)
+            logger.debug("분석 입력 로드 실패 상세", exc_info=True)
+            # 예외 원문 대신 사용자 입력 경로와 사유 문구만 출력
+            inputs = ", ".join(str(i) for i in args.inputs)
+            print(f"[ANA 오류] 분석 입력 로드 실패: {inputs} — {input_error_reason(e)}",
+                  file=sys.stderr)
             return 1
 
     if args.command == "run":
@@ -251,7 +262,10 @@ def main(argv: list | None = None) -> int:
                 args.manifest, failed_only=args.failed_only
             )
         except (OSError, ValueError) as e:
-            print(f"[REGRESSION 오류] {e}", file=sys.stderr)
+            logger.debug("회귀 매니페스트 처리 실패 상세", exc_info=True)
+            # 예외 원문 대신 매니페스트 경로와 오류 분류명만 출력
+            print(f"[REGRESSION 오류] 회귀 매니페스트 처리 실패: {args.manifest} "
+                  f"({error_kind(e)})", file=sys.stderr)
             return 1
         print(
             f"[REGRESSION] {summary['suite']} | 총 {summary['total']}건 | "
@@ -310,9 +324,32 @@ def main(argv: list | None = None) -> int:
             return 4  # 4: 하네스 미실행 그룹 존재
         return 0
     except ExecuteError as e:
-        print(f"[EXE 오류] {e}", file=sys.stderr)
+        logger.debug("퍼징 실행 실패 상세", exc_info=True)
+        # 예외 원문 대신 예외 종류별 고정 안내와 사용자 입력값만 출력
+        print(f"[EXE 오류] {_execute_error_message(e, args, harness_dir)}", file=sys.stderr)
         return 1
 
+
+
+def _execute_error_message(exc: ExecuteError, args: argparse.Namespace,
+                           harness_dir: Path) -> str:
+    """EXE 오류 사용자 안내 (예외 원문 대신 예외 종류별 고정 문구와 사용자 입력값으로 구성)"""
+    from logosfuzz.execute.errors import (
+        DockerUnavailableError,
+        HarnessNotFoundError,
+        ImageBuildError,
+        InvalidEngineError,
+    )
+
+    if isinstance(exc, InvalidEngineError):
+        return f"지원하지 않는 퍼징 엔진: {args.engine} (libfuzzer 만 지원, AFL++ 미지원)"
+    if isinstance(exc, DockerUnavailableError):
+        return "Docker 사용 불가 — docker 설치·데몬 실행 상태 확인 필요"
+    if isinstance(exc, ImageBuildError):
+        return "격리 실행 이미지 빌드 실패 — Dockerfile·Docker 빌드 로그 확인 필요"
+    if isinstance(exc, HarnessNotFoundError):
+        return f"하네스 산출물 없음 — --harness-dir({harness_dir}) 확인 필요"
+    return f"퍼징 실행 실패 — --coverage({args.coverage}) 등 옵션 값 확인 필요 ({error_kind(exc)})"
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -13,6 +13,7 @@ GEN-03 하네스 생성 - CLI (`logosfuzz generate`)
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from typing import List, Optional
 
@@ -20,6 +21,8 @@ from .compiler import FakeCompiler, SubprocessCompiler
 from .llm import OpenAILLMClient, ScriptedLLMClient, default_gen_model
 from .models import HarnessDraft, HealRound
 from .selfheal import SelfHealLoop, summarize
+
+logger = logging.getLogger(__name__)  # 예외 상세의 디버그 로그 기록용
 
 
 def _print_round(rnd: HealRound) -> None:
@@ -67,9 +70,14 @@ def _cmd_generate(args: argparse.Namespace) -> int:
             from ..control.hitl import HITLManager, HITLPolicy
             hitl = HITLManager.create(policy=HITLPolicy.default())
         except ImportError as e:  # HITL 모듈 로드 실패
-            print(f"HITL 연결 실패(무시, 모듈 로드): {e}", file=sys.stderr)
+            logger.debug("HITL 모듈 로드 실패 상세", exc_info=True)
+            # 예외 원문 대신 상황 설명과 오류 분류명만 출력
+            print(f"HITL 연결 실패(무시, 모듈 로드): {type(e).__name__}", file=sys.stderr)
         except (OSError, ValueError) as e:  # 리뷰 저장소 경로·정책 값 오류
-            print(f"HITL 연결 실패(무시): {e}", file=sys.stderr)
+            logger.debug("HITL 연결 실패 상세", exc_info=True)
+            # 예외 원문 대신 상황 설명과 오류 분류명만 출력
+            print(f"HITL 연결 실패(무시): 리뷰 저장소 경로·정책 값 확인 필요 ({type(e).__name__})",
+                  file=sys.stderr)
 
     loop = SelfHealLoop(
         compiler=compiler, llm=llm, max_round=args.max_round,
