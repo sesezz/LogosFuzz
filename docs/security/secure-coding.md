@@ -41,6 +41,9 @@
 
 ### 정적 분석 결과(이 커밋 기준)
 
+> 최신 재검사(3라운드, 2026-11-10 동결본)는 [scan-round3.md](scan-round3.md) 에 있다.
+> Bandit medium 이상 0건·low 35건, pip-audit 0건, Gitleaks 0건으로 아래 기록과 같은 판정이다.
+
 - Bandit(1.8.6, `-x '*/tests/*'`): 수정 전 medium 이상 7건이었다. sha1/md5 3건, 예측 가능한 `/tmp` 3건, XML 파싱 1건이다.
   - 해시 3건은 클러스터·중복 판별용 지문이라 `usedforsecurity=False` 를 명시했다. 다이제스트 값은 바뀌지 않는다.
   - 호스트 `/tmp/seed` 는 출력 디렉터리 아래 시드로 바꿨다.

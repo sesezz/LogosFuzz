@@ -143,7 +143,7 @@ baselibs 를 다른 곳(예: `~/baselibs`)에 두었다면 `source_root` 만 바
 
 ## 2. compile_db 사용법
 
-`compile_db` 는 bear 폐기 결정(README)과 충돌하지 않는다. bear 처럼 컴파일러 호출을
+`compile_db` 는 bear 폐기 결정([MODULE-NOTES.md](MODULE-NOTES.md))과 충돌하지 않는다. bear 처럼 컴파일러 호출을
 가로채지 않고, CMake 가 `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` 으로 직접 만든 파일만 읽는다.
 Bazel 대상은 계속 `bazel_query` 를 쓴다.
 

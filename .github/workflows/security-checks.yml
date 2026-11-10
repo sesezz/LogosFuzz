@@ -6,6 +6,10 @@ name: Security checks
 #   - Bandit  : Python SAST. 심각도·신뢰도 medium 이상이면 실패. 예외는 코드의
 #               `# nosec <ID>` + 사유 주석으로만 둔다(docs/security/secure-coding.md).
 #   - pip-audit: requirements.txt 의 알려진 취약점(PyPI Advisory/OSV). 하나라도 있으면 실패.
+#   - Gitleaks : 커밋 이력·작업 트리의 비밀값. 하나라도 있으면 실패. 시험용 가짜 값은
+#               `.gitleaksignore` 의 지문으로만 예외를 둔다. 받은 바이너리는 릴리스의
+#               sha256 으로 검증한다(docs/security/supply-chain.md).
+# 같은 기준을 로컬에서 돌리려면 `bash scripts/run_security_scans.sh` 를 쓴다.
 # Action 은 현재 주 버전 태그를 쓴다. 전체 commit SHA 고정은 저장소 설정·승인 절차와 함께
 # 진행할 남은 과제다(docs/security/supply-chain.md).
 
@@ -45,4 +49,32 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: security-reports
+          path: security-reports/
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 0          # 커밋 이력 전체를 봐야 과거 커밋의 비밀값이 잡힌다
+      - name: Install Gitleaks
+        env:
+          GITLEAKS_VERSION: '8.30.1'
+          GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+        run: |
+          set -eu
+          curl -sSfL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+      - name: Gitleaks (비밀값)
+        run: |
+          mkdir -p security-reports
+          gitleaks git . --config .gitleaks.toml --redact --report-format json --report-path security-reports/gitleaks-git.json
+          gitleaks dir . --config .gitleaks.toml --redact --report-format json --report-path security-reports/gitleaks-dir.json
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: gitleaks-reports
           path: security-reports/
