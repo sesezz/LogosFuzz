@@ -1,0 +1,20 @@
+# Gitleaks 설정. 기본 규칙(gitleaks 내장)을 그대로 쓰고 경로 예외만 더한다.
+# 커밋된 파일의 예외는 .gitleaksignore 에 지문(fingerprint)으로 둔다. 여기에는
+# 저장소에 커밋되지 않는 로컬 산출물(가상환경, 받아 온 대상 소스, 실행 결과)만 적는다.
+# 디렉터리 스캔(`gitleaks dir .`)이 이 경로를 훑으면 서드파티 패키지의 시험용
+# 문자열이 매번 수백 건씩 올라와 실제 유출 신호를 덮는다.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "커밋되지 않는 로컬 디렉터리"
+paths = [
+  '''(^|/)\.venv''',
+  '''(^|/)venv/''',
+  '''(^|/)third_party/''',
+  '''(^|/)out/''',
+  '''(^|/)build/''',
+  '''(^|/)security-reports/''',
+  '''(^|/)node_modules/''',
+]

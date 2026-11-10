@@ -110,6 +110,7 @@ targets/        대상 프로필(JSON)
 | [docs/VALIDATION-SUMMARY-SCHEMA.md](docs/VALIDATION-SUMMARY-SCHEMA.md) | 공유용 검증 요약 스키마 |
 | [docs/security/secure-coding.md](docs/security/secure-coding.md) | 시큐어코딩 가이드 적용 현황과 정적 분석 결과 |
 | [docs/security/supply-chain.md](docs/security/supply-chain.md) | 외부 구성요소 고정값과 무결성 검증 기록 |
+| [docs/security/scan-round3.md](docs/security/scan-round3.md) | 동결본 보안 스캔(Bandit·pip-audit·Gitleaks) 라운드 기록 |
 | `docs/` 의 과제 코드 문서 | EXT-01 · SCH-02 · GEN-03 · EXE-04 · ANA-05 단계별 설계 |
 
 ## 커밋 메시지 규칙

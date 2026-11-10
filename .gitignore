@@ -91,3 +91,6 @@ third_party/
 examples/embedded/build-fuzz*/
 examples/vuln_overflow/build-fuzz*/
 examples/vuln_overflow/build/
+
+# 보안 스캔 결과 원문 (scripts/run_security_scans.sh, CI 아티팩트로도 남는다)
+security-reports/
