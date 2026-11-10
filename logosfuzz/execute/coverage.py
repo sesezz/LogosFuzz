@@ -311,7 +311,7 @@ class CoverageCollector:
 
     # ---- 경로 헬퍼 ----------------------------------------------------
     def profraw_dir(self, group: LogicGroup) -> Path:
-        # 그룹 이름이 파일·디렉터리 이름과 컨테이너 셸 명령에 들어가므로 검사한다.
+        # 그룹 이름이 파일·디렉터리 이름과 컨테이너 셸 명령에 들어가므로 검사 필요
         return self.cfg.coverage_dir / safe_component(group.name, what="로직 그룹 이름")
 
     def profdata_path(self, group: LogicGroup) -> Path:

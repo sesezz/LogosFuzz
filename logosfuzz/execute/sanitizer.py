@@ -85,19 +85,19 @@ _SOURCE_LOCATION = re.compile(r"(?P<file>(?:[A-Za-z]:)?[^\s():]+\.(?:c|cc|cpp|cx
 # 대신 **줄의 끝/시작을 앵커로** 쓰는 패턴을 따로 둔다. 콜론은 경로에 못 들어
 # 온다고 보고 경계로 쓴다(Windows 드라이브 문자만 예외).
 _PATH_EXT = r"(?:c|cc|cpp|cxx|h|hh|hpp)"
-# 심볼라이즈된 sanitizer 프레임은 줄 끝이 "<파일>:<행>[:<열>]" 이다.
+# 심볼라이즈된 sanitizer 프레임은 줄 끝이 "<파일>:<행>[:<열>]" 형태
 #     #1 0x57a665aa3726 in vulnerable /mnt/c/바탕 화면/x/fuzz_target.c:16:13
 #
-# 절대 경로만 받는다. 경로의 시작을 줄머리/공백 뒤로 못 박아야(앞의 함수 이름을
+# 절대 경로만 수용. 경로의 시작을 줄머리/공백 뒤로 못 박아야(앞의 함수 이름을
 # 빨아들이지 않도록) 하고, 그러면 ``score/json.cc`` 같은 상대 경로는 중간의
-# ``/`` 부터 잘려 ``/json.cc`` 가 된다. 상대 경로는 공백을 품지 않으니 기존
-# _SOURCE_LOCATION 이 제대로 읽는다 — 거기로 떨어뜨린다.
+# ``/`` 부터 잘려 ``/json.cc`` 가 됨. 상대 경로는 공백을 품지 않아 기존
+# _SOURCE_LOCATION 이 정상 처리 — 그쪽으로 전달
 _FRAME_LOCATION = re.compile(
     r"(?:^|(?<=\s))(?P<file>(?:[A-Za-z]:)?[/\\][^:]*?\." + _PATH_EXT
     + r"):(?P<line>\d+)(?::\d+)?\s*$"
 )
-# UBSan 진단 줄은 반대로 경로로 시작한다. "runtime error:" 로 끝을 못 박아
-# 프레임 줄과 섞이지 않게 한다.
+# UBSan 진단 줄은 반대로 경로로 시작. "runtime error:" 로 끝을 못 박아
+# 프레임 줄과 섞이지 않게 분리
 _UBSAN_LOCATION = re.compile(
     r"^(?P<file>(?:[A-Za-z]:)?[^:]+\." + _PATH_EXT + r"):(?P<line>\d+):\d+:\s*runtime error:"
 )

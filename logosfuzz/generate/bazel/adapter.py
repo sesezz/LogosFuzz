@@ -111,8 +111,8 @@ class BazelAdapter:
         src_path = safe_join(pkg, spec.srcs[0], what="하네스 소스 이름")
         build_path = pkg / "BUILD.bazel"
 
-        # 사용자가 원래 가지고 있던 BUILD 를 덮어쓰지 않는다. 이 어댑터가 만든 파일이거나
-        # (manifest 에 있음) 퍼징 타깃 전용 BUILD 일 때만 다시 쓴다.
+        # 사용자가 원래 가지고 있던 BUILD 는 덮어쓰지 않음. 이 어댑터가 만든 파일
+        # (manifest 에 있음)이거나 퍼징 타깃 전용 BUILD 일 때만 재작성
         if build_path.is_file() and "BUILD.bazel" not in self._manifest(pkg):
             if "cc_fuzz_test(" not in build_path.read_text(encoding="utf-8", errors="replace"):
                 raise FileExistsError(
@@ -145,7 +145,7 @@ class BazelAdapter:
         except (FileNotFoundError, NotADirectoryError):  # pkg 부재·비디렉터리 시 무시
             pass
         try:
-            pkg.rmdir()                     # 비어 있을 때만 지워진다
+            pkg.rmdir()                     # 비어 있을 때만 삭제
         except OSError:
             pass
 

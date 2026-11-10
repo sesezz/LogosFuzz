@@ -1,6 +1,6 @@
 # CTR-06-02 · Human-in-the-loop (HITL) 인터페이스 골격
 
-LogosFuzz 자동 퍼징 파이프라인(`EXT → SCH → GEN → EXE → ANA`)에서 **사람의 검토·승인이 필요한 지점**을 표준화된 방식으로 처리하기 위한 제어(CTR) 계층 골격입니다. 이번 커밋은 `CTR-06-02 HITL 골격 착수` 범위로, 배관(데이터 모델·저장소·정책·게이트·CLI·연동 훅)까지 동작하는 스켈레톤을 제공합니다. 각 단계의 심층 로직(하네스 재생성, CVE 리포트 작성 등)은 `TODO`로 표시된 연결점만 남겨 두었습니다.
+LogosFuzz 자동 퍼징 파이프라인(`EXT → SCH → GEN → EXE → ANA`)에서 **사람의 검토·승인이 필요한 지점**을 표준화된 방식으로 처리하는 제어(CTR) 계층이다. `CTR-06-02 HITL` 범위로 데이터 모델·저장소·정책·게이트·CLI·연동 훅까지 동작한다. 각 단계의 심층 로직(하네스 재생성, CVE 리포트 작성 등)은 `TODO` 로 표시한 연결점으로 둔다.
 
 ## 구성
 
@@ -42,7 +42,7 @@ LogosFuzz 자동 퍼징 파이프라인(`EXT → SCH → GEN → EXE → ANA`)�
                                             사람이 나중에 `logosfuzz review approve <id>` 로 처리
 ```
 
-`request()`가 돌려주는 `Decision.type`에 따라 각 단계가 분기합니다: `APPROVE/EDIT`→진행, `REJECT`→재시도/폐기, `SKIP`→건너뜀, `DEFER`→비동기 검토 대기.
+`request()`가 돌려주는 `Decision.type`에 따라 각 단계가 분기한다: `APPROVE/EDIT`→진행, `REJECT`→재시도/폐기, `SKIP`→건너뜀, `DEFER`→비동기 검토 대기.
 
 ## 사용법
 
@@ -72,7 +72,7 @@ python -m logosfuzz.control.hitl.cli review approve <id> -m "검토 완료"
 python -m logosfuzz.control.hitl.cli review stats
 ```
 
-상위 `logosfuzz` CLI에는 `cli.register(subparsers)`로 `review` 서브커맨드를 붙이면 됩니다.
+상위 `logosfuzz` CLI에는 `cli.register(subparsers)`로 `review` 서브커맨드를 붙인다.
 
 ## 테스트 / 데모
 

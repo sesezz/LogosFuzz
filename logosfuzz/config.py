@@ -108,35 +108,33 @@ class FuzzConfig:
     pids_limit: int = 512
     drop_all_caps: bool = True     # --cap-drop ALL
     no_new_privileges: bool = True
-    # 컨테이너를 호스트의 실행 사용자(uid:gid)로 돌린다. 이미지 기본 사용자
-    # (uid 1000 fuzzer)로 두면, 호스트 사용자의 uid가 다를 때(실측 확인:
-    # uid 1003) /out 바인드 마운트에 컨테이너가 쓰기 권한이 없어 크래시
-    # artifact가 조용히 저장되지 않는다 - ASAN은 결함을 잡지만
-    # crashes/ 가 빈 채로 남고 total_crashes=0 으로 보고된다.
+    # 컨테이너를 호스트 실행 사용자(uid:gid)로 실행
+    # 이미지 기본 사용자(uid 1000 fuzzer)로 두면 호스트 uid 가 다를 때(실측 확인:
+    # uid 1003) /out 바인드 마운트에 쓰기 권한이 없어 크래시 artifact 가 조용히
+    # 유실 — ASAN 은 결함을 잡지만 crashes/ 는 빈 채로 남고 total_crashes=0 으로 보고
     run_as_host_user: bool = True
 
     # Sanitizer 환경
     #
-    # symbolize=0: ASAN이 크래시 시그널 핸들러 "안에서" llvm-symbolizer를
-    # fork/exec하면 WSL2에서 그 자식 프로세스가 응답 없이 멈춘다(실측 확인 -
-    # 컨테이너 밖 단독 llvm-symbolizer 호출은 즉시 응답하지만, ASAN이 크래시
-    # 시점에 내부적으로 호출하면 무한 대기 → 하드 타임아웃까지 감 →
-    # 크래시 산출물 저장 전에 프로세스가 죽어 crashes/ 가 비고, 상태가
-    # crashed 대신 timeout 으로 잘못 기록된다). 심볼라이즈를 끄면 즉시
-    # SIGABRT로 종료되고 크래시 산출물도 정상 저장된다(실측 확인).
+    # symbolize=0: ASAN 이 크래시 시그널 핸들러 "안에서" llvm-symbolizer 를
+    # fork/exec 하면 WSL2 에서 그 자식 프로세스가 무응답 상태로 정지(실측 확인 —
+    # 컨테이너 밖 단독 llvm-symbolizer 호출은 즉시 응답, ASAN 내부 호출만 무한
+    # 대기 → 하드 타임아웃 → 크래시 산출물 저장 전에 프로세스 종료 → crashes/ 가
+    # 비고 상태도 crashed 대신 timeout 으로 오기록). 심볼라이즈를 끄면 즉시
+    # SIGABRT 종료, 크래시 산출물도 정상 저장(실측 확인)
     #
-    # 대신 파일:줄 정보를 잃는다. 이건 크래시 발생 "이후" 별도 프로세스로
-    # (ASAN 시그널 핸들러 밖에서) `llvm-symbolizer`를 돌려 복원한다 -
-    # `execute/symbolize.py` 가 그 일을 하고, 아래 세 설정으로 제어한다.
+    # 대신 파일:줄 정보 손실 — 크래시 발생 "이후" 별도 프로세스로(ASAN 시그널
+    # 핸들러 밖에서) `llvm-symbolizer` 를 돌려 복원
+    # 담당은 `execute/symbolize.py`, 제어는 아래 세 설정
     asan_options: str = "abort_on_error=1:detect_leaks=1:symbolize=0"
     tsan_options: str = "halt_on_error=1:second_deadlock_stack=1"
 
     # 크래시 후처리 심볼라이즈 (EXE-04-02). 끄면 sanitizer 결함의 traceback 이
     # 비어 ANA 의 시그니처/정오탐 판별이 근거를 잃는다(모듈 docstring 참조).
     symbolize_crashes: bool = True
-    # 심볼라이저는 호스트에서 돌리는 것이 기본이다 - 퍼징 이미지는 clang/llvm 을
-    # apt 로 깔지 않아(Bazel @llvm_toolchain 이 가져온다) llvm-symbolizer 가 없다.
-    # 한쪽에 도구가 없으면 다른 쪽으로 한 번 넘어간다(symbolize.py 참조).
+    # 심볼라이저는 호스트 실행이 기본 — 퍼징 이미지는 clang/llvm 을 apt 로 깔지
+    # 않아(Bazel @llvm_toolchain 이 가져옴) llvm-symbolizer 부재
+    # 한쪽에 도구가 없으면 다른 쪽으로 한 번 전환(symbolize.py 참조)
     symbolize_in_docker: bool = False
     llvm_symbolizer: str = "llvm-symbolizer"   # 심볼라이저 경로/이름
 

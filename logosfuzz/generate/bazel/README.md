@@ -96,16 +96,16 @@ bazel build --config=fuzz //score/json/fuzz:json_parser_fuzz_test_bin
 
 ## 검증 상태
 
-| 항목 | 상태 |
+| 항목 | 확인 방법·결과 |
 |---|---|
-| `apply_overlay.py` dry-run / 적용 / 멱등 재적용 / revert | ✅ 픽스처로 검증 |
-| `score::json::JsonParser::FromBuffer` 시그니처 | ✅ baselibs 원문 확인 |
-| `score::Result` = `expected` (`has_value()`/`value()`) | ✅ 원문 확인 |
-| `cc_fuzz_test` 생성 타깃 (`_bin`/`_run`/`_corpus`/`_dict`) | ✅ rules_fuzzing 0.8.0 원문 확인 |
-| **`bazel build --config=fuzz` 실제 빌드** | ✅ 7분 12초 / 159 actions |
-| **`bazel build --config=bl-x86_64-linux` 회귀** | ✅ 성공 (오버레이 후에도 무손상) |
-| 퍼저 실행 | ✅ 200만 회 / 521초 / 약 3,840 exec/s / 크래시 0건 |
-| 계측 침투 깊이 | ✅ 자동 사전에 JSON 문법 학습 (true/false/UTF-8 BOM) |
+| `apply_overlay.py` dry-run / 적용 / 멱등 재적용 / revert | 픽스처로 검증 |
+| `score::json::JsonParser::FromBuffer` 시그니처 | baselibs 원문 확인 |
+| `score::Result` = `expected` (`has_value()`/`value()`) | 원문 확인 |
+| `cc_fuzz_test` 생성 타깃 (`_bin`/`_run`/`_corpus`/`_dict`) | rules_fuzzing 0.8.0 원문 확인 |
+| **`bazel build --config=fuzz` 실제 빌드** | 7분 12초 / 159 actions |
+| **`bazel build --config=bl-x86_64-linux` 회귀** | 성공 (오버레이 후에도 무손상) |
+| 퍼저 실행 | 200만 회 / 521초 / 약 3,840 exec/s / 크래시 0건 |
+| 계측 침투 깊이 | 자동 사전에 JSON 문법 학습 (true/false/UTF-8 BOM) |
 
 WSL2 + clang 18 / Bazel 8.6.0 환경에서 전 항목 검증 완료.
 1주차 게이트(빌드·실행·계측) 통과. 컨테이너 내 실행은 C 파트 Dockerfile 완료 후 재확인 필요.

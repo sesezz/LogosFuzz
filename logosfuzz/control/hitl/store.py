@@ -108,8 +108,8 @@ class JsonReviewStore(ReviewStore):
     def _write_disk(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = [it.to_dict() for it in self._items.values()]
-        # 원자적 쓰기: 같은 디렉터리의 고유 임시 파일(0600)에 쓴 뒤 교체.
-        # 고정 이름(.tmp)을 쓰면 두 프로세스가 같은 임시 파일을 덮어쓴다.
+        # 원자적 쓰기: 같은 디렉터리의 고유 임시 파일(0600)에 쓴 뒤 교체
+        # 고정 이름(.tmp)은 두 프로세스가 같은 임시 파일을 덮어쓸 위험
         fd, tmp_name = tempfile.mkstemp(prefix=self.path.name + ".", suffix=".tmp",
                                         dir=str(self.path.parent))
         replaced = False
@@ -141,7 +141,7 @@ class JsonReviewStore(ReviewStore):
             self._flush()
             return
         with self._process_lock():
-            # 디스크가 기준이다: 다른 프로세스가 추가·수정한 항목을 먼저 반영한다.
+            # 디스크 기준 — 다른 프로세스가 추가·수정한 항목을 먼저 반영
             merged = self._read_disk()
             merged[item.id] = item
             self._items = merged

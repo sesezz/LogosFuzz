@@ -29,7 +29,7 @@ from typing import List
 
 OVERLAY_ROOT = Path(__file__).parent / "overlay"
 
-# append 대상 파일과 스니펫. 마커는 스니펫 첫 줄/끝 줄에 들어 있다.
+# append 대상 파일과 스니펫. 마커는 스니펫 첫 줄/끝 줄에 포함
 MODULE_MARKER = "logosfuzz overlay: rules_fuzzing"
 BAZELRC_MARKER = "logosfuzz overlay: fuzz config"
 
