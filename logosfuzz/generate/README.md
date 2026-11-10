@@ -1,6 +1,6 @@
 # GEN-03-02 · 컴파일 에러 자가 치유 루프 ★
 
-LLM이 생성한 퍼징 하네스가 컴파일에 실패하면, **컴파일 에러 로그를 LLM에 되먹여 소스를 수정하고 재컴파일**하는 과정을 `--max-round` 만큼 반복하는 제너레이트(GEN) 계층 골격입니다. 라운드를 모두 소진해도 고쳐지지 않으면 CTR-06-02 HITL의 `HARNESS_REVIEW`로 자동 에스컬레이션합니다.
+LLM이 생성한 퍼징 하네스가 컴파일에 실패하면, **컴파일 에러 로그를 LLM에 되먹여 소스를 수정하고 재컴파일**하는 과정을 `--max-round` 만큼 반복하는 제너레이트(GEN) 계층이다. 라운드를 모두 소진해도 고쳐지지 않으면 CTR-06-02 HITL 의 `HARNESS_REVIEW` 로 자동 에스컬레이션한다.
 
 설계서 GEN-03-00 대응: `logosfuzz generate --model <name> --max-round <n>` — "컴파일 오류 로그를 LLM에 재입력하여 자동 수정 후 재컴파일, 지정 횟수까지 반복. 실패 시 자기 자신(generate)으로 되돌아가는 재시도 루프."
 
@@ -34,7 +34,7 @@ HarnessDraft(초안)
                         (hitl 연결 시) HARNESS_REVIEW 큐로 에스컬레이션
 ```
 
-정체(stagnation) 감지: 라운드 간 **에러 시그니처(line, message 집합)** 가 동일하거나 LLM이 소스를 전혀 바꾸지 못하면 무한 낭비를 막기 위해 조기 중단합니다(`stop_on_stagnation`).
+정체(stagnation) 감지: 라운드 간 **에러 시그니처(line, message 집합)** 가 동일하거나 LLM이 소스를 전혀 바꾸지 못하면 무한 낭비를 막기 위해 조기 중단한다(`stop_on_stagnation`).
 
 ## 사용법
 

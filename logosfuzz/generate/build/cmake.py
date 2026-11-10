@@ -62,7 +62,7 @@ COVERAGE_SUFFIX = "-cov"
 # 외부 명령 1회의 기본 상한. CMake configure 는 대상 프로젝트가 정한 스크립트를 실행하므로
 # 상한 없이 두면 멈춘 configure 하나가 파이프라인 전체를 붙잡는다(자원 관리, CWE-400).
 DEFAULT_TIMEOUT_S = 3600.0
-# 빌드 설정 지문. 소스·컴파일러·플래그가 바뀌었는데 예전 산출물을 캐시로 재사용하지 않게 한다.
+# 빌드 설정 지문 — 소스·컴파일러·플래그가 바뀌었는데 예전 산출물을 캐시로 재사용하지 않도록
 FINGERPRINT_FILE = ".logosfuzz-build.json"
 
 
@@ -225,7 +225,7 @@ class CMakeAdapter:
         if len(srcs) != 1:
             raise ValueError(f"하네스 소스는 1개여야 한다(현재 {len(srcs)}개): {srcs}")
         # package·srcs 는 생성기가 정한 값이라 '../' 나 절대경로가 섞이면 작업 디렉터리
-        # 밖을 덮어쓴다. 칸마다 검사하고 결과가 harness/ 안인지 확인한다.
+        # 밖을 덮어쓸 위험. 칸마다 검사하고 결과가 harness/ 안인지 확인
         return safe_join(self.work_dir / "harness", spec.package, srcs[0], what="하네스 경로")
 
     def _binary_file(self, spec: HarnessSpecLike) -> Path:
@@ -261,7 +261,7 @@ class CMakeAdapter:
         wanted = self.compiler
         if Path(cached).name == Path(wanted).name:
             return True
-        # ``cc`` 가 clang 을 가리키는 환경도 있다. 실제 경로까지 같으면 같은 것이다.
+        # ``cc`` 가 clang 을 가리키는 환경도 존재. 실제 경로까지 같으면 동일한 것으로 판정
         resolved = self._which(wanted)
         if not resolved:
             return False
@@ -344,9 +344,9 @@ class CMakeAdapter:
             return False
         if not all(lib.is_file() for lib in self.libraries):
             return False
-        # 지문이 남아 있는데 다르면 설정이 바뀐 것이므로 다시 빌드한다.
-        # 지문이 없으면(손으로 만든 캐시·지문을 안 남기던 예전 실행) 증명할 수 없으므로
-        # _cache_mismatch 의 판정을 뒤집지 않는다 - 추측으로 캐시를 버리지 않는다.
+        # 지문이 남아 있는데 다르면 설정이 바뀐 것이므로 재빌드
+        # 지문이 없으면(손으로 만든 캐시·지문을 안 남기던 예전 실행) 증명 불가이므로
+        # _cache_mismatch 의 판정을 뒤집지 않음 — 추측으로 캐시를 버리지 않기 위함
         try:
             saved = json.loads(self._fingerprint_path().read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -384,8 +384,8 @@ class CMakeAdapter:
 
         logs: List[str] = []
 
-        # 남이 만들어 둔 캐시 위에서는 CC/CFLAGS 가 먹지 않는다. 지우고 새로
-        # configure 하지 않으면 계측 없는 라이브러리를 성공으로 넘기게 된다.
+        # 남이 만들어 둔 캐시 위에서는 CC/CFLAGS 미적용. 지우고 새로
+        # configure 하지 않으면 계측 없는 라이브러리를 성공으로 넘기게 됨
         mismatch = self._cache_mismatch()
         if mismatch:
             failure = self._discard_build_dir()

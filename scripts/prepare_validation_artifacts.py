@@ -2,7 +2,7 @@
 
 사용 예:
     python scripts/prepare_validation_artifacts.py \
-      --legacy validation-summary-ec2-final.json
+      --legacy report/validation-summary-ec2-final.json
 
 원본 보고서는 수정하지 않음, 대상 선정 결과·GEN 메타데이터를 별도 입력으로 분리 후
 SCORE 최종 실행을 표준 validation-summary로 정규화
@@ -24,7 +24,7 @@ def _write_json(path: Path, value: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--legacy", type=Path, required=True, help="validation-summary-ec2-final.json")
+    parser.add_argument("--legacy", type=Path, required=True, help="report/validation-summary-ec2-final.json")
     parser.add_argument("--gen-gate", type=Path, default=None,
                         help="GEN-03-04 gen_validation_summary.json 경로(선택)")
     parser.add_argument("--output-dir", type=Path, default=None)

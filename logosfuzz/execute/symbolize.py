@@ -51,8 +51,8 @@ from pathlib import Path
 from typing import Optional
 
 from logosfuzz.config import FuzzConfig
-# CmdResult/CommandRunner 는 llvm 도구 실행 공통 계약이다(coverage 가 먼저
-# 정의했다). 같은 모양을 또 만들지 않고 그대로 쓴다.
+# CmdResult/CommandRunner 는 llvm 도구 실행 공통 계약(coverage 가 먼저 정의)
+# 같은 모양을 다시 만들지 않고 그대로 재사용
 from logosfuzz.execute.coverage import CmdResult, CommandRunner
 from logosfuzz.execute.sanitizer import source_locations
 
@@ -62,12 +62,12 @@ def _default_runner(argv: list) -> CmdResult:
     proc = subprocess.run(argv, capture_output=True, text=True)
     return CmdResult(proc.returncode, proc.stdout, proc.stderr)
 
-# 심볼라이즈되지 않은 sanitizer 스택 프레임.
+# 심볼라이즈되지 않은 sanitizer 스택 프레임
 #
 #     #1 0x57a665aa3726  (/harness/rec_fuzz+0x13f726) (BuildId: 1c73e4...)
 #
-# 심볼라이즈된 프레임은 PC 와 모듈 사이에 ``in <함수>`` 가 들어간다. PC 뒤에
-# 곧바로 ``(`` 가 오도록 묶어서, 이미 복원된 줄은 아예 매칭되지 않게 한다.
+# 심볼라이즈된 프레임은 PC 와 모듈 사이에 ``in <함수>`` 가 삽입. PC 뒤에
+# 곧바로 ``(`` 가 오도록 묶어 이미 복원된 줄은 매칭 자체가 되지 않게 처리
 _UNSYMBOLIZED_FRAME = re.compile(
     r"^(?P<head>\s*#\d+\s+0x[0-9a-fA-F]+)\s+"
     r"\((?P<module>[^()]+)\+0x(?P<offset>[0-9a-fA-F]+)\)"
@@ -186,8 +186,8 @@ class CrashSymbolizer:
     def symbolize(self, findings: list) -> SymbolizeReport:
         """결함들의 ``raw_log``·``traceback`` 을 제자리에서 복원한다."""
         report = SymbolizeReport()
-        # 모듈별로 모아서 도구를 한 번만 부른다. (결함, 줄 번호) 를 함께 들고
-        # 있어야 응답을 원래 줄에 되돌려 쓸 수 있다.
+        # 모듈별로 모아 도구를 한 번만 호출. (결함, 줄 번호) 를 함께 보관해야
+        # 응답을 원래 줄에 되돌려 쓸 수 있음
         pending: dict = {}
         for finding in findings:
             for index, line in enumerate(finding.raw_log):
@@ -207,8 +207,8 @@ class CrashSymbolizer:
                 # 복원 가치도 없으니 조용히 넘기는 쪽이 맞다.
                 entries = self._symbolize_module(module, offsets)
             except OSError:
-                # llvm-symbolizer 미설치. 아직 보지 못한 프레임까지 모두 미해결로
-                # 세고, 호출자가 한 번만 경고할 수 있게 tool_available 을 내린다.
+                # llvm-symbolizer 미설치 — 아직 보지 못한 프레임까지 모두 미해결로
+                # 집계하고, 호출자가 한 번만 경고하도록 tool_available 을 내림
                 report.tool_available = False
                 report.unresolved = total - report.resolved
                 break

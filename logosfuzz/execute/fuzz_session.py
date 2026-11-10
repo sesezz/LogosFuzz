@@ -62,8 +62,8 @@ class SessionSummary:
                     "failed_to_start": g.failed_to_start,
                     "duration_sec": round(g.duration_sec, 2),
                     "execs": g.stats.execs,
-                    # 엔진이 0을 찍은 구간은 실행 수/실행 시간으로 보정한다
-                    # (LiveStats.rate 참조).
+                    # 엔진이 0을 찍은 구간은 실행 수/실행 시간으로 보정
+                    # (LiveStats.rate 참조)
                     "exec_per_sec": g.stats.rate(g.duration_sec),
                     "coverage": g.stats.coverage,
                     "crash_count": len(g.crashes),
@@ -156,9 +156,9 @@ class FuzzSession:
             result.crashes = saved
             if self.config.fork_jobs > 0 and saved:
                 self._replay_fork_crashes(group, result)
-            # EXE-04-02: 실행 중에는 symbolize=0 이라 프레임에 파일:줄이 없다.
-            # 결함을 ANA 로 내보내기 "전에" 복원한다 - traceback 이 비면 크래시
-            # 시그니처가 뭉개지고 정/오탐 판별이 근거를 잃는다.
+            # EXE-04-02: 실행 중에는 symbolize=0 이라 프레임에 파일:줄 없음
+            # 결함을 ANA 로 내보내기 "전에" 복원 — traceback 이 비면 크래시
+            # 시그니처가 뭉개지고 정/오탐 판별이 근거 상실
             if result.sanitizer_findings and self.config.symbolize_crashes:
                 self._symbolize(result.sanitizer_findings)
             if result.sanitizer_findings:

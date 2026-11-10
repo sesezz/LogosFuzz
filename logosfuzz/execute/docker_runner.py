@@ -57,12 +57,12 @@ Executor = Callable[[list, float, OnLine], "ProcResult"]
 # 재확인하므로, 무한정 블로킹되지 않는다.
 _POLL_INTERVAL_SEC = 0.5
 
-# 출력 상한(자원 관리, CWE-400). 하네스는 비신뢰 코드라 출력을 무한히 쏟을 수 있다.
-#   - 큐: 가득 차면 읽기 스레드가 기다리고, 그동안 자식은 파이프에서 막힌다(배압).
-#   - 줄: 개행 없는 거대한 한 줄이 메모리를 다 먹지 않도록 자른다.
-#   - 보존: 스트림마다 앞쪽 _KEEP_HEAD_LINES 줄과 마지막 _KEEP_TAIL_LINES 줄만 남긴다.
-#     크래시 원인(ASAN 보고)은 끝에 오므로 꼬리를 반드시 남긴다. 모니터(on_line)는
-#     버린 줄도 모두 본다 - 통계·새니타이저 판정은 상한과 무관하다.
+# 출력 상한(자원 관리, CWE-400) — 하네스는 비신뢰 코드라 출력을 무한히 쏟을 수 있음
+#   - 큐: 가득 차면 읽기 스레드가 대기하고 그동안 자식은 파이프에서 막힘(배압)
+#   - 줄: 개행 없는 거대한 한 줄이 메모리를 다 먹지 않도록 절단
+#   - 보존: 스트림마다 앞쪽 _KEEP_HEAD_LINES 줄과 마지막 _KEEP_TAIL_LINES 줄만 유지
+#     크래시 원인(ASAN 보고)은 끝에 오므로 꼬리 보존 필수. 모니터(on_line)는
+#     버린 줄도 모두 수신 — 통계·새니타이저 판정은 상한과 무관
 _QUEUE_MAXSIZE = 10000
 _MAX_LINE_CHARS = 64 * 1024
 _KEEP_HEAD_LINES = 2000
@@ -199,8 +199,8 @@ def _default_executor(argv: list, timeout: float, on_line: OnLine) -> ProcResult
     ASAN이 크래시 시 심볼라이저를 내부에서 fork하며 응답 없이 대기하는
     경우 90초 넘게 하드 타임아웃까지 멈춘 뒤에야 겨우 빠져나왔다).
     """
-    # 부모 환경(API 키·클라우드 자격증명)을 하네스나 docker CLI 에 물려주지 않는다.
-    # 새 세션으로 띄워 타임아웃 때 자손까지 프로세스 그룹 단위로 정리한다.
+    # 부모 환경(API 키·클라우드 자격증명)은 하네스나 docker CLI 에 전달 금지
+    # 새 세션으로 띄워 타임아웃 때 자손까지 프로세스 그룹 단위로 정리
     popen_kwargs = {"start_new_session": True} if os.name == "posix" else {}
     proc = subprocess.Popen(
         argv,
@@ -620,8 +620,8 @@ class DockerIsolationRunner:
     # ---- 그룹 1개 실행 ------------------------------------------------
     def run_group(self, group: LogicGroup, monitor: Optional[StatsMonitor] = None,
                   sanitizer_monitor: Optional[SanitizerMonitor] = None) -> GroupResult:
-        # 그룹 이름은 컨테이너 이름·로그 디렉터리·커버리지 파일 이름이 된다.
-        # '../x' 같은 값이 출력 디렉터리 밖에 쓰지 못하게 실행 전에 거부한다.
+        # 그룹 이름은 컨테이너 이름·로그 디렉터리·커버리지 파일 이름으로 사용
+        # '../x' 같은 값이 출력 디렉터리 밖에 쓰지 못하도록 실행 전에 거부
         safe_component(group.name, what="로직 그룹 이름")
         harness_file = self.harness_binary_path(group)
         if not harness_file.exists():

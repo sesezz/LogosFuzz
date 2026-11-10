@@ -70,8 +70,8 @@ python -m scripts.score_json_ast_survey     --output report/score-json-ast-surve
 ## EXT-01-02 RAG 제약조건 추출
 
 C/C++ 소스에서 함수별 API 제약조건(NULL 검사, 버퍼·길이 쌍, 범위 검사, 자원 해제 책임 등)을
-추출하여 RAG 지식베이스로 색인합니다. 하네스 생성기(GEN-03-01)가 이 지식베이스에 질의해
-프롬프트 컨텍스트를 얻습니다. 자세한 내용은 [EXT-01-02.md](EXT-01-02.md) 참고.
+추출해 RAG 지식베이스로 색인한다. 하네스 생성기(GEN-03-01)가 이 지식베이스에 질의해
+프롬프트 컨텍스트를 얻는다. 자세한 내용은 [EXT-01-02.md](EXT-01-02.md) 참고.
 
 ```bash
 # 지식베이스 구축 (경로 기반)
@@ -98,8 +98,8 @@ print(kb.constraints_of("parse_header"))   # 구조화된 제약조건 목록
 print(kb.search("메모리 해제 책임", top_k=5))
 ```
 
-> 외부 의존성 없이 BM25 검색기로 동작합니다. `sentence-transformers`가 설치되어 있으면
-> `--dense` 옵션으로 밀집 검색을 함께 사용할 수 있습니다.
+> 외부 의존성 없이 BM25 검색기로 동작한다. `sentence-transformers` 가 설치되어 있으면
+> `--dense` 옵션으로 밀집 검색을 함께 쓸 수 있다.
 
 ## EXT-01-04 KB 통합 (B/D 지원)
 
@@ -113,7 +113,7 @@ python -m logosfuzz.knowledge.knowledge_base show  --kb build/kb.json --api uds_
 python -m logosfuzz.knowledge.knowledge_base stats --kb build/kb.json
 ```
 
-**B 파트 (SCH-02-02/03)** — 목업 하드코딩을 한 줄로 대체합니다. B의 파일은 수정하지 않습니다.
+**B 파트 (SCH-02-02/03)** — 목업 하드코딩을 한 줄로 대체한다. B 의 파일은 수정하지 않는다.
 
 ```python
 from logosfuzz.knowledge.knowledge_base import KnowledgeBase

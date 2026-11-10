@@ -18,7 +18,7 @@
 
 ## 산출물
 
-- `validation-summary-ec2-generated-score-fixed.json`
+- `report/validation-summary-ec2-generated-score-fixed.json`
 - `validation-gen-gate-ec2.json`
 - `validation-target-selection-ec2.json`
 - `ana-score-local-ec2-compare.json`
