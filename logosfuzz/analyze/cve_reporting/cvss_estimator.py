@@ -3,10 +3,10 @@ ANA-05-02: CVSS 3.1 기반 심각도 초안(draft) 산출기
 
 주의: 이 모듈은 실제 CVSS 3.1 표준 산식을 100% 구현한 정밀 계산기가 아니라,
 '취약점 유형 + 크래시 특성'으로부터 합리적인 초기값(Base Vector)을 추정해
-CVE 리포트 초안에 채워 넣기 위한 휴리스틱이다. 최종 제출 전 사람이
-(Attack Vector, 실제 도달 가능성, 영향 범위 등을) 반드시 검토/보정해야 한다.
+CVE 리포트 초안에 채워 넣기 위한 휴리스틱. 최종 제출 전 사람이
+(Attack Vector, 실제 도달 가능성, 영향 범위 등을) 반드시 검토/보정 필요
 
-CVSS 3.1 Base Score 산식은 FIRST.org 공식 문서를 따른다.
+CVSS 3.1 Base Score 산식은 FIRST.org 공식 문서 기준
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def _severity_from_score(score: float) -> str:
 
 
 def estimate_cvss(sanitizer_error_type: str) -> CvssEstimate:
-    """정규화된 sanitizer 에러 타입으로 CVSS 3.1 Base Score 초안을 산출한다."""
+    """정규화된 sanitizer 에러 타입으로 CVSS 3.1 Base Score 초안을 산출"""
     m = _DEFAULT_METRICS.get(sanitizer_error_type, _UNKNOWN_METRICS)
 
     iss = 1 - (
@@ -109,7 +109,7 @@ def estimate_cvss(sanitizer_error_type: str) -> CvssEstimate:
 
 
 def _ceil_1dp(value: float) -> float:
-    """CVSS 3.1 스펙에서 요구하는 소수 첫째 자리 올림(round up)."""
+    """CVSS 3.1 스펙에서 요구하는 소수 첫째 자리 올림(round up)"""
     import math
 
     return math.ceil(value * 10) / 10

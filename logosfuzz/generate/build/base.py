@@ -116,7 +116,15 @@ class HarnessSpec:
 
 
 class BuildAdapter(Protocol):
-    """빌드 시스템 1종을 감싸는 어댑터."""
+    """빌드 시스템 1종을 감싸는 어댑터
+
+    컨트롤러(CTR-06-01)는 이 Protocol 로만 빌드 시스템 접근
+    빌드 시스템 이름·에러 분류는 ``build_system`` 속성과 ``classify_build_error`` (선택)로 획득
+    """
+
+    #: 이 어댑터가 다루는 빌드 시스템 이름(예: "bazel", "cmake", "prebuilt")
+    #: build_summary.json 의 ``build_system`` 필드 값
+    build_system: str
 
     def emit_build_definition(self, spec: HarnessSpecLike, harness_source: str) -> Path:
         """하네스 소스(와 빌드 정의)를 작업 위치에 쓴다. 쓴 파일 경로를 돌려준다.

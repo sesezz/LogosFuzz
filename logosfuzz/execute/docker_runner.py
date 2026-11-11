@@ -1,16 +1,15 @@
-"""EXE-04-01: Docker 기반 격리 퍼징 실행.
+"""EXE-04-01: Docker 기반 격리 퍼징 실행
 
-퍼징 중 발생하는 크래시로부터 호스트를 보호하기 위해, 각 로직 그룹의
-하네스를 격리된 Docker 컨테이너 안에서 실행한다.
+크래시로부터 호스트 보호를 위한 로직 그룹별 컨테이너 격리 실행
 
 격리 정책:
-  - --network none        : 외부 네트워크 완전 차단(오탐/유출 방지)
-  - --cap-drop ALL        : 리눅스 capability 전부 제거
+  - --network none        : 외부 네트워크 차단
+  - --cap-drop ALL        : 리눅스 capability 전체 제거
   - --security-opt no-new-privileges
   - --memory / --cpus / --pids-limit : 자원 상한
-  - 하네스는 읽기 전용(:ro)으로, 출력만 쓰기 가능(/out)으로 마운트
+  - 하네스는 읽기 전용(:ro), 출력(/out)만 쓰기 가능으로 마운트
 
-테스트 용이성을 위해 실제 프로세스 실행은 `executor` 콜러블로 주입한다.
+실제 프로세스 실행은 `executor` 콜러블로 주입.
 기본 executor는 stdout/stderr를 각각 스레드로 읽어 큐에 모으고, 메인
 스레드는 `queue.get(timeout=...)`으로 소비한다 - 자식이 침묵해도(예: ASAN이
 크래시 시 심볼라이저를 내부에서 fork하며 응답 없이 대기) 데드라인이 정확히
@@ -21,6 +20,7 @@
 from __future__ import annotations
 
 import collections
+import math
 import os
 import queue
 import shlex
@@ -35,7 +35,7 @@ from typing import Callable, Optional
 
 from logosfuzz.common.logging import get_logger
 from logosfuzz.common.security import minimal_env, safe_component, safe_join
-from logosfuzz.config import Engine, FuzzConfig, LogicGroup
+from logosfuzz.config import FuzzConfig, LogicGroup
 from logosfuzz.execute.errors import (
     DockerUnavailableError,
     HarnessNotFoundError,
@@ -43,6 +43,10 @@ from logosfuzz.execute.errors import (
 )
 from logosfuzz.execute.stats import LiveStats, StatsMonitor
 from logosfuzz.execute.sanitizer import SanitizerFinding, SanitizerMonitor
+from logosfuzz.execute.timeout_manager import DEFAULT_PER_INPUT_MS
+
+# 컨테이너 내부 딕셔너리 마운트 위치
+_CONTAINER_DICT = "/dict/fuzz.dict"
 
 
 # executor(argv, timeout, on_line) -> ProcResult
@@ -53,12 +57,12 @@ Executor = Callable[[list, float, OnLine], "ProcResult"]
 # 재확인하므로, 무한정 블로킹되지 않는다.
 _POLL_INTERVAL_SEC = 0.5
 
-# 출력 상한(자원 관리, CWE-400). 하네스는 비신뢰 코드라 출력을 무한히 쏟을 수 있다.
-#   - 큐: 가득 차면 읽기 스레드가 기다리고, 그동안 자식은 파이프에서 막힌다(배압).
-#   - 줄: 개행 없는 거대한 한 줄이 메모리를 다 먹지 않도록 자른다.
-#   - 보존: 스트림마다 앞쪽 _KEEP_HEAD_LINES 줄과 마지막 _KEEP_TAIL_LINES 줄만 남긴다.
-#     크래시 원인(ASAN 보고)은 끝에 오므로 꼬리를 반드시 남긴다. 모니터(on_line)는
-#     버린 줄도 모두 본다 - 통계·새니타이저 판정은 상한과 무관하다.
+# 출력 상한(자원 관리, CWE-400) — 하네스는 비신뢰 코드라 출력을 무한히 쏟을 수 있음
+#   - 큐: 가득 차면 읽기 스레드가 대기하고 그동안 자식은 파이프에서 막힘(배압)
+#   - 줄: 개행 없는 거대한 한 줄이 메모리를 다 먹지 않도록 절단
+#   - 보존: 스트림마다 앞쪽 _KEEP_HEAD_LINES 줄과 마지막 _KEEP_TAIL_LINES 줄만 유지
+#     크래시 원인(ASAN 보고)은 끝에 오므로 꼬리 보존 필수. 모니터(on_line)는
+#     버린 줄도 모두 수신 — 통계·새니타이저 판정은 상한과 무관
 _QUEUE_MAXSIZE = 10000
 _MAX_LINE_CHARS = 64 * 1024
 _KEEP_HEAD_LINES = 2000
@@ -124,18 +128,20 @@ class ProcResult:
 
 @dataclass
 class GroupResult:
-    """단일 로직 그룹 퍼징 결과."""
+    """단일 로직 그룹 퍼징 결과"""
 
     group: str
     exit_code: int
     timed_out: bool
     stats: LiveStats
-    crashes: list  # 수집된 크래시 경로(fuzz_session이 채움)
+    crashes: list  # 수집된 크래시 경로 (fuzz_session에서 기록)
     duration_sec: float
     sanitizer_findings: list[SanitizerFinding] = field(default_factory=list)
-    coverage: object = None  # EXE-04-04 CoverageSummary(없으면 None); fuzz_session이 채움
+    coverage: object = None  # EXE-04-04 CoverageSummary (없으면 None)
     stdout_log: Optional[str] = None  # 표준 출력 로그 파일 경로(저장 실패 시 None)
     stderr_log: Optional[str] = None  # 표준 오류 로그 파일 경로
+    timeout_sec: Optional[int] = None  # 그룹별 퍼징 시간 (run 의 SCH 배분)
+    corpus_minimized: Optional[dict] = None  # -merge=1 결과 {"before": n, "after": m}
     # 증적(로그) 저장 실패 사유. 비어 있지 않으면 이 결과는 "증적 불완전"이다 -
     # 저장 실패를 정상 완료처럼 보고하지 않기 위해 남긴다.
     log_error: str = ""
@@ -146,15 +152,10 @@ class GroupResult:
 
     @property
     def failed_to_start(self) -> bool:
-        """하네스가 입력을 한 번도 실행하지 못하고 죽었는가.
+        """하네스 시작 실패 여부 (비정상 종료 + 실행 횟수 0)
 
-        컨테이너 안에서 공유 라이브러리를 못 찾거나(libatomic.so.1, GLIBC_2.38
-        - 5주차 실측) 바이너리가 아예 실행되지 않으면 종료코드는 0 이 아닌데
-        실행 횟수는 0 이다. 이걸 크래시로 세면 "크래시 0건, 완료" 또는 가짜
-        크래시로 보고돼 퍼징이 실제로는 안 돌았다는 사실이 가려진다.
-
-        첫 입력에서 바로 크래시한 경우와 구분하기 위해 크래시 산출물이나
-        새니타이저 결함이 있으면 실행 실패로 보지 않는다.
+        공유 라이브러리 누락 등으로 미실행된 경우를 크래시와 구분하기 위함
+        크래시 산출물이나 새니타이저 결함이 있으면 시작 실패로 미판정
         """
         return (
             self.exit_code not in (0, None)
@@ -165,7 +166,7 @@ class GroupResult:
 
     @property
     def crashed(self) -> bool:
-        # libFuzzer는 크래시 시 non-zero 종료, 크래시 산출물도 남긴다.
+        # libFuzzer는 크래시 시 non-zero 종료 및 크래시 산출물 생성
         if self.crashes:
             return True
         return (
@@ -173,6 +174,17 @@ class GroupResult:
             and not self.timed_out
             and not self.failed_to_start
         )
+
+    @property
+    def status(self) -> str:
+        """공유 결과 JSON 용 단일 실행 상태 (timeout·crashed·failed·passed)"""
+        if self.timed_out:
+            return "timeout"
+        if self.crashed:
+            return "crashed"
+        if self.failed_to_start or self.exit_code not in (0, None):
+            return "failed"
+        return "passed"
 
 
 def _default_executor(argv: list, timeout: float, on_line: OnLine) -> ProcResult:
@@ -187,8 +199,8 @@ def _default_executor(argv: list, timeout: float, on_line: OnLine) -> ProcResult
     ASAN이 크래시 시 심볼라이저를 내부에서 fork하며 응답 없이 대기하는
     경우 90초 넘게 하드 타임아웃까지 멈춘 뒤에야 겨우 빠져나왔다).
     """
-    # 부모 환경(API 키·클라우드 자격증명)을 하네스나 docker CLI 에 물려주지 않는다.
-    # 새 세션으로 띄워 타임아웃 때 자손까지 프로세스 그룹 단위로 정리한다.
+    # 부모 환경(API 키·클라우드 자격증명)은 하네스나 docker CLI 에 전달 금지
+    # 새 세션으로 띄워 타임아웃 때 자손까지 프로세스 그룹 단위로 정리
     popen_kwargs = {"start_new_session": True} if os.name == "posix" else {}
     proc = subprocess.Popen(
         argv,
@@ -214,7 +226,8 @@ def _default_executor(argv: list, timeout: float, on_line: OnLine) -> ProcResult
         finally:
             lines.put((tag, None))  # EOF 신호
 
-    assert proc.stdout is not None and proc.stderr is not None
+    if proc.stdout is None or proc.stderr is None:
+        raise RuntimeError("자식 프로세스 stdout/stderr 파이프 없음")
     readers = [
         threading.Thread(target=_pump, args=(proc.stdout, "stdout"), daemon=True),
         threading.Thread(target=_pump, args=(proc.stderr, "stderr"), daemon=True),
@@ -321,60 +334,91 @@ class DockerIsolationRunner:
             raise ImageBuildError(f"이미지 빌드 실패: {self.config.image}")
 
     # ---- 하네스 바이너리 위치 해석 -------------------------------------
-    #
-    # GEN이 Bazel 어댑터로 넘어가면서 하네스 바이너리가 harness_dir 밖에
-    # 생긴다. cc_fuzz_test 는 `<name>_bin`(계측된 퍼저 바이너리)을 워크스페이스
-    # 의 bazel-bin 출력 트리에 떨구고, 그 경로는 빌드 설정(--platform_suffix)
-    # 에 따라 달라진다. 그래서 EXE 계층은 경로를 **추측하지 않고** 빌드
-    # 어댑터가 돌려준 실제 경로를 그대로 받는다(GEN 파트 결정사항 ④:
-    # "EXE 계층은 bazel run 이 아니라 바이너리를 직접 실행한다").
-    #
-    # 덕분에 이 계층은 빌드 시스템을 모른다 - Bazel 산출물이든 CMake
-    # 산출물이든 docker_runner 에겐 그냥 실행 파일 하나다.
+    # 빌드 어댑터가 돌려준 실제 경로 그대로 사용 (경로 추측 없음)
+    # 빌드 시스템과 무관하게 실행 파일 하나로 취급
     def harness_binary_path(self, group: LogicGroup) -> Path:
-        """하네스 바이너리의 호스트 경로.
-
-        ``harness_path`` 에 디렉토리가 붙어 있으면(절대경로 등) 그 경로를
-        그대로 쓰고, 이름만 있으면 지금까지처럼 ``harness_dir`` 기준으로 푼다.
-        """
+        """하네스 바이너리의 호스트 경로 (이름만 있으면 ``harness_dir`` 기준)"""
         p = Path(group.harness_path)
         if p.parent != Path("."):
             return p.resolve()
         return (self.config.harness_dir / p.name).resolve()
 
     def harness_mount_dir(self, group: LogicGroup) -> Path:
-        """``/harness`` 로 읽기 전용 마운트할 호스트 디렉토리.
+        """``/harness`` 읽기 전용 마운트 대상 호스트 디렉토리
 
-        바이너리가 harness_dir 밖(bazel-bin 등)에 있으면 그 바이너리가 있는
-        디렉토리를 대신 마운트한다. 컨테이너 안 경로는 두 경우 모두
-        ``/harness/<파일명>`` 이라 내부 커맨드 구성은 달라지지 않는다.
+        바이너리가 harness_dir 밖에 있으면 바이너리 소재 디렉토리 마운트
         """
         return self.harness_binary_path(group).parent
 
-    # ---- 실행 커맨드 구성 (EXE-04-01 핵심 로직) -----------------------
-    def _in_container_cmd(self, group: LogicGroup) -> str:
-        """엔진별로 컨테이너 내부에서 실행할 셸 명령 문자열."""
+    # ---- libFuzzer 옵션 ------------------------------------------------
+    def per_input_timeout_sec(self) -> int:
+        """입력 1건 실행 제한(초, 올림, 최소 1초). 미지정 시 EXE-04-03 기본값"""
+        ms = self.config.per_input_timeout_ms or DEFAULT_PER_INPUT_MS
+        return max(1, math.ceil(ms / 1000))
+
+    def resolve_dict(self, group: LogicGroup) -> Optional[Path]:
+        """그룹 딕셔너리 경로 (명시 경로 → dict_dir/<name>.dict → <바이너리>.dict)"""
+        candidates = []
+        if group.dict_path is not None:
+            candidates.append(Path(group.dict_path))
+        if self.config.dict_dir is not None:
+            candidates.append(Path(self.config.dict_dir) / f"{group.name}.dict")
+        binary = self.harness_binary_path(group)
+        candidates.append(binary.with_name(binary.name + ".dict"))
+        for path in candidates:
+            if path.is_file():
+                return path.resolve()
+        return None
+
+    def libfuzzer_option_args(self, group: LogicGroup, *, in_docker: bool) -> list:
+        """-timeout / -rss_limit_mb / -malloc_limit_mb / -max_len / -dict 인자 목록"""
+        c = self.config
+        args = [f"-timeout={self.per_input_timeout_sec()}"]
+        if c.rss_limit_mb > 0:
+            args.append(f"-rss_limit_mb={c.rss_limit_mb}")
+        if c.malloc_limit_mb > 0:
+            args.append(f"-malloc_limit_mb={c.malloc_limit_mb}")
+        if c.max_len > 0:
+            args.append(f"-max_len={c.max_len}")
+        dict_path = self.resolve_dict(group)
+        if dict_path is not None:
+            args.append(f"-dict={_CONTAINER_DICT if in_docker else dict_path}")
+        return args
+
+    def _run_limit_args(self, timeout_sec: int, smoke_runs: Optional[int]) -> list:
+        """본 퍼징은 -max_total_time(+ fork 모드 인자), 스모크 테스트는 -runs 로 실행 횟수 제한
+
+        스모크 테스트는 단일 프로세스 고정 (-runs 와 -fork 동시 사용 시 -runs 미적용)
+        """
+        if smoke_runs is not None:
+            return [f"-runs={smoke_runs}", f"-max_total_time={timeout_sec}"]
+        args = [f"-max_total_time={timeout_sec}"]
+        if self.config.fork_jobs > 0:
+            args.append(f"-fork={self.config.fork_jobs}")
+            if self.config.ignore_crashes:
+                args.append("-ignore_crashes=1")
+        return args
+
+    def smoke_dir(self, group: LogicGroup) -> Path:
+        """스모크 테스트 크래시 산출물 위치 (본 퍼징 crashes/ 와 분리)"""
+        return self.config.output_dir / "smoke" / group.name
+
+    # ---- 실행 커맨드 구성 ---------------------------------------------
+    def _in_container_cmd(self, group: LogicGroup, smoke_runs: Optional[int] = None) -> str:
+        """컨테이너 내부 libFuzzer 실행 셸 명령 문자열"""
         harness = f"/harness/{group.harness_path.name}"
-        corpus = "/corpus" if group.corpus_dir else ""
-        t = self.config.timeout_sec
-        if self.config.engine is Engine.LIBFUZZER:
-            parts = [
-                shlex.quote(harness),
-                f"-max_total_time={t}",
-                "-artifact_prefix=/out/crashes/",
-                "-print_final_stats=1",
-            ]
-            if corpus:
-                parts.append(shlex.quote(corpus))
-            return "chmod +x %s 2>/dev/null; %s" % (shlex.quote(harness), " ".join(parts))
-        # AFL++
-        # 컨테이너 전용 /tmp(--rm 으로 매번 새로 생긴다)라 호스트 임시 디렉터리 경쟁과 무관하다.
-        indir = shlex.quote(corpus) if corpus else "/tmp/seed"  # nosec B108
-        seed_prep = "" if corpus else "mkdir -p /tmp/seed && printf a > /tmp/seed/seed;"
-        return (
-            f"{seed_prep} chmod +x {shlex.quote(harness)} 2>/dev/null; "
-            f"afl-fuzz -i {indir} -o /out/afl -V {t} -- {shlex.quote(harness)} @@"
-        )
+        prefix = ("/out/crashes/" if smoke_runs is None
+                  else f"/out/smoke/{group.name}/")
+        parts = [
+            shlex.quote(harness),
+            *self._run_limit_args(self.config.timeout_sec, smoke_runs),
+            f"-artifact_prefix={prefix}",
+            "-print_final_stats=1",
+            *self.libfuzzer_option_args(group, in_docker=True),
+        ]
+        if group.corpus_dir:
+            parts.append("/corpus")
+        return "chmod +x %s 2>/dev/null; %s" % (shlex.quote(harness), " ".join(parts))
 
     def _host_user(self) -> str | None:
         """호스트 uid:gid. Windows 등 uid 개념이 없는 플랫폼이면 None."""
@@ -384,14 +428,18 @@ class DockerIsolationRunner:
             return None
         return f"{getuid()}:{getgid()}"
 
-    def build_run_argv(self, group: LogicGroup) -> list:
+    def build_run_argv(self, group: LogicGroup, smoke_runs: Optional[int] = None,
+                       inner_cmd: Optional[str] = None, suffix: Optional[str] = None) -> list:
+        """docker run 인자 목록. inner_cmd 지정 시 컨테이너 내부 명령 대체(크래시 재실행·코퍼스 최소화)"""
         c = self.config
+        if suffix is None:
+            suffix = "" if smoke_runs is None else "-smoke"
         argv = [
             self.docker_bin, "run", "--rm",
-            "--name", f"logosfuzz-{group.name}",
+            "--name", f"logosfuzz-{group.name}{suffix}",
             "--network", c.network,
             "--memory", c.memory_limit,
-            "--cpus", c.cpus,
+            "--cpus", c.effective_cpus,
             "--pids-limit", str(c.pids_limit),
         ]
         if c.drop_all_caps:
@@ -410,43 +458,41 @@ class DockerIsolationRunner:
             "-v", f"{c.output_dir.resolve()}:/out",
         ]
         if group.corpus_dir:
-            argv += ["-v", f"{group.corpus_dir.resolve()}:/corpus:ro"]
+            # 쓰기 가능 마운트 (최종 코퍼스를 커버리지 바이너리로 재생하기 위함)
+            argv += ["-v", f"{group.corpus_dir.resolve()}:/corpus"]
+        dict_path = self.resolve_dict(group)
+        if dict_path is not None:
+            argv += ["-v", f"{dict_path}:{_CONTAINER_DICT}:ro"]
         argv += [
             "-e", f"ASAN_OPTIONS={c.asan_options}",
             "-e", f"TSAN_OPTIONS={c.tsan_options}",
         ]
-        # EXE-04-04: 커버리지 계측 활성 시 profraw 출력 경로를 환경변수로 주입.
+        # EXE-04-04: 커버리지 계측 시 profraw 출력 경로 환경변수 주입
         for k, v in self._coverage_env_pairs(group, in_docker=True).items():
             argv += ["-e", f"{k}={v}"]
         argv += [
             c.image,
-            "bash", "-lc", self._in_container_cmd(group),
+            "bash", "-lc", inner_cmd or self._in_container_cmd(group, smoke_runs),
         ]
         return argv
 
     def _coverage_env_pairs(self, group: LogicGroup, *, in_docker: bool) -> dict:
-        """EXE-04-04 커버리지 환경변수(LLVM_PROFILE_FILE 등). NONE이면 빈 dict."""
-        # 지연 임포트로 config→execute 순환 의존을 피한다.
+        """EXE-04-04 커버리지 환경변수 (NONE이면 빈 dict)"""
+        # config→execute 순환 의존 회피용 지연 임포트
         from logosfuzz.execute.coverage import profile_env
 
         return profile_env(group, self.config, in_docker=in_docker)
 
-    def _local_argv(self, group: LogicGroup) -> list:
-        """--docker 미사용 시(디버그) 호스트에서 직접 실행하는 커맨드."""
+    def _local_argv(self, group: LogicGroup, smoke_runs: Optional[int] = None) -> list:
+        """Docker 미사용 시 호스트 직접 실행 커맨드"""
         harness = str(self.harness_binary_path(group))
-        t = self.config.timeout_sec
-        if self.config.engine is Engine.LIBFUZZER:
-            argv = [harness, f"-max_total_time={t}",
-                    f"-artifact_prefix={self.config.crashes_dir}/",
-                    "-print_final_stats=1"]
-            if group.corpus_dir:
-                argv.append(str(group.corpus_dir))
-        else:
-            # 호스트에서는 예측 가능한 /tmp/seed 를 쓰지 않는다(다른 사용자가 미리 만들어 둔
-            # 디렉터리·심볼릭 링크를 따라갈 수 있다). 출력 디렉터리 아래에 시드를 만든다.
-            argv = ["afl-fuzz", "-i", str(group.corpus_dir or self._local_seed_dir()),
-                    "-o", str(self.config.output_dir / "afl"), "-V", str(t),
-                    "--", harness, "@@"]
+        prefix = self.config.crashes_dir if smoke_runs is None else self.smoke_dir(group)
+        argv = [harness, *self._run_limit_args(self.config.timeout_sec, smoke_runs),
+                f"-artifact_prefix={prefix}/",
+                "-print_final_stats=1",
+                *self.libfuzzer_option_args(group, in_docker=False)]
+        if group.corpus_dir:
+            argv.append(str(group.corpus_dir))
         # 호스트 실행에서는 env 프리픽스로 환경변수를 주입한다(기본 executor
         # 시그니처를 바꾸지 않기 위함). Docker 경로(build_run_argv)는
         # `-e ASAN_OPTIONS=...`로 넘기지만, 이 로컬 경로는 그동안 ASAN_OPTIONS/
@@ -464,19 +510,118 @@ class DockerIsolationRunner:
         argv = ["env", *[f"{k}={v}" for k, v in pairs.items()], *argv]
         return argv
 
-    def _local_seed_dir(self) -> Path:
-        seed_dir = self.config.output_dir / "afl-seed"
-        seed_dir.mkdir(parents=True, exist_ok=True)
-        seed = seed_dir / "seed"
-        if not seed.exists():
-            seed.write_bytes(b"a")
-        return seed_dir
+    # ---- fork 모드 크래시 재실행 ---------------------------------------
+    def replay_argv(self, group: LogicGroup, crash_file: Path) -> list:
+        """크래시 입력 1건 단독 재실행 커맨드 (본 퍼징과 같은 격리·sanitizer 옵션)
+
+        fork 모드의 부모 프로세스는 자식 sanitizer 보고 중 ERROR 한 줄만 출력하므로
+        스택 복원용 전체 보고 확보 목적
+        """
+        opts = [f"-timeout={self.per_input_timeout_sec()}"]
+        if self.config.rss_limit_mb > 0:
+            opts.append(f"-rss_limit_mb={self.config.rss_limit_mb}")
+        if self.config.malloc_limit_mb > 0:
+            opts.append(f"-malloc_limit_mb={self.config.malloc_limit_mb}")
+        if self.config.use_docker:
+            rel = Path(crash_file).resolve().relative_to(self.config.output_dir.resolve())
+            harness = f"/harness/{group.harness_path.name}"
+            inner = "chmod +x %s 2>/dev/null; %s %s %s" % (
+                shlex.quote(harness), shlex.quote(harness), " ".join(opts),
+                shlex.quote(f"/out/{rel.as_posix()}"))
+            return self.build_run_argv(group, inner_cmd=inner, suffix="-replay")
+        pairs = {"ASAN_OPTIONS": self.config.asan_options,
+                 "TSAN_OPTIONS": self.config.tsan_options}
+        return ["env", *[f"{k}={v}" for k, v in pairs.items()],
+                str(self.harness_binary_path(group)), *opts, str(crash_file)]
+
+    def replay_crash(self, group: LogicGroup, crash_file: Path) -> list:
+        """크래시 입력 1건 재실행 후 sanitizer 결함 목록 반환 (재현 실패 시 빈 목록)"""
+        monitor = SanitizerMonitor()
+        timeout = self.per_input_timeout_sec() + 30
+        self.executor(self.replay_argv(group, crash_file), timeout, monitor.feed)
+        return monitor.finish()
+
+    # ---- 코퍼스 최소화 (-merge=1) --------------------------------------
+    def merge_dir(self, group: LogicGroup) -> Path:
+        """최소화 결과 임시 위치 (출력 디렉토리 하위, 컨테이너에서는 /out 하위)"""
+        return self.config.output_dir / "corpus_merge" / group.name
+
+    def merge_argv(self, group: LogicGroup) -> list:
+        """코퍼스 최소화 커맨드. ``-merge=1 <새 디렉토리> <기존 코퍼스>``"""
+        opts = [f"-timeout={self.per_input_timeout_sec()}"]
+        if self.config.rss_limit_mb > 0:
+            opts.append(f"-rss_limit_mb={self.config.rss_limit_mb}")
+        if self.config.malloc_limit_mb > 0:
+            opts.append(f"-malloc_limit_mb={self.config.malloc_limit_mb}")
+        if self.config.use_docker:
+            rel = self.merge_dir(group).resolve().relative_to(self.config.output_dir.resolve())
+            harness = f"/harness/{group.harness_path.name}"
+            inner = "chmod +x %s 2>/dev/null; %s -merge=1 %s %s /corpus" % (
+                shlex.quote(harness), shlex.quote(harness), " ".join(opts),
+                shlex.quote(f"/out/{rel.as_posix()}"))
+            return self.build_run_argv(group, inner_cmd=inner, suffix="-merge")
+        pairs = {"ASAN_OPTIONS": self.config.asan_options,
+                 "TSAN_OPTIONS": self.config.tsan_options}
+        return ["env", *[f"{k}={v}" for k, v in pairs.items()],
+                str(self.harness_binary_path(group)), "-merge=1", *opts,
+                str(self.merge_dir(group)), str(group.corpus_dir)]
+
+    def minimize_corpus(self, group: LogicGroup) -> Optional[tuple]:
+        """그룹 코퍼스 최소화 후 (이전 개수, 이후 개수) 반환
+
+        최소화 실패(비정상 종료, 결과 0건) 시 기존 코퍼스 유지 후 None 반환
+        """
+        corpus = Path(group.corpus_dir) if group.corpus_dir else None
+        if corpus is None or not corpus.is_dir():
+            return None
+        before = [f for f in corpus.iterdir() if f.is_file()]
+        if not before:
+            return None
+        merged = self.merge_dir(group)
+        shutil.rmtree(merged, ignore_errors=True)
+        merged.mkdir(parents=True, exist_ok=True)
+        hard_timeout = self.config.timeout_sec + 30
+        result = self.executor(self.merge_argv(group), hard_timeout, lambda _line: None)
+        self._write_run_logs(group, result, stem="merge")
+        kept = [f for f in merged.iterdir() if f.is_file()]
+        if result.exit_code != 0 or result.timed_out or not kept:
+            shutil.rmtree(merged, ignore_errors=True)
+            return None
+        for f in before:
+            f.unlink()
+        for f in kept:
+            shutil.move(str(f), corpus / f.name)
+        shutil.rmtree(merged, ignore_errors=True)
+        return len(before), len(kept)
+
+    # ---- 스모크 테스트 (GEN-03-04 dry-run) -----------------------------
+    def run_smoke(self, group: LogicGroup, runs: int, timeout_sec: int) -> ProcResult:
+        """본 퍼징 전 짧은 dry-run (``-runs=N``). 본 퍼징과 같은 격리·옵션 사용
+
+        크래시 산출물은 ``smoke/<group>/`` 에 남기고, 로그는
+        ``logs/<group>/smoke.*.log`` 로 저장
+        """
+        harness_file = self.harness_binary_path(group)
+        if not harness_file.exists():
+            raise HarnessNotFoundError(f"하네스 없음: {harness_file}")
+        self.config.ensure_dirs()
+        self.smoke_dir(group).mkdir(parents=True, exist_ok=True)
+        saved = self.config.timeout_sec
+        self.config.timeout_sec = max(1, int(timeout_sec))
+        try:
+            argv = (self.build_run_argv(group, smoke_runs=runs) if self.config.use_docker
+                    else self._local_argv(group, smoke_runs=runs))
+        finally:
+            self.config.timeout_sec = saved
+        result = self.executor(argv, timeout_sec + 30, lambda _line: None)
+        self._write_run_logs(group, result, stem="smoke")
+        return result
 
     # ---- 그룹 1개 실행 ------------------------------------------------
     def run_group(self, group: LogicGroup, monitor: Optional[StatsMonitor] = None,
                   sanitizer_monitor: Optional[SanitizerMonitor] = None) -> GroupResult:
-        # 그룹 이름은 컨테이너 이름·로그 디렉터리·커버리지 파일 이름이 된다.
-        # '../x' 같은 값이 출력 디렉터리 밖에 쓰지 못하게 실행 전에 거부한다.
+        # 그룹 이름은 컨테이너 이름·로그 디렉터리·커버리지 파일 이름으로 사용
+        # '../x' 같은 값이 출력 디렉터리 밖에 쓰지 못하도록 실행 전에 거부
         safe_component(group.name, what="로직 그룹 이름")
         harness_file = self.harness_binary_path(group)
         if not harness_file.exists():
@@ -489,7 +634,7 @@ class DockerIsolationRunner:
         stats = mon.stats
         argv = self.build_run_argv(group) if self.config.use_docker else self._local_argv(group)
 
-        # 엔진이 스스로 종료하지 못할 경우를 대비한 하드 월클럭 상한(+ grace).
+        # 엔진 미종료 대비 하드 월클럭 상한 (+ grace)
         hard_timeout = self.config.timeout_sec + 30
         start = time.monotonic()
         sanitizer = sanitizer_monitor or SanitizerMonitor()
@@ -517,7 +662,7 @@ class DockerIsolationRunner:
             log_error=log_error,
         )
 
-    def _write_run_logs(self, group: LogicGroup, result: "ProcResult"
+    def _write_run_logs(self, group: LogicGroup, result: "ProcResult", stem: str = "run"
                         ) -> tuple[Optional[str], Optional[str], str]:
         """표준 출력/표준 오류 전문을 그룹별 로그 파일로 남긴다.
 
@@ -530,8 +675,8 @@ class DockerIsolationRunner:
         try:
             log_dir = safe_join(self.config.logs_dir, group.name, what="로직 그룹 이름")
             log_dir.mkdir(parents=True, exist_ok=True)
-            stdout_path = log_dir / "run.stdout.log"
-            stderr_path = log_dir / "run.stderr.log"
+            stdout_path = log_dir / f"{stem}.stdout.log"
+            stderr_path = log_dir / f"{stem}.stderr.log"
             stdout_path.write_text(result.stdout, encoding="utf-8")
             stderr_path.write_text(result.stderr, encoding="utf-8")
             return str(stdout_path), str(stderr_path), ""

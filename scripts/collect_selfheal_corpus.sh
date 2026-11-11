@@ -2,22 +2,22 @@
 # GEN-03-02 자가치유 에러 코퍼스 수집기 (D 파트 1주차)
 # ====================================================
 #
-# 두 가지를 실제로 실행해서 **원문 그대로** 모은다:
+# 두 가지를 실제로 실행해서 **원문 그대로** 수집:
 #
 #   1. Bazel 파손 에러 — tests/fixtures/bazel_repro/breaks/<case>/ 를 워크스페이스
-#      위에 덮어쓰고 빌드해, deps/visibility/구문 오류 등이 뱉는 문장을 수집한다.
+#      위에 덮어쓰고 빌드해, deps/visibility/구문 오류 등이 뱉는 문장을 수집
 #   2. Sanitizer 출력 — --config=asan_ubsan_lsan 으로 빌드한 하네스를 UB 종류별
-#      입력으로 실행해 UBSan/ASan/LSan 진단 원문을 수집한다.
+#      입력으로 실행해 UBSan/ASan/LSan 진단 원문을 수집
 #
-# 2주차 generate/bazel_errors.py 분류기가 이 코퍼스를 정답지로 쓴다.
+# 2주차 generate/bazel_errors.py 분류기가 이 코퍼스를 정답지로 사용
 #
-# 리눅스 전용이다(Bazel + clang sanitizer). WSL 과 docker/Dockerfile.selfheal
-# 컨테이너 양쪽에서 같은 명령으로 돈다:
+# 리눅스 전용(Bazel + clang sanitizer). WSL 과 docker/Dockerfile.selfheal
+# 컨테이너 양쪽에서 같은 명령으로 실행:
 #
 #   bash scripts/collect_selfheal_corpus.sh --out-root <저장소 루트>
 #
 # 왜 워크스페이스를 복사하나 — Bazel 을 /mnt/c (Windows 마운트) 에서 돌리면
-# 느리고 심볼릭 링크·권한이 깨진다. 항상 네이티브 FS 로 복사해서 빌드한다.
+# 느리고 심볼릭 링크·권한이 깨진다. 항상 네이티브 FS 로 복사해서 빌드
 
 set -uo pipefail
 
@@ -77,18 +77,18 @@ echo "   scratch : ${WORK}"
 echo
 
 # --------------------------------------------------------------------------- #
-# 정규화: 머신마다 달라지는 값만 걷어낸다. 에러 '문장'은 건드리지 않는다.
+# 정규화: 머신마다 달라지는 값만 제거. 에러 '문장'은 유지
 #
-# 이걸 하는 이유 — 절대경로(=사용자 홈), 빌드 소요 시간, PID, 샌드박스 해시는
-# 실행할 때마다 바뀌어서 그대로 커밋하면 diff 가 매번 깨지고 분류기 테스트가
-# 머신에 종속된다. 치환 규칙은 _META.json 에 그대로 적어 둔다.
+# 이유 — 절대경로(=사용자 홈), 빌드 소요 시간, PID, 샌드박스 해시는
+# 실행할 때마다 바뀌어 그대로 커밋하면 diff 가 매번 깨지고 분류기 테스트가
+# 머신에 종속. 치환 규칙은 _META.json 에 그대로 기록
 # --------------------------------------------------------------------------- #
 normalize() {
     local output_base
     output_base="$(cd "${WORK}" 2>/dev/null && bazel info output_base 2>/dev/null)" || output_base=""
-    # 치환 순서가 중요하다. WORK 는 SCRATCH 아래에 있고 SCRATCH 는 (WSL 기본값에서)
-    # HOME 아래에 있으므로, 좁은 경로부터 먼저 바꿔야 한다. HOME 을 먼저 바꾸면
-    # 뒤의 절대경로 패턴이 더 이상 일치하지 않는다.
+    # 치환 순서 중요. WORK 는 SCRATCH 아래, SCRATCH 는 (WSL 기본값에서)
+    # HOME 아래에 있으므로 좁은 경로부터 먼저 치환. HOME 을 먼저 바꾸면
+    # 뒤의 절대경로 패턴이 더 이상 일치하지 않음
     sed -e "s|${WORK}|<WORKSPACE>|g" \
         -e "${output_base:+s|${output_base}|<OUTPUT_BASE>|g}" \
         -e "s|${SCRATCH}|<SCRATCH>|g" \
@@ -118,18 +118,18 @@ normalize() {
         -e "/^\[[0-9,]* \/ [0-9,]*\]/d" \
     | cat -s
 }
-# 마지막의 `cat -s` 는 연속된 빈 줄을 하나로 압축한다. Bazel 이 진행률을 몇 번
+# 마지막의 `cat -s` 는 연속된 빈 줄을 하나로 압축. Bazel 이 진행률을 몇 번
 # 갱신했느냐에 따라 빈 줄 개수가 달라지는데(WSL 1줄 vs 컨테이너 5줄) 정보가 없는
-# 값이다. 단일 빈 줄은 그대로 두므로 sanitizer 로그의 스택/SUMMARY 구분선은 살아남는다.
+# 값. 단일 빈 줄은 그대로 두므로 sanitizer 로그의 스택/SUMMARY 구분선은 유지
 #
-# 진행률·서버기동 줄은 빈 줄로 바꾸지 않고 **삭제**한다. 빈 줄로 남기면 환경마다
+# 진행률·서버기동 줄은 빈 줄로 바꾸지 않고 **삭제**. 빈 줄로 남기면 환경마다
 # 진행률 줄 개수가 달라 빈 줄 수까지 달라지고, WSL 과 컨테이너 출력이 내용은
-# 같은데 diff 는 깨지는 상태가 된다.
+# 같은데 diff 는 깨지는 상태 발생
 #
 # 샌드박스 전략(linux-sandbox / processwrapper-sandbox)과 clang 인자 개수도
-# 정규화 대상이다. 비특권 컨테이너에서는 linux-sandbox 를 못 써서 Bazel 이
+# 정규화 대상. 비특권 컨테이너에서는 linux-sandbox 를 못 써서 Bazel 이
 # processwrapper-sandbox 로 내려가고, 그 때문에 clang 명령줄 인자가 하나 줄어
-# `(remaining 30 arguments skipped)` 이 `29` 로 바뀐다. 에러 문장과는 무관하다.
+# `(remaining 30 arguments skipped)` 이 `29` 로 변경. 에러 문장과는 무관
 
 reset_workspace() {
     rm -rf "${WORK}"
@@ -147,9 +147,9 @@ collect_bazel_errors() {
     while IFS= read -r d; do cases+=("$(basename "$d")"); done \
         < <(find "${FIXTURE_SRC}/breaks" -mindepth 1 -maxdepth 1 -type d | sort)
 
-    # 대조군: 정상 상태가 정말로 빌드되는지 먼저 확인한다. 이게 깨지면 아래
+    # 대조군: 정상 상태가 실제로 빌드되는지 먼저 확인. 이게 깨지면 아래
     # 파손 에러들이 '내가 낸 파손' 때문인지 워크스페이스가 원래 고장난 건지
-    # 구분할 수 없다.
+    # 구분 불가
     echo "[baseline] 정상 빌드 확인 중..."
     reset_workspace
     local base_log
@@ -216,7 +216,7 @@ META
 # --------------------------------------------------------------------------- #
 # 2. Sanitizer 출력 수집
 # --------------------------------------------------------------------------- #
-# json.h 의 Case 열거형 순서와 일치해야 한다.
+# json.h 의 Case 열거형 순서와 일치 필요
 SAN_CASES=(
     "0:ubsan_signed_overflow"
     "1:ubsan_shift_exponent"
@@ -234,11 +234,11 @@ SAN_CASES=(
 collect_sanitizer_logs() {
     mkdir -p "${SAN_DIR}"
 
-    # 두 설정을 모두 수집한다.
-    #   asan_ubsan_lsan      : UBSan 기본(복구 가능) — 진단만 찍고 실행을 계속한다.
-    #   asan_ubsan_lsan_halt : -fno-sanitize-recover=undefined — UB 에서 프로세스가 죽는다.
+    # 두 설정을 모두 수집
+    #   asan_ubsan_lsan      : UBSan 기본(복구 가능) — 진단만 찍고 실행을 계속
+    #   asan_ubsan_lsan_halt : -fno-sanitize-recover=undefined — UB 에서 프로세스 종료
     # 이 차이가 "UB 를 찾았는데 크래시 아티팩트가 안 생기는" 현상의 원인이라
-    # 1주차에 양쪽을 다 남긴다.
+    # 1주차에 양쪽 모두 보존
     local configs=("asan_ubsan_lsan" "asan_ubsan_lsan_halt")
 
     for cfg in "${configs[@]}"; do

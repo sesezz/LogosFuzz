@@ -178,6 +178,48 @@ def test_repo_libsndfile_profile_contents():
         assert arg in profile.build.configure_args
 
 
+
+def test_repo_libsndfile_profile_seeds_are_real_audio_files():
+    from logosfuzz.execute.seeds import _seed_files, profile_seed_paths
+
+    profile = load_profile(REPO_ROOT / "targets" / "libsndfile.json", base_dir=REPO_ROOT)
+    files = _seed_files(profile_seed_paths(profile))
+
+    assert {f.suffix for f in files} == {".wav", ".aiff", ".aifc", ".au"}
+    assert len(files) == 6
+    assert all(f.stat().st_size <= 4096 for f in files)   # libFuzzer 기본 max_len 이내
+    magics = {f.read_bytes()[:4] for f in files}
+    assert magics <= {b"RIFF", b"FORM", b".snd"}
+
+def test_dictionary_defaults_to_empty_and_is_omitted_from_to_dict(tmp_path):
+    profile = parse_profile(CMAKE_PROFILE, base_dir=tmp_path)
+    assert profile.dictionary == ""
+    assert "dictionary" not in profile.to_dict()       # 사전 미지정 프로필의 기존 형태 유지
+
+
+def test_dictionary_resolves_like_seeds(tmp_path):
+    profile = parse_profile(_mutated(dictionary="../../dicts/demo.dict"), base_dir=tmp_path)
+    assert profile.dictionary == "../../dicts/demo.dict"
+    assert profile.abs(profile.dictionary) == (tmp_path / "dicts" / "demo.dict").resolve()
+    assert parse_profile(profile.to_dict(), base_dir=tmp_path) == profile
+
+
+def test_dictionary_must_be_string(tmp_path):
+    with pytest.raises(ProfileError, match="dictionary"):
+        parse_profile(_mutated(dictionary=["a.dict"]), base_dir=tmp_path)
+
+
+def test_repo_libsndfile_profile_dictionary_is_valid_libfuzzer_dict():
+    from logosfuzz.execute.dictionary import validate_dictionary
+
+    profile = load_profile(REPO_ROOT / "targets" / "libsndfile.json", base_dir=REPO_ROOT)
+    path = profile.abs(profile.dictionary)
+    assert path == (REPO_ROOT / "targets" / "dicts" / "libsndfile.dict").resolve()
+    count, reason = validate_dictionary(path)
+    assert reason == "" and count >= 100
+    assert b'"RIFF"' in path.read_bytes() and b'"fmt "' in path.read_bytes()
+
+
 def test_repo_automotive_profile_contents():
     profile = load_profile(REPO_ROOT / "targets" / "automotive.json", base_dir=REPO_ROOT)
     assert profile.domain == "automotive"

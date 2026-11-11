@@ -154,7 +154,7 @@ def test_lookup_by_name_and_by_id(kb):
 
 
 def test_header_doc_is_merged_into_the_implementation(kb):
-    # 문서는 lib.h 선언에 달려 있고 lib.c 정의에는 없다
+    # 문서는 lib.h 선언에만 있고 lib.c 정의에는 없음
     document = kb.api("lib_open")
 
     assert "컨텍스트를 연다" in document["doc"]
@@ -186,12 +186,12 @@ def test_call_graph_records_callees_and_callers(kb):
 
 
 def test_call_graph_excludes_external_calls(kb):
-    # free() 는 지식베이스에 없는 외부 함수이므로 내부 호출로 세지 않는다
+    # free() 는 지식베이스에 없는 외부 함수이므로 내부 호출에서 제외
     assert "free" not in kb.callees_of("lib_close")
 
 
 def test_call_seq_contains_the_api_itself(kb):
-    """SCH-02-02 의 call_adjacency_score 는 시퀀스에서 자기 api_id 를 찾는다."""
+    """SCH-02-02 call_adjacency_score 의 시퀀스 내 자기 api_id 탐색 전제 확인"""
     open_id = str(kb.api("lib_open")["api_id"])
     sequence = kb.call_sequence_ids("lib_open")
 
@@ -258,10 +258,9 @@ def test_defines_type_returns_empty_for_unknown(kb):
 
 
 def test_compile_flags_are_empty_until_bazel_supplies_them(tree):
-    """compile_commands.json 수급을 걷어낸 뒤의 상태를 못박아 둔다.
+    """Bazel 정보 없는 빌드의 `compile_flags` 빈 값 고정
 
-    `compile_flags` 필드 자체는 유지한다 — 2주차 `extract/bazel_query.py` 가
-    Bazel 타깃에서 받은 값으로 채운다. 그때 이 테스트가 깨져야 한다.
+    필드는 유지, 값은 `extract/bazel_query.py` 가 Bazel 타깃 기준으로 채움
     """
     kb = KnowledgeBase.build(paths=[str(tree)])
 
@@ -318,10 +317,8 @@ def test_saved_kb_keeps_korean_text(kb, tmp_path):
 
 # -- 링키지 ---------------------------------------------------------------
 #
-# 4단계 검증(dlt-daemon 파싱 모듈)에서, SCH 가 `static` 함수를 퍼징 대상 그룹에
-# 넣고 GEN 이 그걸 호출하는 하네스를 만들어 "undefined reference" 로 링크가
-# 깨졌다. 소스 수준 에러가 아니라 자가 치유가 아무리 돌아도 못 고치는 실패다.
-# 소비자가 거를 수 있도록 KB 가 링키지를 기록해야 한다.
+# `static` 함수 호출 하네스는 "undefined reference" 링크 실패 (자가 치유로 복구 불가)
+# 소비자 필터링용 KB 링키지 기록 필요
 
 LINKAGE_SOURCE = """
 #include <stddef.h>
@@ -385,33 +382,31 @@ def test_is_test_path_recognises_common_layouts():
 
 
 def test_is_test_path_recognises_score_ut_ct_convention():
-    """S-CORE 는 `unit_test/` 아래에 `ut_`/`ct_` 접두사를 쓴다.
+    """S-CORE `unit_test/` 아래 `ut_`/`ct_` 접두사 관례 인식
 
-    이 관례를 모르면 baselibs 소스 1,730개 중 22개가 퍼징 대상으로 샜다.
-    다른 팀원들이 S-CORE 를 다룰 때 쓴 필터에서 확인한 것이다.
+    미인식 시 baselibs 소스 1,730개 중 22개가 퍼징 대상으로 유출
     """
     assert is_test_path("score/json/internal/parser/vajson/unit_test/ut_number.cpp")
     assert is_test_path("score/json/internal/parser/vajson/unit_test/parser/ut_bool.cpp")
     assert is_test_path("score/json/internal/parser/vajson/unit_test/ct_vajson_v2_parsers.cpp")
     assert is_test_path("score/result/rust/result_example_cpp.cpp")
-    # 토큰 경계를 지켜야 한다. 아래는 프로덕션 코드다.
+    # 토큰 경계 준수 확인 (아래는 프로덕션 코드)
     assert not is_test_path("score/json/internal/parser/vajson/number.cpp")
     assert not is_test_path("score/mw/log/detail/output_statement.cpp")
     assert not is_test_path("src/console/dlt_receive.c")
 
 
 def test_project_root_named_fuzz_is_not_a_test_directory():
-    """프로젝트 이름이 Fuzz여도 제품 소스 전체를 테스트로 오인하지 않는다."""
+    """프로젝트 이름이 Fuzz여도 제품 소스를 테스트로 오인하지 않음"""
     root = "C:/workspace/Fuzz"
     assert not is_test_path(f"{root}/src/shared/dlt_common.c", root=root)
     assert is_test_path(f"{root}/src/tests/dlt_test.c", root=root)
 
 
 def test_build_does_not_mark_everything_as_test_under_a_fuzz_named_root(tmp_path):
-    """`build()` 가 실제로 루트 기준 판별을 쓰는지 확인한다.
+    """`build()` 의 루트 기준 테스트 판별 사용 확인
 
-    `fuzz` 는 _TEST_DIR_SEGMENTS 에 들어 있어서, 루트를 넘기지 않으면 이 트리의
-    제품 코드가 전부 is_test=True 로 뒤집힌다.
+    `fuzz` 는 _TEST_DIR_SEGMENTS 포함이므로 루트 미지정 시 전부 is_test=True
     """
     root = tmp_path / "Fuzz"
     (root / "src").mkdir(parents=True)

@@ -1,15 +1,16 @@
-"""로직 그룹들을 순차적으로 격리 실행하는 퍼징 세션 오케스트레이터.
+"""로직 그룹 순차 격리 실행 퍼징 세션 오케스트레이터
 
 설계서 EXE-04-00 흐름:
   - Docker 격리 환경에서 Logic Group별로 퍼징 순차 수행
   - --timeout 도달 시 해당 그룹 종료 후 다음 그룹으로 진행
-  - 새 크래시는 강조 출력하고 crashes/ 폴더에 저장
-  - 완료 후 다음 기능(analyze)으로 연결될 요약(JSON) 산출
+  - 새 크래시 강조 출력 및 crashes/ 폴더 저장
+  - 완료 후 analyze 연결용 요약(JSON) 산출
 """
 
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ from logosfuzz.execute.docker_runner import DockerIsolationRunner, GroupResult
 from logosfuzz.execute.stats import LiveStats, StatsMonitor
 from logosfuzz.execute.sanitizer import SanitizerMonitor, write_findings
 from logosfuzz.execute.coverage import CoverageCollector, write_coverage
+from logosfuzz.execute.symbolize import CrashSymbolizer
 
 
 @dataclass
@@ -38,7 +40,7 @@ class SessionSummary:
 
     @property
     def failed_groups(self) -> list:
-        """하네스가 한 번도 실행되지 못한 그룹 이름들."""
+        """하네스 미실행 그룹 이름 목록"""
         return [g.group for g in self.groups if g.failed_to_start]
 
     def to_dict(self) -> dict:
@@ -53,20 +55,29 @@ class SessionSummary:
             "groups": [
                 {
                     "group": g.group,
+                    "status": g.status,
                     "exit_code": g.exit_code,
                     "timed_out": g.timed_out,
                     "crashed": g.crashed,
                     "failed_to_start": g.failed_to_start,
                     "duration_sec": round(g.duration_sec, 2),
                     "execs": g.stats.execs,
-                    "exec_per_sec": g.stats.exec_per_sec,
+                    # 엔진이 0을 찍은 구간은 실행 수/실행 시간으로 보정
+                    # (LiveStats.rate 참조)
+                    "exec_per_sec": g.stats.rate(g.duration_sec),
                     "coverage": g.stats.coverage,
+                    "crash_count": len(g.crashes),
+                    "sanitizer_count": len(g.sanitizer_findings),
                     "crashes": [str(p) for p in g.crashes],
                     "sanitizer_findings": [f.to_dict() for f in g.sanitizer_findings],
                     "coverage_report": g.coverage.to_dict()
                     if getattr(g, "coverage", None) is not None else None,
                     "stdout_log": getattr(g, "stdout_log", None),
                     "stderr_log": getattr(g, "stderr_log", None),
+                    **({"timeout_sec": g.timeout_sec}
+                       if getattr(g, "timeout_sec", None) is not None else {}),
+                    **({"corpus_minimized": g.corpus_minimized}
+                       if getattr(g, "corpus_minimized", None) else {}),
                 }
                 for g in self.groups
             ],
@@ -76,27 +87,33 @@ class SessionSummary:
 class FuzzSession:
     def __init__(self, config: FuzzConfig, runner: Optional[DockerIsolationRunner] = None,
                  stream=sys.stdout,
-                 coverage_collector: Optional[CoverageCollector] = None):
+                 coverage_collector: Optional[CoverageCollector] = None,
+                 symbolizer: Optional[CrashSymbolizer] = None):
         self.config = config
         self.runner = runner or DockerIsolationRunner(config)
         self.stream = stream
         self.collector = CrashCollector(config.crashes_dir)
-        # EXE-04-04: 커버리지 수집기(테스트에서 주입 가능). NONE이면 사용되지 않음.
+        # EXE-04-04: 커버리지 수집기 (NONE이면 미사용)
         self.coverage_collector = coverage_collector or CoverageCollector(config)
+        # EXE-04-02: 크래시 후처리 심볼라이저. symbolize_crashes=False 면 쓰이지 않음.
+        self.symbolizer = symbolizer or CrashSymbolizer(config)
 
     def _log(self, msg: str) -> None:
         self.stream.write(msg + "\n")
         self.stream.flush()
 
     def _crash_search_dirs(self, group: LogicGroup) -> list:
-        # libFuzzer artifact_prefix(/out/crashes/) 와 AFL++(/out/afl/**/crashes)
-        return [
-            self.config.crashes_dir,
-            self.config.output_dir / "afl",
-        ]
+        # libFuzzer artifact_prefix(/out/crashes/)
+        return [self.config.crashes_dir]
 
-    def run(self, groups: list, ensure_image: bool = True) -> SessionSummary:
+    def run(self, groups: list, ensure_image: bool = True,
+            timeouts: Optional[dict] = None) -> SessionSummary:
+        """그룹 순차 퍼징
+
+        ``timeouts`` (``{그룹 이름: 초}``) 지정 시 그룹별 퍼징 시간 적용 (미지정 그룹은 ``config.timeout_sec``)
+        """
         self.config.ensure_dirs()
+        default_timeout = self.config.timeout_sec
         if self.config.use_docker and ensure_image:
             self.runner.ensure_image()
 
@@ -119,24 +136,38 @@ class FuzzSession:
                 )
             )
 
-            # EXE-04-04: 계측 활성 시 실행 전 그룹별 profraw 디렉토리를 준비한다
-            # (컨테이너가 /out 마운트에 profraw를 떨굴 수 있도록).
+            # EXE-04-04: 계측 시 실행 전 그룹별 profraw 디렉토리 준비
             if self.config.coverage is not CoverageMode.NONE:
                 (self.config.coverage_dir / group.name).mkdir(parents=True, exist_ok=True)
 
             # 그룹 실행 전 크래시 baseline
             before = set(self.config.crashes_dir.rglob("*"))
-            result: GroupResult = self.runner.run_group(
-                group, monitor=monitor, sanitizer_monitor=sanitizer_monitor
-            )
+            group_timeout = (timeouts or {}).get(group.name)
+            self.config.timeout_sec = group_timeout or default_timeout
+            try:
+                result: GroupResult = self.runner.run_group(
+                    group, monitor=monitor, sanitizer_monitor=sanitizer_monitor
+                )
+            finally:
+                self.config.timeout_sec = default_timeout
             result.stats = stats
+            # 크래시 수집 (fork 모드 재실행 대상 확보 목적상 심볼라이즈 전 수행)
+            saved = self.collector.collect(group.name, self._crash_search_dirs(group))
+            result.crashes = saved
+            if self.config.fork_jobs > 0 and saved:
+                self._replay_fork_crashes(group, result)
+            # EXE-04-02: 실행 중에는 symbolize=0 이라 프레임에 파일:줄 없음
+            # 결함을 ANA 로 내보내기 "전에" 복원 — traceback 이 비면 크래시
+            # 시그니처가 뭉개지고 정/오탐 판별이 근거 상실
+            if result.sanitizer_findings and self.config.symbolize_crashes:
+                self._symbolize(result.sanitizer_findings)
             if result.sanitizer_findings:
                 write_findings(
                     self.config.logs_dir / "sanitizer" / f"{group.name}.jsonl",
                     result.sanitizer_findings,
                 )
 
-            # EXE-04-04: 실행 후 커버리지 후처리(profraw→profdata→llvm-cov export).
+            # EXE-04-04: 실행 후 커버리지 후처리 (profraw→profdata→llvm-cov export)
             if self.config.coverage is not CoverageMode.NONE:
                 cov = self.coverage_collector.collect(group)
                 result.coverage = cov
@@ -153,9 +184,7 @@ class FuzzSession:
                 else:
                     self._log("  - 커버리지 산출물 없음(계측 미빌드 또는 도구 실패), 건너뜀")
 
-            # 크래시 수집 및 강조
-            saved = self.collector.collect(group.name, self._crash_search_dirs(group))
-            result.crashes = saved
+            # 크래시 강조
             if saved:
                 self._log(f"  >>> [CRASH] '{group.name}'에서 새 크래시 {len(saved)}건 저장: "
                           f"{self.config.crashes_dir / group.name}")
@@ -164,6 +193,10 @@ class FuzzSession:
                           f"(exit={result.exit_code}, execs=0). 로그: {result.stderr_log}")
             elif result.timed_out:
                 self._log(f"  - 타임아웃 도달, 다음 그룹으로 진행")
+
+            # 캠페인 후 코퍼스 최소화 (COV 재생 전 수행, 같은 커버리지 유지)
+            if self.config.minimize_corpus and group.corpus_dir and not result.failed_to_start:
+                self._minimize(group, result)
 
             summary.groups.append(result)
 
@@ -177,6 +210,68 @@ class FuzzSession:
             self._log(f"\n=== 완료: 그룹 {len(summary.groups)}개, "
                       f"총 크래시 {summary.total_crashes}건 → analyze 단계로 전달 ===")
         return summary
+
+    def _replay_fork_crashes(self, group: LogicGroup, result: GroupResult) -> None:
+        """fork 모드 크래시 입력 재실행으로 sanitizer 전체 보고(스택) 확보
+
+        fork 모드 부모 출력에는 자식 보고의 ERROR 한 줄만 남아 traceback 이 빈 상태.
+        발견 순서(수정 시각) 앞쪽부터 ``fork_replay_limit`` 건만 재실행하고,
+        재현된 결함으로 스트림 결함 목록 대체. 재현 0건이면 기존 목록 유지
+        """
+        limit = max(0, self.config.fork_replay_limit)
+        if limit == 0:
+            return
+
+        def _mtime(path: Path) -> float:
+            try:
+                return path.stat().st_mtime
+            except OSError:
+                return 0.0
+
+        targets = sorted(result.crashes, key=_mtime)[:limit]
+        replayed: list = []
+        for crash_file in targets:
+            replayed.extend(self.runner.replay_crash(group, crash_file))
+        self._log(f"  >>> [REPLAY] fork 모드 크래시 입력 {len(targets)}/{len(result.crashes)}건 "
+                  f"재실행 → 결함 보고 {len(replayed)}건 확보")
+        if replayed:
+            result.sanitizer_findings = replayed
+
+    def _minimize(self, group: LogicGroup, result: GroupResult) -> None:
+        """-merge=1 코퍼스 최소화. 실패해도 캠페인 결과는 유지"""
+        try:
+            counts = self.runner.minimize_corpus(group)
+        except OSError as exc:
+            self._log(f"  - 코퍼스 최소화 실패({exc.__class__.__name__}), 기존 코퍼스 유지")
+            return
+        if counts is None:
+            self._log("  - 코퍼스 최소화 결과 없음, 기존 코퍼스 유지")
+            return
+        before, after = counts
+        result.corpus_minimized = {"before": before, "after": after}
+        self._log(f"  >>> [MERGE] 코퍼스 최소화 {before} → {after}개")
+
+    def _symbolize(self, findings: list) -> None:
+        """크래시 프레임의 파일:줄을 복원하고 결과를 한 줄로 보고한다.
+
+        심볼라이즈가 실패해도 캠페인을 깨뜨리지 않는다 — 복원 못 한 결함은
+        복원 전과 똑같이 남고, 사람이 알아챌 수 있도록 이유만 남긴다.
+        """
+        try:
+            report = self.symbolizer.symbolize(findings)
+        except (OSError, subprocess.SubprocessError, RuntimeError, ValueError,
+                KeyError, IndexError, AttributeError, TypeError) as exc:
+            # 심볼라이저 실행 실패·출력 형식 변화
+            self._log(f"  - 심볼라이즈 실패({exc.__class__.__name__}), 원문 그대로 둠")
+            return
+        if not report.attempted:
+            return
+        if not report.tool_available:
+            self._log(f"  - 심볼라이저('{self.config.llvm_symbolizer}') 없음 → "
+                      f"프레임 {report.unresolved}개의 파일:줄 복원 건너뜀")
+            return
+        self._log(f"  >>> [SYMBOLIZE] 프레임 {report.resolved}/{report.attempted}개 "
+                  f"파일:줄 복원")
 
     def _write_summary(self, summary: SessionSummary) -> Path:
         path = self.config.output_dir / "fuzz_summary.json"

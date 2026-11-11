@@ -20,10 +20,12 @@ import os
 import re
 import shutil
 import subprocess
-import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+
+import defusedxml.ElementTree as DefusedET
+from defusedxml import DefusedXmlException
 
 
 _CPP_RULE_RE = re.compile(r"^(?:cc_|.*_cc_).*")
@@ -239,7 +241,7 @@ def label_to_path(label: str, workspace: str, package: str = "") -> Optional[str
     return str((Path(workspace) / Path(relative)).resolve())
 
 
-def _attribute_values(rule: ET.Element, name: str) -> List[str]:
+def _attribute_values(rule: Any, name: str) -> List[str]:
     """Read scalar/list/select values from a Bazel XML rule attribute."""
     values: List[str] = []
     for element in rule.iter():
@@ -271,10 +273,8 @@ def parse_query_xml(xml_text: str, workspace: str,
     """Parse ``bazel query --output=xml`` into :class:`BazelGraph`."""
     workspace_path = str(Path(workspace).resolve())
     try:
-        # 입력은 이 도구가 직접 실행한 `bazel query --output=xml` 의 출력이다. 표준 ElementTree 는
-        # 외부 엔티티를 해석하지 않고, 엔티티 확장 폭탄은 expat(>=2.4.1)이 막는다.
-        query = ET.fromstring(xml_text)  # nosec B314
-    except ET.ParseError as exc:
+        query = DefusedET.fromstring(xml_text)
+    except (DefusedET.ParseError, DefusedXmlException) as exc:
         raise BazelQueryError(f"invalid Bazel query XML: {exc}") from exc
 
     targets: Dict[str, BazelTarget] = {}

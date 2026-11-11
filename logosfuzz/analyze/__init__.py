@@ -1,14 +1,13 @@
-"""ANA 파트: 크래시 분석, 중복 제거, 정/오탐 판별, 지식 베이스 역피드백.
+"""ANA 파트: 크래시 분석, 중복 제거, 정/오탐 판별, 지식 베이스 역피드백
 
 하위 기능:
   - ANA-05-04 Crash Deduplication (dedup.py, signature.py, loader.py)
   - ANA-05-01 LLM 기반 정/오탐 판별 (triage.py)
   - ANA-05-03 지식 베이스 역피드백 및 하네스 재생성 (rootcause.py, kb_feedback.py,
-    commit.py, regenerate.py, audit.py, pipeline.py). ANA-05-01의 출력
-    (`TriageResult`)이 아직 api_id/harness_id/run_id 매핑까지 제공하지 않아,
-    `models.FalsePositiveCrash`가 그 매핑까지 포함한 최소 입력 계약의 스텁
-    역할을 한다(`models.CrashRecord`와는 다른 타입 - 그쪽은 ANA-05-04가 쓰는
-    "원시 크래시 레코드").
+    commit.py, regenerate.py, audit.py, pipeline.py). ANA-05-01 출력
+    (`TriageResult`)에 api_id/harness_id/run_id 매핑이 없어
+    `models.FalsePositiveCrash`가 매핑을 포함한 최소 입력 계약 스텁 역할
+    (`models.CrashRecord`와는 별개 타입 - ANA-05-04용 "원시 크래시 레코드")
   - (연계) ANA-05-02 CVE 리포트 - 서브패키지 ``logosfuzz.analyze.cve_reporting``
 
 파이프라인: EXE-04-02(Sanitizer 모니터링) → ANA-05-04(중복 제거)

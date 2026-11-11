@@ -1,20 +1,11 @@
 /*
- * Deliberately vulnerable ASan smoke-test target.
- *
- * This program is only for validating the LogosFuzz pipeline.  It copies a
- * user-controlled string into a fixed-size stack buffer without a bounds
- * check.  An input longer than 15 bytes must produce an ASan
- * stack-buffer-overflow report.
+ * LogosFuzz 파이프라인 검증용 의도적 취약 ASan 스모크 테스트 대상 (CLI 진입점)
+ * 취약 함수 copy_can_label 은 can_label.c (logosfuzz run 대상 라이브러리와 공용)
+ * 15바이트 초과 입력 시 ASan stack-buffer-overflow 보고 발생
  */
 #include <stdio.h>
-#include <string.h>
 
-int copy_can_label(const char *label) {
-    char can_label[16];
-
-    strcpy(can_label, label); /* Intentional CWE-121 vulnerability. */
-    return (unsigned char)can_label[0];
-}
+#include "can_label.h"
 
 int main(int argc, char **argv) {
     if (argc != 2) {

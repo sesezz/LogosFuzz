@@ -1,4 +1,4 @@
-/* EXT-01-02 예제: 제약조건 추출기가 무엇을 뽑아내는지 보여주는 샘플.
+/* EXT-01-02 예제: 제약조건 추출기의 추출 대상 샘플
  *
  * python -m src.rag_constraints build --paths examples --output build/kb.json
  * python -m src.rag_constraints context --kb build/kb.json --function parse_header
@@ -15,6 +15,8 @@ struct header {
     int  value;
 };
 
+/* 아래 함수 주석은 제약조건 추출기의 입력 데이터
+ * ("NULL이면 안 된다", "~여야 한다" 등 서술형 문장에서 제약 추출, 말투 변경 시 추출 결과 달라짐) */
 /**
  * 입력 버퍼에서 헤더 하나를 파싱한다.
  *

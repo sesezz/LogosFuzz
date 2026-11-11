@@ -1,0 +1,26 @@
+{
+  "_comment": "GENERIC-C 임베디드 샘플(examples/embedded). HAL_* 는 정의가 없어 링크 시 weak 스텁으로 채운다. proto_parse 에 길이 필드를 믿는 힙 OOB 가 의도적으로 1건 있다.",
+  "name": "embedded-sample",
+  "version": "0.1.0",
+  "language": "c",
+  "domain": "embedded",
+  "build": {
+    "system": "cmake",
+    "source_root": "examples/embedded",
+    "build_dir": "build-fuzz",
+    "configure_args": [],
+    "libraries": ["build-fuzz/libproto.a"],
+    "include_dirs": ["."],
+    "link_flags": [],
+    "compile_commands": "build-fuzz/compile_commands.json",
+    "bazel": null
+  },
+  "apis": ["proto_create", "proto_parse", "proto_payload", "proto_destroy"],
+  "error_contract": "c_return_code",
+  "embedded": {
+    "strip_flags": ["-mcpu=*", "-mthumb", "-mfloat-abi=*", "-mfpu=*", "--specs=*"],
+    "stub_undefined": true,
+    "stub_allowlist": ["HAL_*"]
+  },
+  "seeds": ["seeds"]
+}

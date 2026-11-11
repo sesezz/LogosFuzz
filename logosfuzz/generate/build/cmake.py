@@ -62,7 +62,7 @@ COVERAGE_SUFFIX = "-cov"
 # 외부 명령 1회의 기본 상한. CMake configure 는 대상 프로젝트가 정한 스크립트를 실행하므로
 # 상한 없이 두면 멈춘 configure 하나가 파이프라인 전체를 붙잡는다(자원 관리, CWE-400).
 DEFAULT_TIMEOUT_S = 3600.0
-# 빌드 설정 지문. 소스·컴파일러·플래그가 바뀌었는데 예전 산출물을 캐시로 재사용하지 않게 한다.
+# 빌드 설정 지문 — 소스·컴파일러·플래그가 바뀌었는데 예전 산출물을 캐시로 재사용하지 않도록
 FINGERPRINT_FILE = ".logosfuzz-build.json"
 
 
@@ -118,6 +118,9 @@ def _coverage_flags() -> List[str]:
 
 class CMakeAdapter:
     """CMake 대상용 빌드 어댑터. ``BuildAdapter`` 계약(emit/build/remove)을 따른다."""
+
+    #: BuildAdapter Protocol 의 build_system (build_summary.json 에 그대로 기록)
+    build_system = "cmake"
 
     def __init__(
         self,
@@ -208,7 +211,11 @@ class CMakeAdapter:
         있으므로, 허용 목록으로 새 환경을 만든다(``common.security.minimal_env``).
         """
         flags = " ".join(self.compile_flags())
-        return minimal_env({"CC": self.cc, "CXX": self.cxx, "CFLAGS": flags, "CXXFLAGS": flags})
+        env = minimal_env({"CC": self.cc, "CXX": self.cxx, "CFLAGS": flags, "CXXFLAGS": flags})
+        if self.coverage:
+            # configure 검사 프로그램의 default.profraw 저장소 루트 유출 방지
+            env["LLVM_PROFILE_FILE"] = str(self.build_dir / "configure-%p.profraw")
+        return env
 
     def _bin_dir(self) -> Path:
         return self.work_dir / ("bin" + COVERAGE_SUFFIX if self.coverage else "bin")
@@ -218,7 +225,7 @@ class CMakeAdapter:
         if len(srcs) != 1:
             raise ValueError(f"하네스 소스는 1개여야 한다(현재 {len(srcs)}개): {srcs}")
         # package·srcs 는 생성기가 정한 값이라 '../' 나 절대경로가 섞이면 작업 디렉터리
-        # 밖을 덮어쓴다. 칸마다 검사하고 결과가 harness/ 안인지 확인한다.
+        # 밖을 덮어쓸 위험. 칸마다 검사하고 결과가 harness/ 안인지 확인
         return safe_join(self.work_dir / "harness", spec.package, srcs[0], what="하네스 경로")
 
     def _binary_file(self, spec: HarnessSpecLike) -> Path:
@@ -232,6 +239,75 @@ class CMakeAdapter:
     # ------------------------------------------------------------------ #
     # prepare: 라이브러리 계측 빌드 (캐시)
     # ------------------------------------------------------------------ #
+    def _cache_entries(self) -> Dict[str, str]:
+        """``CMakeCache.txt`` 를 ``{KEY: VALUE}`` 로 읽는다. 못 읽으면 빈 dict."""
+        try:
+            text = (self.build_dir / "CMakeCache.txt").read_text(
+                encoding="utf-8", errors="replace")
+        except OSError:
+            return {}
+        entries: Dict[str, str] = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith(("#", "//")):
+                continue
+            key, sep, value = line.partition("=")
+            if sep and ":" in key:
+                entries[key.split(":", 1)[0]] = value
+        return entries
+
+    def _same_compiler(self, cached: str) -> bool:
+        """캐시에 박힌 컴파일러가 이 어댑터가 쓰려는 것과 같은가."""
+        wanted = self.compiler
+        if Path(cached).name == Path(wanted).name:
+            return True
+        # ``cc`` 가 clang 을 가리키는 환경도 존재. 실제 경로까지 같으면 동일한 것으로 판정
+        resolved = self._which(wanted)
+        if not resolved:
+            return False
+        try:
+            return Path(cached).resolve() == Path(resolved).resolve()
+        except OSError:
+            return False
+
+    def _cache_mismatch(self) -> str:
+        """캐시가 이 어댑터의 설정과 **다름이 증명되면** 그 이유를, 아니면 빈 문자열.
+
+        CMake 는 캐시가 이미 있으면 ``CC``/``CFLAGS`` 환경변수를 무시하고 캐시에
+        박힌 값을 그대로 쓴다. 그래서 남이(또는 문서의 수동 ``cmake configure`` 가)
+        만들어 둔 캐시 위에서 ``prepare()`` 를 돌리면 **계측 없는 라이브러리가
+        조용히 다시 빌드되고 prepare 는 성공으로 끝난다.** 커버리지도 크래시도
+        나오지 않는데 수치는 그럴듯해서 알아차릴 방법이 없다.
+
+        판정은 보수적으로 한다 — 키가 아예 없으면(= 증명 불가) 일치로 본다.
+        캐시를 지우는 쪽이 비싼 쪽이라, 추측으로 지우지 않는다.
+        """
+        entries = self._cache_entries()
+        prefix = "CMAKE_CXX" if self.profile.language == "cpp" else "CMAKE_C"
+
+        cached_compiler = entries.get(prefix + "_COMPILER", "")
+        if cached_compiler and not self._same_compiler(cached_compiler):
+            return f"컴파일러가 다르다({cached_compiler} != {self.compiler})"
+
+        if prefix + "_FLAGS" in entries:
+            cached_flags = entries[prefix + "_FLAGS"].split()
+            missing = [f for f in self.compile_flags() if f not in cached_flags]
+            if missing:
+                return "계측 플래그가 빠져 있다(" + " ".join(missing) + ")"
+        return ""
+
+    def _discard_build_dir(self) -> Optional[str]:
+        """다시 configure 하려고 빌드 디렉터리를 지운다. 못 지우면 그 이유를 돌려준다."""
+        if not (self.build_dir / "CMakeCache.txt").is_file():
+            return "CMake 빌드 디렉터리가 아니다"
+        try:
+            if self.build_dir.resolve() == self.source_dir.resolve():
+                return "build_dir 이 source_root 와 같다"
+            shutil.rmtree(self.build_dir)
+        except OSError as exc:
+            return f"{exc}"
+        return None
+
     def _source_revision(self) -> str:
         """대상 소스의 git commit(있으면). 외부 명령 없이 .git 을 직접 읽는다."""
         git = self.source_dir / ".git"
@@ -264,14 +340,20 @@ class CMakeAdapter:
     def _is_built(self) -> bool:
         if not (self.build_dir / "CMakeCache.txt").is_file():
             return False
+        if self._cache_mismatch():
+            return False
         if not all(lib.is_file() for lib in self.libraries):
             return False
-        # 지문이 없거나(예전 캐시) 다르면 설정이 바뀐 것이므로 다시 빌드한다.
+        # 지문이 남아 있는데 다르면 설정이 바뀐 것이므로 재빌드
+        # 지문이 없으면(손으로 만든 캐시·지문을 안 남기던 예전 실행) 증명 불가이므로
+        # _cache_mismatch 의 판정을 뒤집지 않음 — 추측으로 캐시를 버리지 않기 위함
         try:
             saved = json.loads(self._fingerprint_path().read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return False
-        return isinstance(saved, dict) and saved.get("fingerprint") == self.build_fingerprint()
+            return True
+        if not isinstance(saved, dict) or "fingerprint" not in saved:
+            return True
+        return saved["fingerprint"] == self.build_fingerprint()
 
     def _write_fingerprint(self) -> Optional[str]:
         """지문을 남긴다. 실패하면 오류 문구를 돌려준다(다음 실행이 캐시를 못 쓸 뿐)."""
@@ -300,6 +382,22 @@ class CMakeAdapter:
                     f"(대상 소스를 source_root 위치에 받아 두었는가?)",
             )
 
+        logs: List[str] = []
+
+        # 남이 만들어 둔 캐시 위에서는 CC/CFLAGS 미적용. 지우고 새로
+        # configure 하지 않으면 계측 없는 라이브러리를 성공으로 넘기게 됨
+        mismatch = self._cache_mismatch()
+        if mismatch:
+            failure = self._discard_build_dir()
+            if failure is not None:
+                return BuildResult(
+                    ok=False, target=target,
+                    log=f"ERROR: 기존 캐시가 이 어댑터의 설정과 다른데({mismatch}) "
+                        f"{self.build_dir} 를 지울 수 없다: {failure}. "
+                        f"직접 지우고 다시 실행하라.",
+                    duration_s=time.monotonic() - started)
+            logs.append(f"INFO: 기존 캐시를 버리고 다시 configure 한다 — {mismatch}")
+
         configure = [
             "cmake", "-S", str(self.source_dir), "-B", str(self.build_dir),
         ]
@@ -310,7 +408,6 @@ class CMakeAdapter:
         build = ["cmake", "--build", str(self.build_dir), "--parallel", str(self.jobs)]
 
         env = self._env()
-        logs: List[str] = []
         for command in (configure, build):
             result = self.runner(command, None, env, self.timeout_s)
             logs.append(result.stdout + result.stderr)

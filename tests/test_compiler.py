@@ -1,10 +1,6 @@
-"""GEN-03 컴파일러 어댑터 위임 단위 테스트.
+"""GEN-03 컴파일러 `-fsanitize=` 플래그 위임 훅 단위 테스트
 
-`-fsanitize=` 플래그를 어댑터(BuildAdapter)에 위임할 수 있게 만든 훅이,
-기본값(어댑터 없음)에서는 기존 동작을 그대로 유지하는지, 그리고 어댑터를
-넘기면 실제로 그쪽 결과가 쓰이는지를 확인한다. B의 BuildAdapter 자체는
-아직 저장소에 없으므로(2026-09-17 기준), 여기서는 그 인터페이스 계약
-(``link_fuzzer: bool -> list[str]``)만 만족하는 콜백으로 대체해 검증한다.
+기본값 동작 유지 및 콜백(``link_fuzzer: bool -> list[str]``) 결과 사용 확인
 """
 
 from logosfuzz.generate.compiler import SubprocessCompiler
@@ -16,7 +12,7 @@ def _draft(language="c"):
                         language=language)
 
 
-# --- 기본값(어댑터 미지정)은 기존 동작과 동일해야 한다 ---------------------
+# --- 기본값(어댑터 미지정): 기존 동작 유지 ----------------------------------
 def test_default_sanitize_flags_unchanged_compile_only():
     c = SubprocessCompiler(sanitizers="address")
     argv = c._build_argv(src_path=__import__("pathlib").Path("a.c"),
@@ -32,7 +28,7 @@ def test_default_sanitize_flags_unchanged_link_fuzzer():
                          out_path=__import__("pathlib").Path("a.out"),
                          language="c")
     assert "-fsanitize=fuzzer,address" in argv
-    assert "-c" not in argv  # 링크까지 하므로 오브젝트 전용 플래그는 없어야 함
+    assert "-c" not in argv  # 링크 포함이므로 오브젝트 전용 플래그 없음
 
 
 def test_empty_sanitizers_emits_no_flag():
@@ -42,7 +38,7 @@ def test_empty_sanitizers_emits_no_flag():
     assert not any(a.startswith("-fsanitize=") for a in argv)
 
 
-# --- 어댑터(콜백)를 넘기면 그 결과가 그대로 쓰인다 --------------------------
+# --- 어댑터(콜백) 지정: 콜백 결과 사용 --------------------------------------
 def test_sanitize_flags_provider_overrides_default():
     calls = []
 
@@ -50,13 +46,13 @@ def test_sanitize_flags_provider_overrides_default():
         calls.append(link_fuzzer)
         return ["-fsanitize=undefined", "-fno-sanitize-recover=undefined"]
 
-    c = SubprocessCompiler(sanitizers="address",  # 제공자가 있으면 무시돼야 함
+    c = SubprocessCompiler(sanitizers="address",  # 제공자 존재 시 무시
                            sanitize_flags_provider=fake_adapter)
     argv = c._build_argv(src_path=__import__("pathlib").Path("a.c"),
                          out_path=__import__("pathlib").Path("a.out"))
     assert "-fsanitize=undefined" in argv
     assert "-fsanitize=address" not in argv
-    assert calls == [False]  # link_fuzzer 기본값이 그대로 전달됐는지
+    assert calls == [False]  # link_fuzzer 기본값 전달 여부
 
 
 def test_sanitize_flags_provider_receives_link_fuzzer_flag():

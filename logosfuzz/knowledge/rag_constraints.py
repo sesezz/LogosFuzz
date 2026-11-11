@@ -1,14 +1,12 @@
-"""EXT-01-02: RAG 제약조건 지식베이스 구축/검색.
+"""EXT-01-02: RAG 제약조건 지식베이스 구축/검색
 
 파이프라인:
-  1. 경로 목록에서 소스를 모은다.
-  2. `logosfuzz.extract.constraint_extractor`로 함수별 제약조건을 추출한다.
-  3. 함수 하나를 문서 하나로 만들어 `logosfuzz.knowledge.rag_index`에 색인한다.
-  4. 하네스 생성기(GEN-03-01)가 질의하면 프롬프트에 넣을 컨텍스트를 돌려준다.
+  1. 경로 목록의 소스 수집
+  2. `logosfuzz.extract.constraint_extractor`로 함수별 제약조건 추출
+  3. 함수 1개 = 문서 1개로 `logosfuzz.knowledge.rag_index`에 색인
+  4. 하네스 생성기(GEN-03-01) 질의 시 프롬프트용 컨텍스트 반환
 
-`compile_commands.json` 수급(구 EXT-01-03)은 걷어냈다. S-CORE 는 Bazel 로 빌드하고
-strict deps·visibility 를 강제하므로 정답은 `bazel query` 만 안다. 대체 경로는
-2주차 `extract/bazel_query.py` 에서 붙는다.
+S-CORE 는 Bazel 빌드라 `compile_commands.json` 대신 `bazel query` 기반 경로 사용 예정
 
 사용법:
   python -m logosfuzz.knowledge.rag_constraints build --paths examples --output build/kb.json
@@ -47,7 +45,7 @@ KIND_PRIORITY = {
 
 
 def build_document(facts: FunctionFacts) -> dict:
-    """함수 하나를 검색 문서로 변환한다."""
+    """함수 하나의 검색 문서 변환"""
     constraints = sorted(
         facts.constraints,
         key=lambda c: (KIND_PRIORITY.get(c.kind, 99), -c.confidence),
@@ -85,7 +83,7 @@ def build_document(facts: FunctionFacts) -> dict:
 
 
 class ConstraintKB:
-    """제약조건 문서 + 검색 인덱스를 함께 들고 다니는 지식베이스."""
+    """제약조건 문서 + 검색 인덱스를 함께 보관하는 지식베이스"""
 
     def __init__(self, documents: Optional[Sequence[dict]] = None,
                  index: Optional[BM25Index] = None,
@@ -140,7 +138,7 @@ class ConstraintKB:
 
     # -- 하네스 생성기용 컨텍스트 -------------------------------------------
     def context_for(self, target: str, top_k: int = 3, max_constraints: int = 12) -> str:
-        """GEN-03-01 프롬프트에 그대로 붙일 수 있는 텍스트 블록을 만든다."""
+        """GEN-03-01 프롬프트에 그대로 붙일 텍스트 블록 생성"""
         documents = self.get_function(target)
         if not documents:
             documents = [hit["document"] for hit in self.search(target, top_k=top_k)]
@@ -199,7 +197,7 @@ class ConstraintKB:
 
 def build_kb(paths: Optional[Sequence[str]] = None,
              output_path: Optional[str] = None, use_dense: bool = False) -> ConstraintKB:
-    """경로 목록으로부터 지식베이스를 만든다."""
+    """경로 목록 기반 지식베이스 구축"""
     if not paths:
         raise ValueError("paths must be provided")
 

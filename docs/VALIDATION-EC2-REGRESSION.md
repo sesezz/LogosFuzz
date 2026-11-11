@@ -54,10 +54,10 @@ HTML/보고서 입력에서 잃어버릴 수 있었다. `logosfuzz summary`에 `
 
 ```bash
 python scripts/prepare_validation_artifacts.py \
-  --legacy validation-summary-ec2-final.json
+  --legacy report/validation-summary-ec2-final.json
 ```
 
-생성된 `validation-summary-ec2-generated-score-fixed.json`은 SCORE 생성
+생성된 `report/validation-summary-ec2-generated-score-fixed.json`은 SCORE 생성
 하네스 최종 실행의 크래시 0·Sanitizer 0·커버리지 216과, GEN 시도/수선 및
 EXT/SCH 대상 수치를 함께 보존한다. 이후 EC2에서 실제 GEN-03-04 게이트를
 100회 smoke로 실행해 DLT(coverage 2), SCORE(coverage 135) 모두 통과했고,
@@ -105,10 +105,12 @@ ground-truth 라벨을 추가하면 같은 JSON 계약에 recall/F1을 계산할
 
 ## 결과 파일
 
-- `validation-summary-ec2-final.json`: 기존 2·4단계 최종 실행 결과
+저장소에 커밋된 것은 `report/` 아래 두 개뿐이고, 나머지는 EC2 실행 기록이다.
+
+- `report/validation-summary-ec2-final.json`: 기존 2·4단계 최종 실행 결과
 - `validation-summary-ec2-score-harness-ana.json`: 생성 SCORE 초기 크래시의 ANA 재분석 결과
 - `ana-score-reachability-ec2.json`: 도달 가능성 근거가 포함된 원본 ANA 결과
-- `validation-summary-ec2-generated-score-fixed.json`: GEN·ANA·대상 선정이 연결된 표준 결과
+- `report/validation-summary-ec2-generated-score-fixed.json`: GEN·ANA·대상 선정이 연결된 표준 결과
 - `validation-target-selection-ec2.json`: EXT/SCH 대상 선정·제약 조건 원본
 - `validation-gen-ec2.json`: 최종 EC2 GEN 생성 메타데이터
 - `validation-gen-gate-ec2.json`: 실제 EC2 GEN-03-04 게이트 결과

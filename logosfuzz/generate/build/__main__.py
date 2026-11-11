@@ -22,6 +22,7 @@ Bazel 프로필은 이 도구 대신 ``ctr_06_01_controller --mode bazel`` 로 �
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
@@ -29,6 +30,8 @@ from typing import Optional, Sequence
 from logosfuzz.common.target_profile import ProfileError, load_profile
 
 from . import HarnessSpec, Runner, adapter_for
+
+logger = logging.getLogger(__name__)  # 예외 상세의 디버그 로그 기록용
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -70,6 +73,11 @@ def main(argv: Optional[Sequence[str]] = None, *, runner: Optional[Runner] = Non
 
     prepared = adapter.prepare(force=args.force)
     print(f"[PREPARE] {'OK' if prepared.ok else 'FAIL'} {prepared.target} ({prepared.duration_s:.1f}s)")
+    # 캐시를 버리고 다시 configure 했다는 사실은 성공 시에도 노출 필요
+    # 조용히 지나가면 "왜 2분이나 걸렸지" 로만 남음
+    for line in prepared.log.splitlines():
+        if line.startswith("INFO: "):
+            print("  " + line)
     if not prepared.ok:
         print(prepared.short_log or prepared.log[-800:], file=sys.stderr)
         return 1
@@ -80,7 +88,10 @@ def main(argv: Optional[Sequence[str]] = None, *, runner: Optional[Runner] = Non
     try:
         source = harness.read_text(encoding="utf-8")
     except OSError as exc:
-        print(f"[BUILD 오류] 하네스를 읽을 수 없다: {harness} ({exc})", file=sys.stderr)
+        logger.debug("하네스 읽기 실패 상세: %s", harness, exc_info=True)
+        # 예외 원문 대신 하네스 경로와 오류 분류명만 출력
+        print(f"[BUILD 오류] 하네스를 읽을 수 없다: {harness} ({type(exc).__name__})",
+              file=sys.stderr)
         return 2
 
     spec = HarnessSpec(name=args.name or harness.stem, srcs=(harness.name,))

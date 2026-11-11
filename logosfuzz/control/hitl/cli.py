@@ -2,7 +2,7 @@
 CTR-06-02 HITL 인터페이스 - CLI (`logosfuzz review`)
 ====================================================
 
-사람이 대기 중인 리뷰 항목을 처리하는 명령줄 인터페이스.
+사람이 대기 중인 리뷰 항목을 처리하는 명령줄 인터페이스
 
 사용 예:
     logosfuzz review list [--project P] [--all]
@@ -14,11 +14,12 @@ CTR-06-02 HITL 인터페이스 - CLI (`logosfuzz review`)
     logosfuzz review stats
 
 이 모듈은 argparse 서브파서를 조립해 반환하는 build_parser()와,
-상위 logosfuzz CLI에 연결하기 위한 register(subparsers) 진입점을 제공한다.
+상위 logosfuzz CLI에 연결하기 위한 register(subparsers) 진입점을 제공
 """
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from typing import List, Optional
 
@@ -26,6 +27,8 @@ from .gate import HITLManager
 from .models import Checkpoint, DecisionType, ReviewItem, ReviewStatus
 from .policy import HITLPolicy
 from .store import JsonReviewStore
+
+logger = logging.getLogger(__name__)  # 예외 상세의 디버그 로그 기록용
 
 
 # --------------------------------------------------------------------------- #
@@ -101,19 +104,29 @@ def _cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_decide_error(item_id: str, exc: Exception) -> None:
+    """결정 실패 안내 (예외 원문 대신 항목 번호와 상황 설명만 출력, 상세는 디버그 로그)"""
+    logger.debug("리뷰 항목 결정 실패 상세: %s", item_id, exc_info=exc)
+    if isinstance(exc, KeyError):
+        print(f"오류: 리뷰 항목을 찾을 수 없음: {item_id}", file=sys.stderr)
+    else:
+        print(f"오류: 리뷰 항목 #{item_id} 처리 불가 — 이미 처리된 항목 또는 잘못된 입력값",
+              file=sys.stderr)
+
+
 def _decide(args: argparse.Namespace, dtype: DecisionType) -> int:
     m = _manager(args)
     try:
         it = m.decide(args.id, dtype, comment=getattr(args, "message", "") or "")
     except (KeyError, ValueError) as e:
-        print(f"오류: {e}", file=sys.stderr)
+        _print_decide_error(args.id, e)
         return 1
     print(f"#{it.id} → {it.status.value}")
     return 0
 
 
 def _cmd_edit(args: argparse.Namespace) -> int:
-    """payload 일부를 고쳐 승인(EDIT). 크래시 게이트에서 정/오탐을 뒤집을 때 쓴다."""
+    """payload 일부를 고쳐 승인(EDIT). 크래시 게이트에서 정/오탐을 뒤집을 때 사용"""
     m = _manager(args)
     it = m.get(args.id)
     if it is None:
@@ -130,7 +143,7 @@ def _cmd_edit(args: argparse.Namespace) -> int:
         it = m.decide(args.id, DecisionType.EDIT, comment=args.message or "",
                       edited_payload=edited)
     except (KeyError, ValueError) as e:
-        print(f"오류: {e}", file=sys.stderr)
+        _print_decide_error(args.id, e)
         return 1
     print(f"#{it.id} → {it.status.value}")
     return 0
@@ -149,7 +162,7 @@ def _cmd_stats(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 def register(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """
-    상위 logosfuzz 파서에 `review` 서브커맨드를 등록한다.
+    상위 logosfuzz 파서에 `review` 서브커맨드를 등록
 
         p = argparse.ArgumentParser(prog="logosfuzz")
         sub = p.add_subparsers(dest="command")
@@ -194,7 +207,7 @@ def register(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """review 서브커맨드만 담은 독립 실행용 파서(테스트/단독 실행)."""
+    """review 서브커맨드만 담은 독립 실행용 파서(테스트/단독 실행)"""
     parser = argparse.ArgumentParser(prog="logosfuzz")
     sub = parser.add_subparsers(dest="command", required=True)
     register(sub)

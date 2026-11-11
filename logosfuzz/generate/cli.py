@@ -5,21 +5,24 @@ GEN-03 하네스 생성 - CLI (`logosfuzz generate`)
     logosfuzz generate --model <name> --max-round <n> [--project P]
                        [--cc clang] [--demo]
 
-- 기본: SubprocessCompiler + OpenAILLMClient(골격) 조합. LLM 미연결 시 안내.
-- --demo: FakeCompiler + ScriptedLLMClient로 루프 흐름을 즉시 시연.
+- 기본: SubprocessCompiler + OpenAILLMClient(골격) 조합. LLM 미연결 시 안내
+- --demo: FakeCompiler + ScriptedLLMClient로 루프 흐름을 즉시 시연
 
-상위 logosfuzz CLI에는 register(subparsers)로 붙인다.
+상위 logosfuzz CLI에는 register(subparsers)로 연결
 """
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from typing import List, Optional
 
 from .compiler import FakeCompiler, SubprocessCompiler
-from .llm import OpenAILLMClient, ScriptedLLMClient
+from .llm import OpenAILLMClient, ScriptedLLMClient, default_gen_model
 from .models import HarnessDraft, HealRound
 from .selfheal import SelfHealLoop, summarize
+
+logger = logging.getLogger(__name__)  # 예외 상세의 디버그 로그 기록용
 
 
 def _print_round(rnd: HealRound) -> None:
@@ -55,7 +58,7 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     else:
         compiler = SubprocessCompiler(cc=args.cc)
         llm = OpenAILLMClient(model=args.model)
-        # 실사용에서는 GEN-03-01 초안 생성기가 drafts를 제공한다.
+        # 실사용에서는 GEN-03-01 초안 생성기가 drafts를 제공
         print("※ 실사용 모드: GEN-03-01 초안 생성기를 연결해 drafts를 공급하세요.",
               file=sys.stderr)
         print("  지금은 데모 초안으로 대체합니다(--demo 권장).", file=sys.stderr)
@@ -66,8 +69,15 @@ def _cmd_generate(args: argparse.Namespace) -> int:
         try:
             from ..control.hitl import HITLManager, HITLPolicy
             hitl = HITLManager.create(policy=HITLPolicy.default())
-        except Exception as e:
-            print(f"HITL 연결 실패(무시): {e}", file=sys.stderr)
+        except ImportError as e:  # HITL 모듈 로드 실패
+            logger.debug("HITL 모듈 로드 실패 상세", exc_info=True)
+            # 예외 원문 대신 상황 설명과 오류 분류명만 출력
+            print(f"HITL 연결 실패(무시, 모듈 로드): {type(e).__name__}", file=sys.stderr)
+        except (OSError, ValueError) as e:  # 리뷰 저장소 경로·정책 값 오류
+            logger.debug("HITL 연결 실패 상세", exc_info=True)
+            # 예외 원문 대신 상황 설명과 오류 분류명만 출력
+            print(f"HITL 연결 실패(무시): 리뷰 저장소 경로·정책 값 확인 필요 ({type(e).__name__})",
+                  file=sys.stderr)
 
     loop = SelfHealLoop(
         compiler=compiler, llm=llm, max_round=args.max_round,
@@ -94,7 +104,8 @@ def _cmd_generate(args: argparse.Namespace) -> int:
 
 def register(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = subparsers.add_parser("generate", help="LLM 하네스 생성 + 자가 치유 (GEN-03)")
-    p.add_argument("--model", default="gpt-4o-mini", help="LLM 모델명")
+    p.add_argument("--model", default=default_gen_model(),
+                   help="LLM 모델명 (기본: gpt-4o, LOGOSFUZZ_GEN_MODEL로 변경 가능)")
     p.add_argument("--max-round", type=int, default=3, help="자가 치유 최대 반복 횟수")
     p.add_argument("--project", help="프로젝트명")
     p.add_argument("--cc", default="clang", help="컴파일러 실행 파일")

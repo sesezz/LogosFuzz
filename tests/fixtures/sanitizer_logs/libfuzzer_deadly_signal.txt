@@ -1,0 +1,46 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: <SEED>
+INFO: Loaded 1 modules   (61966 inline 8-bit counters): 61966 [<ADDR>, <ADDR>), 
+INFO: Loaded 1 PC tables (61966 PCs): 61966 [<ADDR>,<ADDR>), 
+INFO: -max_len is not provided; libFuzzer will not generate inputs larger than 4096 bytes
+INFO: A corpus is not provided, starting from an empty corpus
+=================================================================
+==<PID>== ERROR: libFuzzer: deadly signal
+    #0 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #1 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #2 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #3 <ADDR>  (/lib/x86_64-linux-gnu/libc.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #4 <ADDR>  (/lib/x86_64-linux-gnu/libc.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #5 <ADDR>  (/lib/x86_64-linux-gnu/libc.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #6 <ADDR>  (/lib/x86_64-linux-gnu/libc.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #7 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #8 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #9 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #10 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #11 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #12 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #13 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #14 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #15 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #16 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #17 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #18 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #19 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #20 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+    #21 <ADDR>  (/lib/x86_64-linux-gnu/libc.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #22 <ADDR>  (/lib/x86_64-linux-gnu/libc.so.6+<ADDR>) (BuildId: <BUILDID>)
+    #23 <ADDR>  (/harness/sndfile_manual_fuzz+<ADDR>) (BuildId: <BUILDID>)
+
+NOTE: libFuzzer has rudimentary signal handlers.
+      Combine libFuzzer with AddressSanitizer or similar for better crash reports.
+SUMMARY: libFuzzer: deadly signal
+MS: 2 CrossOver-CopyPart-; base unit: <SHA1>
+0x0,0x0,0x0,0x0,0x1,0x0,0x0,0x0,0x1,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x27,0x0,0xb4,
+\000\000\000\000\001\000\000\000\001\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000'\000\264
+artifact_prefix='/out/crashes/'; Test unit written to /out/crashes/crash-<SHA1>
+Base64: AAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJwC0
+stat::number_of_executed_units: 718915
+stat::average_exec_per_sec:     28756
+stat::new_units_added:          140
+stat::slowest_unit_time_sec:    0
+stat::peak_rss_mb:              410

@@ -1,4 +1,4 @@
-"""ANA-05-03 STEP 3(HITL 승인/거부 처리) 단위 테스트."""
+"""ANA-05-03 STEP 3(HITL 승인/거부 처리) 단위 테스트"""
 from __future__ import annotations
 
 import unittest

@@ -1,7 +1,7 @@
-"""파이프라인 공용 데이터 모델.
+"""파이프라인 공용 데이터 모델
 
-SCH(Schedule) 단계가 산출한 Logic Group을 EXE(Execute) 단계가 소비한다.
-EXE-04-03(타임아웃 임계치 조정)은 그룹에 결합된 실시간 제약 신호를 참조한다.
+SCH(Schedule) 단계가 산출한 Logic Group을 EXE(Execute) 단계가 소비
+EXE-04-03(타임아웃 임계치 조정)은 그룹에 결합된 실시간 제약 신호를 참조
 """
 
 from __future__ import annotations
@@ -17,15 +17,15 @@ SIGNAL_UDS_P2 = "uds_p2"           # UDS 서버 응답(P2/P2*) 타이밍
 
 @dataclass(frozen=True)
 class RealtimeSignal:
-    """Logic Group에 결합된 실시간성 제약 신호 1건.
+    """Logic Group에 결합된 실시간성 제약 신호 1건
 
     EXT-01-02(RAG 파서 기반 문서 제약 조건 추출)가 규격서(CAN/UDS 등)에서
-    추출하여 지식베이스에 적재하고, SCH 단계가 그룹에 결합한다.
+    추출하여 지식베이스에 적재하고, SCH 단계가 그룹에 결합
 
     Attributes:
-        kind: 신호 종류. ``SIGNAL_*`` 상수 중 하나를 권장.
-        period_ms: 주기/데드라인 (밀리초). 반드시 양수.
-        source: 산정 근거 출처(규격서명·헤더 등). 로그/추적용.
+        kind: 신호 종류. ``SIGNAL_*`` 상수 중 하나 권장
+        period_ms: 주기/데드라인 (밀리초). 반드시 양수
+        source: 산정 근거 출처(규격서명·헤더 등). 로그/추적용
     """
 
     kind: str
@@ -42,15 +42,15 @@ class RealtimeSignal:
 
 @dataclass
 class LogicGroup:
-    """SCH-02-01에서 패키징된 상태 기반 로직 그룹.
+    """SCH-02-01에서 패키징된 상태 기반 로직 그룹
 
     Attributes:
-        group_id: 그룹 고유 식별자.
-        name: 사람이 읽는 그룹명.
-        api_set: 그룹에 속한 대상 API 이름 목록.
-        priority: SCH-02-02 시너지 점수 기반 퍼징 우선순위(높을수록 먼저).
-        realtime_signals: 그룹에 결합된 실시간성 제약 신호 목록.
-            비어 있으면 EXE-04-03이 안전 기본값으로 폴백한다.
+        group_id: 그룹 고유 식별자
+        name: 사람이 읽는 그룹명
+        api_set: 그룹에 속한 대상 API 이름 목록
+        priority: SCH-02-02 시너지 점수 기반 퍼징 우선순위(높을수록 먼저)
+        realtime_signals: 그룹에 결합된 실시간성 제약 신호 목록
+            비어 있으면 EXE-04-03이 안전 기본값으로 폴백
     """
 
     group_id: str

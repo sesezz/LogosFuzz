@@ -1,21 +1,23 @@
-"""퍼징 실시간 통계 파싱/표시.
+"""퍼징 실시간 통계 파싱/표시
 
-설계서 EXE-04-00: exec/s, coverage, crash 수를 라이브로 갱신 출력.
-EXE-04-01에서는 libFuzzer/AFL++ 표준 출력에서 핵심 지표를 추출하는
-경량 파서만 제공한다. 정밀 coverage 계측(EXE-04-04)과 ASAN/TSAN 스트림
-정밀 전처리(EXE-04-02)는 이후 주차에서 이 모듈을 확장한다.
+설계서 EXE-04-00: exec/s, coverage, crash 수 실시간 갱신 출력
+libFuzzer/AFL++ 표준 출력의 핵심 지표 추출용 경량 파서
 """
 
 from __future__ import annotations
 
 import re
 import sys
+import time
 from dataclasses import dataclass
 
 
 # libFuzzer 진행 라인 예: "#1024 pulse cov: 231 ft: 512 exec/s: 512 ..."
-# 필드가 라인마다 가변적이라 필드별로 독립 검색한다.
-_LF_EXECS = re.compile(r"^#(\d+)\s+\w+")
+# fork 모드(-fork=N) 라인 예: "#1201: cov: 6 ft: 6 corp: 1 exec/s: 0 oom/timeout/crash: 0/0/1 ..."
+# 라인마다 필드가 가변적이므로 필드별 독립 검색
+_LF_EXECS = re.compile(r"^#(\d+):?\s+\w+")
+# fork 모드 누적 결함 수 (oom/timeout/crash)
+_LF_FORK_FAULTS = re.compile(r"\boom/timeout/crash:\s*(\d+)/(\d+)/(\d+)")
 _LF_COV = re.compile(r"\bcov:\s*(\d+)", re.IGNORECASE)
 _LF_EPS = re.compile(r"\bexec/s:\s*(\d+)", re.IGNORECASE)
 # AFL++ status 라인 일부 예: "corpus count : 120", "exec speed : 900/sec"
@@ -26,7 +28,7 @@ _AFL_CRASHES = re.compile(r"(?:uniq crashes|saved crashes)\s*:\s*(\d+)", re.IGNO
 
 @dataclass
 class LiveStats:
-    """단일 로직 그룹의 누적 통계."""
+    """단일 로직 그룹의 누적 통계"""
 
     group: str
     execs: int = 0
@@ -35,7 +37,7 @@ class LiveStats:
     crashes: int = 0
 
     def update_from_line(self, line: str) -> bool:
-        """엔진 출력 한 줄을 반영. 값이 갱신되면 True."""
+        """엔진 출력 한 줄 반영 (값 갱신 시 True)"""
         changed = False
 
         stripped = line.strip()
@@ -49,6 +51,10 @@ class LiveStats:
             me = _LF_EPS.search(stripped)
             if me:
                 self.exec_per_sec = float(me.group(1))
+            mf = _LF_FORK_FAULTS.search(stripped)
+            if mf:
+                total = sum(int(g) for g in mf.groups())
+                self.crashes = max(self.crashes, total)
 
         m = _AFL_EXEC_SPEED.search(line)
         if m:
@@ -65,31 +71,49 @@ class LiveStats:
 
         return changed
 
-    def render(self) -> str:
+    def rate(self, elapsed_sec: float) -> float:
+        """실행 속도. 엔진이 알려준 값이 0이면 실행 수/경과 시간으로 보정한다.
+
+        libFuzzer 는 1초가 안 되는 구간에서 ``exec/s: 0`` 을 찍고, 종료 요약도
+        ``stat::average_exec_per_sec: 0`` 으로 남긴다. 그대로 쓰면 수만 번
+        실행한 그룹의 속도가 0으로 보고돼(실측: execs=12302 · exec_per_sec=0.0)
+        리포트에서 "하네스가 안 돌았다" 와 구분되지 않는다.
+        """
+        if self.exec_per_sec > 0:
+            return self.exec_per_sec
+        if elapsed_sec > 0 and self.execs:
+            return round(self.execs / elapsed_sec, 1)
+        return 0.0
+
+    def render(self, elapsed_sec: float = 0.0) -> str:
         return (
-            f"[{self.group}] exec/s={self.exec_per_sec:>8.0f} "
+            f"[{self.group}] exec/s={self.rate(elapsed_sec):>8.0f} "
             f"cov={self.coverage:>6d} crashes={self.crashes:>3d} "
             f"execs={self.execs}"
         )
 
 
 class StatsMonitor:
-    """라이브 통계를 한 줄로 갱신 출력하는 경량 모니터.
+    """실시간 통계 한 줄 갱신 출력 모니터 (stream 주입 가능)"""
 
-    stream 인자를 주입할 수 있어 테스트에서 캡처가 가능하다.
-    """
-
-    def __init__(self, stats: LiveStats, stream=sys.stdout, live: bool = True):
+    def __init__(self, stats: LiveStats, stream=sys.stdout, live: bool = True,
+                 clock=time.monotonic):
         self.stats = stats
         self.stream = stream
         self.live = live
+        # 엔진이 exec/s 를 0으로 찍는 구간에서도 속도를 보여주기 위한 기준 시각.
+        self.clock = clock
+        self.started_at = clock()
+
+    def _elapsed(self) -> float:
+        return max(0.0, self.clock() - self.started_at)
 
     def feed(self, line: str) -> None:
         if self.stats.update_from_line(line) and self.live:
-            self.stream.write("\r" + self.stats.render())
+            self.stream.write("\r" + self.stats.render(self._elapsed()))
             self.stream.flush()
 
     def finish(self) -> None:
         if self.live:
-            self.stream.write("\r" + self.stats.render() + "\n")
+            self.stream.write("\r" + self.stats.render(self._elapsed()) + "\n")
             self.stream.flush()

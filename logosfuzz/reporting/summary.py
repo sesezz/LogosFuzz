@@ -1,16 +1,14 @@
-"""EXE·ANA 결과를 웹과 보고서가 함께 사용하는 JSON으로 정규화한다.
+"""EXE·ANA 결과를 웹·보고서 공용 JSON으로 정규화
 
-실행기(``fuzz_summary.json``)와 분석기(``analyze`` 출력)는 서로 다른
-목적의 산출물이다. 이 모듈은 두 산출물을 보존하면서도, 화면과 보고서가
-안정적으로 읽을 수 있는 최소 계약을 제공한다.
+실행기(``fuzz_summary.json``)·분석기(``analyze`` 출력) 원문 보존 + 화면·보고서용 최소 계약 제공
 
 계약 원칙
 ---------
-* ``schema_version``으로 형식 변경을 명시한다.
-* 실행 결과의 원문 필드는 ``run`` 아래에 보존한다.
-* ANA 결과의 원문 필드는 ``analysis`` 아래에 보존한다.
-* 화면에 바로 쓸 집계값은 ``metrics``와 ``run.groups``에 둔다.
-* 새 필드는 선택적으로 추가할 수 있지만 기존 필드의 의미를 바꾸지 않는다.
+* ``schema_version``으로 형식 변경 명시
+* 실행 결과 원문 필드는 ``run`` 아래 보존
+* ANA 결과 원문 필드는 ``analysis`` 아래 보존
+* 화면용 집계값은 ``metrics``와 ``run.groups``에 배치
+* 새 필드는 선택적 추가만 허용, 기존 필드 의미 변경 금지
 """
 
 from __future__ import annotations
@@ -42,7 +40,7 @@ def profile_metadata(profile: Any, **extra: Any) -> dict[str, Any]:
 
 
 class ValidationSummaryError(ValueError):
-    """검증 결과 JSON이 공유 계약을 만족하지 않을 때 발생한다."""
+    """검증 결과 JSON의 공유 계약 위반 시 발생"""
 
 
 def _now_iso() -> str:
@@ -50,7 +48,7 @@ def _now_iso() -> str:
 
 
 def load_json(path: str | Path) -> dict[str, Any]:
-    """UTF-8 JSON 파일을 읽고 최상위 객체인지 확인한다."""
+    """UTF-8 JSON 파일 로드 및 최상위 객체 여부 확인"""
     source = Path(path)
     try:
         value = json.loads(source.read_text(encoding="utf-8"))
@@ -201,11 +199,9 @@ def _normalise_analysis(analysis: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def _normalise_generation(generation: Mapping[str, Any] | None) -> dict[str, Any]:
-    """GEN-03-04 품질 게이트 결과를 화면용 요약으로 정규화한다.
+    """GEN-03-04 품질 게이트 결과를 화면용 요약으로 정규화
 
-    ``gen_validation_summary.json``은 라운드별 상세 리포트를 포함할 수 있어
-    그대로 HTML에 넣으면 결과 파일이 불필요하게 커진다. 최종 상태·라운드 수·
-    실패 단계·로그 경로처럼 재현과 보고서에 필요한 정보만 보존한다.
+    HTML 크기 억제를 위해 최종 상태·라운드 수·실패 단계·로그 경로만 보존
     """
     if generation is None:
         return {
@@ -217,9 +213,8 @@ def _normalise_generation(generation: Mapping[str, Any] | None) -> dict[str, Any
         }
 
     source = dict(generation)
-    # 최종 EC2 기록에는 GEN 실행 메타데이터가 ``real.{dlt,score}``로
-    # 남아 있을 수 있다. GEN-03-04 파이프라인 산출물(outcomes)이 아직
-    # 없다는 사실을 숨기지 않고, 생성/수선 산출물만 별도 상태로 보존한다.
+    # 최종 EC2 기록의 ``real.{dlt,score}`` GEN 메타데이터 처리
+    # GEN-03-04 산출물(outcomes) 부재는 그대로 드러내고 생성/수선 산출물만 별도 상태로 보존
     compact_real = source.get("real")
     if isinstance(compact_real, Mapping) and not isinstance(source.get("outcomes"), list):
         compact_groups: list[dict[str, Any]] = []
@@ -279,8 +274,8 @@ def _normalise_generation(generation: Mapping[str, Any] | None) -> dict[str, Any
         total = len(groups)
     if validated + failed > total:
         total = validated + failed
-    # 파일을 명시적으로 전달했다면 그룹이 0개인 검증도 정상 완료로
-    # 기록한다(대상 미생성/빈 입력과 파일 자체 누락을 구분하기 위함).
+    # 파일을 명시적으로 전달한 경우 그룹 0개도 정상 완료로 기록
+    # (빈 입력과 파일 누락 구분 목적)
     status = str(source.get("status") or "completed")
     if status not in {"completed", "not_run", "failed"}:
         status = "completed"
@@ -299,7 +294,7 @@ def _normalise_generation(generation: Mapping[str, Any] | None) -> dict[str, Any
 
 
 def _normalise_selection(selection: Mapping[str, Any] | None) -> dict[str, Any]:
-    """EXT/SCH 대상 선정·제약 조건 결과를 공통 배열로 정규화한다."""
+    """EXT/SCH 대상 선정·제약 조건 결과를 공통 배열로 정규화"""
     if selection is None:
         return {"status": "not_run", "targets": []}
 
@@ -308,7 +303,7 @@ def _normalise_selection(selection: Mapping[str, Any] | None) -> dict[str, Any]:
     if isinstance(raw_targets, list):
         candidates = raw_targets
     else:
-        # 기존 검증 보고서(ext_sch)의 ``{target_name: result}`` 형식도 수용한다.
+        # 기존 검증 보고서(ext_sch)의 ``{target_name: result}`` 형식도 수용
         candidates = [
             {"target": name, **value}
             for name, value in source.items()
@@ -570,13 +565,13 @@ def build_validation_summary(
     selection_summary: Mapping[str, Any] | None = None,
     build_summary: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """실행 요약과 선택적인 ANA 결과를 표준 검증 결과로 묶는다.
+    """실행 요약과 선택적 ANA 결과를 표준 검증 결과로 결합
 
-    ``run_summary``는 ``FuzzSession``이 쓰는 ``fuzz_summary.json`` 형식,
-    ``analysis_summary``는 ``logosfuzz analyze``의 출력 형식을 받는다.
+    ``run_summary``: ``FuzzSession``의 ``fuzz_summary.json`` 형식
+    ``analysis_summary``: ``logosfuzz analyze`` 출력 형식
     ``build_summary``는 CTR-06-01 BUILD 단계의 ``build_summary.json``이며,
     주면 그룹에 빌드 단위 필드를 붙이고 ``build_units`` 집계를 채운다.
-    누락된 선택 필드는 안전한 기본값으로 채우고 원문 분석 결과는 보존한다.
+    누락 선택 필드는 안전한 기본값으로 채움, 원문 분석 결과는 보존
     """
     if not isinstance(run_summary, Mapping):
         raise ValidationSummaryError("run_summary는 JSON 객체여야 합니다")
@@ -634,7 +629,7 @@ def build_validation_summary(
 
 
 def validate_validation_summary(data: Mapping[str, Any]) -> None:
-    """공유 계약의 필수 필드와 기본 타입을 검증한다."""
+    """공유 계약의 필수 필드·기본 타입 검증"""
     if not isinstance(data, Mapping):
         raise ValidationSummaryError("검증 결과는 JSON 객체여야 합니다")
     if data.get("schema_version") != SUMMARY_SCHEMA_VERSION:
@@ -679,7 +674,7 @@ def validate_validation_summary(data: Mapping[str, Any]) -> None:
 
 
 def write_validation_summary(path: str | Path, data: Mapping[str, Any]) -> Path:
-    """검증 결과를 UTF-8 JSON으로 원자적으로 저장한다."""
+    """검증 결과를 UTF-8 JSON으로 원자적 저장"""
     validate_validation_summary(data)
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,4 @@
-"""검증 결과를 공유 가능한 JSON 형식으로 정규화한다."""
+"""검증 결과를 공유 가능한 JSON 형식으로 정규화"""
 
 from .summary import (
     SUMMARY_SCHEMA_VERSION,

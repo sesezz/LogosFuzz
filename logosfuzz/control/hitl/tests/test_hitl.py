@@ -1,4 +1,4 @@
-"""CTR-06-02 HITL 골격 단위 테스트."""
+"""CTR-06-02 HITL 골격 단위 테스트"""
 from __future__ import annotations
 
 import unittest

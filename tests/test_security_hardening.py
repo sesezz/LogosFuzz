@@ -75,7 +75,7 @@ def test_minimal_env_drops_secrets_and_keeps_toolchain_basics():
 
 
 def test_redact_secrets_masks_tokens_env_values_and_assignments():
-    text = (f"key={FAKE_SECRET}\nOPENAI_API_KEY=abc123def456ghi\n"
+    text = (f"key={FAKE_SECRET}\nOPENAI_API_KEY=abc123def456ghi\n"  # gitleaks:allow (마스킹 시험용 가짜 값)
             "int token_len = sizeof(x);\nleaked DBVALUE-zzzzzzzzzz here")
     out = redact_secrets(text, env={"DB_PASSWORD": "DBVALUE-zzzzzzzzzz"})
     assert FAKE_SECRET not in out and "abc123def456ghi" not in out

@@ -2,10 +2,10 @@
 CTR-06-02 HITL 인터페이스 - 리뷰 항목 저장소
 ============================================
 
-리뷰 항목(ReviewItem)의 영속화를 담당한다.
+리뷰 항목(ReviewItem)의 영속화를 담당
 
-- ReviewStore: 추상 인터페이스. 향후 SQLite/Vector DB 백엔드로 교체 가능하도록 분리.
-- JsonReviewStore: 스켈레톤 기본 구현. 프로젝트별 JSON 파일(append-friendly)에 저장.
+- ReviewStore: 추상 인터페이스. 향후 SQLite/Vector DB 백엔드로 교체 가능하도록 분리
+- JsonReviewStore: 스켈레톤 기본 구현. 프로젝트별 JSON 파일(append-friendly)에 저장
 
 기본 저장 경로: <workdir>/.logosfuzz/hitl/reviews.json
 """
@@ -29,7 +29,7 @@ from .models import Checkpoint, ReviewItem, ReviewStatus
 
 
 class ReviewStore(ABC):
-    """리뷰 항목 저장소 인터페이스."""
+    """리뷰 항목 저장소 인터페이스"""
 
     @abstractmethod
     def add(self, item: ReviewItem) -> ReviewItem: ...
@@ -55,7 +55,7 @@ class ReviewStore(ABC):
 
 class JsonReviewStore(ReviewStore):
     """
-    JSON 파일 기반 저장소(스켈레톤 기본값).
+    JSON 파일 기반 저장소(스켈레톤 기본값)
 
     스레드 락으로 단일 프로세스 내 동시 접근을, POSIX 에서는 ``<path>.lock`` 파일
     락(fcntl.flock)으로 같은 호스트의 다중 프로세스 접근을 보호한다. 쓰기는
@@ -108,20 +108,24 @@ class JsonReviewStore(ReviewStore):
     def _write_disk(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = [it.to_dict() for it in self._items.values()]
-        # 원자적 쓰기: 같은 디렉터리의 고유 임시 파일(0600)에 쓴 뒤 교체.
-        # 고정 이름(.tmp)을 쓰면 두 프로세스가 같은 임시 파일을 덮어쓴다.
+        # 원자적 쓰기: 같은 디렉터리의 고유 임시 파일(0600)에 쓴 뒤 교체
+        # 고정 이름(.tmp)은 두 프로세스가 같은 임시 파일을 덮어쓸 위험
         fd, tmp_name = tempfile.mkstemp(prefix=self.path.name + ".", suffix=".tmp",
                                         dir=str(self.path.parent))
+        replaced = False
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(json.dumps(data, ensure_ascii=False, indent=2))
                 fh.flush()
                 os.fsync(fh.fileno())
             os.replace(tmp_name, self.path)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_name)
-            raise
+            replaced = True
+        finally:
+            # 교체 전에 빠져나간 모든 경로(예외·인터럽트)에서 임시 파일 정리.
+            # 예외는 그대로 올라가고 승인 기록은 기존대로 호출자가 실패로 본다.
+            if not replaced:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_name)
 
     def _flush(self) -> None:
         self._write_disk()
@@ -137,7 +141,7 @@ class JsonReviewStore(ReviewStore):
             self._flush()
             return
         with self._process_lock():
-            # 디스크가 기준이다: 다른 프로세스가 추가·수정한 항목을 먼저 반영한다.
+            # 디스크 기준 — 다른 프로세스가 추가·수정한 항목을 먼저 반영
             merged = self._read_disk()
             merged[item.id] = item
             self._items = merged
@@ -185,7 +189,7 @@ class JsonReviewStore(ReviewStore):
 
 
 class InMemoryReviewStore(JsonReviewStore):
-    """테스트/데모용 - 디스크에 쓰지 않는 인메모리 저장소."""
+    """테스트/데모용 - 디스크에 쓰지 않는 인메모리 저장소"""
 
     def __init__(self) -> None:
         super().__init__(path=None)

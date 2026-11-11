@@ -388,19 +388,19 @@ git checkout validation/step2-step4
 python -m pytest -q                      # 398 passed
 
 # ANA 재검증 (정답 20건, 3회 반복)
-python <스크래치패드>/step1/run_triage_eval20.py --repeat 3
+python <실험 디렉터리>/step1/run_triage_eval20.py --repeat 3
 
 # 2단계 (Magma libpng)
-docker build -t magma-bench <스크래치패드>/step2b
+docker build -t magma-bench <실험 디렉터리>/step2b
 docker run --rm -v <work>:/work -v <magma>:/magma magma-bench bash -lc "bash build_libpng.sh"
-python <스크래치패드>/step2b/run_step2b.py --seconds 900 --model gpt-4o
+python <실험 디렉터리>/step2b/run_step2b.py --seconds 900 --model gpt-4o
 
 # 4단계 / S-CORE
-python <스크래치패드>/step4/run_step4.py --groups 5 --seconds 240
-python <스크래치패드>/step5/run_step5.py --seconds 300 --model gpt-4o
+python <실험 디렉터리>/step4/run_step4.py --groups 5 --seconds 240
+python <실험 디렉터리>/step5/run_step5.py --seconds 300 --model gpt-4o
 ```
 
-실험 스크립트와 원시 결과는 세션 스크래치패드에 있고 git 에는 없다. 저장소에
+실험 스크립트와 원시 결과는 로컬 실험 디렉터리에 있고 git 에는 없다. 저장소에
 반영된 것은 코드 수정과 회귀 테스트, 이 문서뿐이다.
 
 ## 9. 보안 메모

@@ -3,9 +3,9 @@ CTR-06-02 HITL 인터페이스 - 개입 정책
 =====================================
 
 각 Checkpoint를 "완전 자동(AUTO)"으로 통과시킬지, "사람 검토 필수(MANUAL)"로
-막을지, 아니면 "조건부(CONDITIONAL)"로 특정 조건에서만 사람을 부를지 결정한다.
+막을지, 아니면 "조건부(CONDITIONAL)"로 특정 조건에서만 사람을 부를지 결정
 
-이 정책 한 곳만 바꾸면 파이프라인을 완전 자동 운전 <-> 사람 감독 운전으로 전환할 수 있다.
+이 정책 한 곳만 바꾸면 파이프라인을 완전 자동 운전 <-> 사람 감독 운전으로 전환 가능
 """
 from __future__ import annotations
 
@@ -57,11 +57,11 @@ class CheckpointRule:
 # 기본 조건부 판정 함수들 (스켈레톤 예시 - 실제 임계값은 팀에서 조정)
 # --------------------------------------------------------------------------- #
 def _low_confidence_crash(item: ReviewItem) -> bool:
-    """ANA 정탐/오탐 신뢰도가 낮거나, 판별기가 판정을 못 냈으면 사람 확인을 요청.
+    """ANA 정탐/오탐 신뢰도가 낮거나 판별기가 판정을 못 냈으면 사람 확인 요청
 
-    ``needs_review`` 는 신뢰도와 무관하게 사람에게 보낸다. 규칙 기반 판별기는
+    ``needs_review`` 는 신뢰도와 무관하게 사람에게 전달. 규칙 기반 판별기는
     점수가 0.5 근처일수록 needs_review 의 신뢰도를 높게(최대 0.9) 매기므로, 신뢰도만
-    보면 "판정 불가" 크래시가 자동 승인돼 검증 목록에 섞인다.
+    보면 "판정 불가" 크래시가 자동 승인돼 검증 목록에 섞이는 문제
     """
     verdict = item.payload.get("llm_verdict") or item.payload.get("verdict")
     if verdict == "needs_review":
@@ -71,13 +71,13 @@ def _low_confidence_crash(item: ReviewItem) -> bool:
 
 
 def _harness_compile_failed(item: ReviewItem) -> bool:
-    """컴파일 실패한 하네스만 사람 검토(성공본은 자동 통과)."""
+    """컴파일 실패한 하네스만 사람 검토(성공본은 자동 통과)"""
     return not bool(item.payload.get("compile_ok", False))
 
 
 @dataclass
 class HITLPolicy:
-    """체크포인트별 규칙 모음."""
+    """체크포인트별 규칙 모음"""
     rules: Dict[Checkpoint, CheckpointRule] = field(default_factory=dict)
     default_rule: CheckpointRule = field(default_factory=lambda: CheckpointRule(Mode.MANUAL))
 
@@ -88,14 +88,14 @@ class HITLPolicy:
     @classmethod
     def default(cls) -> "HITLPolicy":
         """
-        스켈레톤 기본 정책.
+        스켈레톤 기본 정책
 
-        - 취약점 공개(CVE_DISCLOSURE): 항상 사람 승인 필수(가장 민감).
-        - 크래시 트리아지(CRASH_TRIAGE): 신뢰도 낮은 건만 사람 확인.
-        - 하네스 검토(HARNESS_REVIEW): 컴파일 실패본만 사람 확인.
+        - 취약점 공개(CVE_DISCLOSURE): 항상 사람 승인 필수(가장 민감)
+        - 크래시 트리아지(CRASH_TRIAGE): 신뢰도 낮은 건만 사람 확인
+        - 하네스 검토(HARNESS_REVIEW): 컴파일 실패본만 사람 확인
         - 지식베이스 역피드백(KB_FEEDBACK): 항상 사람 승인 필수 - 승인 전까지
-          KB/재생성 어느 쪽도 반영되지 않아야 하므로 CONDITIONAL로 완화하지 않는다.
-        - 스케줄/호환성: 기본 자동, 필요 시 MANUAL로 전환.
+          KB/재생성 어느 쪽도 반영되지 않아야 하므로 CONDITIONAL로 완화하지 않음
+        - 스케줄/호환성: 기본 자동, 필요 시 MANUAL로 전환
         """
         return cls(
             rules={
@@ -114,10 +114,10 @@ class HITLPolicy:
 
     @classmethod
     def fully_manual(cls) -> "HITLPolicy":
-        """모든 체크포인트에서 사람 검토(감독 모드)."""
+        """모든 체크포인트에서 사람 검토(감독 모드)"""
         return cls(default_rule=CheckpointRule(Mode.MANUAL))
 
     @classmethod
     def fully_auto(cls) -> "HITLPolicy":
-        """모든 체크포인트 자동 통과(무인 운전 - CVE 공개까지 자동이므로 주의)."""
+        """모든 체크포인트 자동 통과(무인 운전 - CVE 공개까지 자동이므로 주의)"""
         return cls(default_rule=CheckpointRule(Mode.AUTO))

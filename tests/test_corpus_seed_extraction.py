@@ -1,9 +1,4 @@
-"""EXE-04-05: `*_test.cc` 에서 시드를 뽑는 기능의 단위 테스트.
-
-형식 없는 합성 시드(빈 입력, 0xFF 반복)는 파서류 대상에서 입력 검증 첫 줄에
-전부 튕긴다. 대상 저장소의 유닛 테스트에는 그 API 가 실제로 받아들이는 입력이
-리터럴로 들어 있으므로, 그걸 시드로 쓰면 퍼저가 유효한 형식에서 출발한다.
-"""
+"""EXE-04-05: `*_test.cc` 시드 추출 기능 단위 테스트"""
 
 from logosfuzz.execute.exe_04_05_corpus_manager import (
     SeedManager,
@@ -52,15 +47,12 @@ def test_extracts_plain_literal_with_escapes():
 
 
 def test_extracts_raw_string_literal():
-    """JSON 같은 중첩 따옴표 입력은 테스트에서 거의 항상 원시 문자열이다."""
+    """중첩 따옴표 입력(JSON 등)의 원시 문자열 추출"""
     assert '{"outer": {"inner": [1, 2, 3]}}' in _literals(_SAMPLE_TEST_CC)
 
 
 def test_concatenates_adjacent_literals():
-    """C++ 에서 인접 리터럴은 한 문자열이다.
-
-    이어 붙이지 않으면 여러 줄로 쪼개 쓴 JSON 이 쓸모없는 조각으로 나온다.
-    """
+    """C++ 인접 리터럴의 한 문자열 연결"""
     assert '{  "a": true,  "b": null}' in _literals(_SAMPLE_TEST_CC)
 
 
@@ -76,7 +68,7 @@ def test_skips_comments():
 
 
 def test_char_literal_does_not_break_scanning():
-    """'"' 같은 문자 리터럴이 문자열 시작으로 오인되면 이후가 전부 깨진다."""
+    """'"' 같은 문자 리터럴의 문자열 시작 오인 방지"""
     assert "not json at all" in _literals(_SAMPLE_TEST_CC)
 
 
@@ -131,7 +123,7 @@ def test_extract_seeds_respects_limit(tmp_path):
 
 
 def test_unreadable_file_does_not_abort_extraction(tmp_path):
-    """읽을 수 없는 파일 하나 때문에 나머지 추출이 멈추면 안 된다."""
+    """읽기 실패 파일이 있어도 나머지 추출 계속"""
     good = _write_test_cc(tmp_path)
     missing = tmp_path / "does_not_exist_test.cc"
     seeds = SeedManager(base_dir=str(tmp_path / "corpus")).extract_seeds_from_tests(
@@ -150,10 +142,6 @@ def test_extracted_seeds_round_trip_through_disk(tmp_path):
 
 
 def test_identifier_r_followed_by_string_is_not_treated_as_raw_string():
-    """`FOO(R, "v")` 처럼 R 뒤에 그냥 문자열이 오는 코드를 오인하면 안 된다.
-
-    구분자 길이 제한이 없으면 저 멀리 있는 여는 괄호를 tag 끝으로 잡아
-    파일 전체를 잘못 읽는다.
-    """
+    """`FOO(R, "v")` 처럼 R 뒤 일반 문자열의 원시 문자열 오인 방지"""
     text = 'CHECK(R, "value"); auto later = "second";'
     assert _literals(text) == ["value", "second"]

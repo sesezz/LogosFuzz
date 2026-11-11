@@ -4,7 +4,7 @@
 
 **기준 브랜치** `origin/dev` (`648b7b9`)
 
-**작업 브랜치** `claude/minzu-week4-dev-3txqbx`
+**작업 브랜치** `minju/week4-dev`
 
 **주차 완료 기준** 커버리지 증분 수치 + 검증된 고유 크래시 목록 산출 — D 담당분은 후자
 

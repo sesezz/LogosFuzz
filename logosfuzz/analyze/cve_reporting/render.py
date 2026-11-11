@@ -1,11 +1,11 @@
 """
-ANA-05-02: CVEReport 를 JSON / Markdown 두 가지 산출 포맷으로 변환.
+ANA-05-02: CVEReport 를 JSON / Markdown 두 가지 산출 포맷으로 변환
 
 - JSON: CTR-06(제어) 및 ANA-05-03(지식베이스 역피드백) 단계에서 기계적으로
-  소비하기 위한 포맷.
+  소비하기 위한 포맷
 - Markdown: 개발팀/제보 담당자가 사람이 읽고 바로 CNA(CVE Numbering Authority)
-  제보 양식에 옮겨 담을 수 있도록 하는 포맷. OSS-Fuzz 이슈 리포트 관례를 따라
-  요약 -> 영향 -> 재현 절차 -> PoC -> 스택트레이스 순으로 구성한다.
+  제보 양식에 옮겨 담을 수 있도록 하는 포맷. OSS-Fuzz 이슈 리포트 관례에 따라
+  요약 -> 영향 -> 재현 절차 -> PoC -> 스택트레이스 순으로 구성
 """
 
 from __future__ import annotations

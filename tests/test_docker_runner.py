@@ -1,3 +1,4 @@
+from pathlib import Path
 import sys
 import time
 
@@ -93,12 +94,23 @@ def test_local_argv_injects_asan_and_tsan_options(tmp_path):
     assert env_pairs.get("TSAN_OPTIONS") == cfg.tsan_options
 
 
-def test_build_run_argv_aflpp(tmp_path):
-    cfg = _config(tmp_path, engine=Engine.AFLPP)
+def test_build_run_argv_has_no_aflpp_branch(tmp_path):
+    cfg = _config(tmp_path)
     runner = DockerIsolationRunner(cfg)
     grp = _make_harness(cfg)
-    joined = " ".join(runner.build_run_argv(grp))
-    assert "afl-fuzz" in joined and "-V 60" in joined
+    joined = " ".join(runner.build_run_argv(grp)) + " ".join(runner._local_argv(grp))
+    assert "afl-fuzz" not in joined
+
+
+def test_corpus_is_mounted_writable_so_final_corpus_grows(tmp_path):
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg)
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    grp = LogicGroup(name="g", harness_path=_make_harness(cfg).harness_path, corpus_dir=corpus)
+    argv = runner.build_run_argv(grp)
+    assert f"{corpus.resolve()}:/corpus" in argv
+    assert argv[-1].endswith(" /corpus")
 
 
 def test_run_group_missing_harness(tmp_path):
@@ -158,6 +170,32 @@ def test_run_group_streams_and_returns(tmp_path):
     assert result.stats.exec_per_sec == 512
     assert result.stats.coverage == 231
     assert result.timed_out is False
+    assert result.status == "passed"
+
+
+def test_run_group_status_distinguishes_timeout_and_crash(tmp_path):
+    cfg = _config(tmp_path)
+    grp = _make_harness(cfg, "grp-status")
+
+    def timeout_executor(argv, timeout, on_line):
+        return ProcResult(exit_code=-15, timed_out=True)
+
+    timeout_result = DockerIsolationRunner(cfg, executor=timeout_executor).run_group(grp)
+    assert timeout_result.status == "timeout"
+
+    def crash_executor(argv, timeout, on_line):
+        on_line("#1024 pulse cov: 231 ft: 5 exec/s: 512")
+        return ProcResult(exit_code=1, timed_out=False)
+
+    crash_result = DockerIsolationRunner(cfg, executor=crash_executor).run_group(grp)
+    assert crash_result.status == "crashed"
+
+    # 실행 횟수 0 의 비정상 종료는 크래시가 아닌 시작 실패
+    def start_fail_executor(argv, timeout, on_line):
+        return ProcResult(exit_code=1, timed_out=False)
+
+    start_fail_result = DockerIsolationRunner(cfg, executor=start_fail_executor).run_group(grp)
+    assert start_fail_result.status == "failed"
 
 
 def test_run_group_saves_stdout_and_stderr_logs(tmp_path):
@@ -182,11 +220,8 @@ def test_run_group_saves_stdout_and_stderr_logs(tmp_path):
     assert "heap-use-after-free" in stderr_path.read_text(encoding="utf-8")
 
 
-# --- Bazel 산출물 직접 실행 (EXE-04-01, GEN 파트 결정사항 ④) ---------------
-#
-# cc_fuzz_test 는 `<name>_bin`(계측된 퍼저 바이너리)을 워크스페이스의 bazel
-# 출력 트리에 떨군다. harness_dir 밖이므로, 그 바이너리가 있는 디렉토리를
-# /harness 로 마운트해야 컨테이너 안에서 실행할 수 있다.
+# --- Bazel 산출물 직접 실행 (EXE-04-01) -------------------------------------
+# harness_dir 밖의 `<name>_bin` 실행을 위한 바이너리 디렉토리 /harness 마운트
 def _make_bazel_binary(tmp_path, name="json_parser_fuzz_test_bin"):
     out = tmp_path / "ws" / "bazel-out" / "fuzz-opt" / "bin" / "score" / "json" / "fuzz"
     out.mkdir(parents=True, exist_ok=True)
@@ -210,20 +245,20 @@ def test_harness_binary_path_resolves_bare_name_against_harness_dir(tmp_path):
 
 
 def test_build_run_argv_mounts_bazel_output_dir(tmp_path):
-    """하네스가 harness_dir 밖에 있으면 그 디렉토리를 /harness 로 마운트한다."""
+    """harness_dir 밖 하네스의 디렉토리 /harness 마운트"""
     cfg = _config(tmp_path)
     binary = _make_bazel_binary(tmp_path)
     grp = LogicGroup(name="json", harness_path=binary)
     joined = " ".join(DockerIsolationRunner(cfg).build_run_argv(grp))
     assert f"{binary.parent.resolve()}:/harness:ro" in joined
-    # 컨테이너 안 경로는 두 경우 모두 /harness/<파일명> 이라 내부 커맨드는 동일하다.
+    # 컨테이너 안 경로는 두 경우 모두 /harness/<파일명> 으로 동일
     assert "/harness/json_parser_fuzz_test_bin" in joined
-    # harness_dir 은 이 경우 마운트되지 않아야 한다(엉뚱한 디렉토리 노출 방지).
+    # 이 경우 harness_dir 미마운트 (불필요한 디렉토리 노출 방지)
     assert f"{cfg.harness_dir.resolve()}:/harness:ro" not in joined
 
 
 def test_build_run_argv_still_mounts_harness_dir_for_bare_name(tmp_path):
-    """기존 흐름(GEN이 harness_dir에 바이너리를 두는 경우)은 그대로 동작한다."""
+    """기존 흐름(harness_dir 내 바이너리) 동작 유지"""
     cfg = _config(tmp_path)
     grp = _make_harness(cfg)
     joined = " ".join(DockerIsolationRunner(cfg).build_run_argv(grp))
@@ -236,13 +271,12 @@ def test_local_argv_uses_explicit_binary_path(tmp_path):
     binary = _make_bazel_binary(tmp_path)
     grp = LogicGroup(name="json", harness_path=binary)
     argv = DockerIsolationRunner(cfg)._local_argv(grp)
-    # argv 앞에는 env 프리픽스(ASAN_OPTIONS 등)가 붙으므로 위치가 아니라
-    # 포함 여부로 확인한다.
+    # argv 앞 env 프리픽스(ASAN_OPTIONS 등)로 인해 위치 대신 포함 여부 확인
     assert str(binary.resolve()) in argv
 
 
 def test_run_group_finds_harness_outside_harness_dir(tmp_path):
-    """harness_dir 밖 바이너리를 '하네스 없음'으로 오판하지 않아야 한다."""
+    """harness_dir 밖 바이너리의 '하네스 없음' 오판 방지"""
     cfg = _config(tmp_path, timeout_sec=1)
     binary = _make_bazel_binary(tmp_path)
     grp = LogicGroup(name="json", harness_path=binary)
@@ -252,5 +286,234 @@ def test_run_group_finds_harness_outside_harness_dir(tmp_path):
         return ProcResult(exit_code=0, timed_out=False)
 
     runner = DockerIsolationRunner(cfg, executor=fake_executor)
-    result = runner.run_group(grp)   # HarnessNotFoundError 가 나면 실패
+    result = runner.run_group(grp)   # HarnessNotFoundError 발생 시 실패
     assert result.exit_code == 0
+
+
+# --------------------------------------------------------------------------- #
+# libFuzzer 실행 옵션 / 딕셔너리 / 스모크 테스트
+# --------------------------------------------------------------------------- #
+def test_libfuzzer_options_are_passed_in_both_paths(tmp_path):
+    cfg = _config(tmp_path, max_len=4096, rss_limit_mb=1024, malloc_limit_mb=512,
+                  per_input_timeout_ms=2500)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    for argv in (runner.build_run_argv(grp), runner._local_argv(grp)):
+        joined = " ".join(argv)
+        assert "-timeout=3" in joined            # 2500ms → 올림 3초
+        assert "-rss_limit_mb=1024" in joined
+        assert "-malloc_limit_mb=512" in joined
+        assert "-max_len=4096" in joined
+
+
+def test_default_input_timeout_follows_timeout_manager(tmp_path):
+    from logosfuzz.execute.timeout_manager import DEFAULT_PER_INPUT_MS
+
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg)
+    assert runner.per_input_timeout_sec() == max(1, -(-DEFAULT_PER_INPUT_MS // 1000))
+    joined = " ".join(runner._local_argv(_make_harness(cfg)))
+    assert "-max_len=" not in joined             # 0 이면 생략
+
+
+def test_zero_memory_limits_are_omitted(tmp_path):
+    cfg = _config(tmp_path, rss_limit_mb=0, malloc_limit_mb=0)
+    joined = " ".join(DockerIsolationRunner(cfg)._local_argv(_make_harness(cfg)))
+    assert "rss_limit_mb" not in joined and "malloc_limit_mb" not in joined
+
+
+def test_group_dict_is_added_and_mounted(tmp_path):
+    dict_dir = tmp_path / "dict"
+    dict_dir.mkdir()
+    (dict_dir / "grp1.dict").write_text('kw="RIFF"\n')
+    cfg = _config(tmp_path, dict_dir=dict_dir)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    local = " ".join(runner._local_argv(grp))
+    assert f"-dict={(dict_dir / 'grp1.dict').resolve()}" in local
+    docker = runner.build_run_argv(grp)
+    assert f"{(dict_dir / 'grp1.dict').resolve()}:/dict/fuzz.dict:ro" in docker
+    assert "-dict=/dict/fuzz.dict" in docker[-1]
+
+
+def test_dict_next_to_binary_and_explicit_path(tmp_path):
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    assert runner.resolve_dict(grp) is None
+    assert "-dict=" not in " ".join(runner._local_argv(grp))
+    side = cfg.harness_dir / "grp1.dict"
+    side.write_text('a="x"\n')
+    assert runner.resolve_dict(grp) == side.resolve()
+    explicit = tmp_path / "custom.dict"
+    explicit.write_text('b="y"\n')
+    grp2 = LogicGroup(name="grp1", harness_path=grp.harness_path, dict_path=explicit)
+    assert runner.resolve_dict(grp2) == explicit.resolve()
+
+
+def test_run_smoke_uses_runs_and_separate_artifacts(tmp_path):
+    seen = {}
+
+    def executor(argv, timeout, on_line):
+        seen["argv"], seen["timeout"] = argv, timeout
+        return ProcResult(0, False, stdout="", stderr="#2 INITED cov: 40\nDone 50 runs")
+
+    cfg = _config(tmp_path, use_docker=False)
+    runner = DockerIsolationRunner(cfg, executor=executor)
+    grp = _make_harness(cfg)
+    result = runner.run_smoke(grp, runs=50, timeout_sec=20)
+    joined = " ".join(seen["argv"])
+    assert result.exit_code == 0
+    assert "-runs=50" in joined and "-max_total_time=20" in joined
+    assert f"-artifact_prefix={cfg.output_dir / 'smoke' / 'grp1'}/" in joined
+    assert cfg.timeout_sec == 60                 # 본 퍼징 설정 복원
+    assert (cfg.logs_dir / "grp1" / "smoke.stderr.log").read_text().endswith("Done 50 runs")
+
+
+def test_run_smoke_in_docker_keeps_isolation(tmp_path):
+    seen = {}
+
+    def executor(argv, timeout, on_line):
+        seen["argv"] = argv
+        return ProcResult(0, False)
+
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg, executor=executor)
+    runner.run_smoke(_make_harness(cfg), runs=10, timeout_sec=5)
+    argv = seen["argv"]
+    assert "logosfuzz-grp1-smoke" in argv
+    assert "--network" in argv and "--cap-drop" in argv
+    assert "-runs=10" in argv[-1] and "/out/smoke/grp1/" in argv[-1]
+
+
+def test_fork_mode_args_in_both_paths(tmp_path):
+    cfg = _config(tmp_path, fork_jobs=4)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    for argv in (runner.build_run_argv(grp), runner._local_argv(grp)):
+        joined = " ".join(argv)
+        assert "-fork=4" in joined
+        assert "-ignore_crashes=1" in joined
+
+
+def test_fork_mode_off_by_default(tmp_path):
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    joined = " ".join(runner.build_run_argv(grp))
+    assert "-fork=" not in joined
+    assert "-ignore_crashes" not in joined
+    assert runner.build_run_argv(grp)[runner.build_run_argv(grp).index("--cpus") + 1] == "1.0"
+
+
+def test_fork_mode_can_stop_on_first_crash(tmp_path):
+    cfg = _config(tmp_path, fork_jobs=2, ignore_crashes=False)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    joined = " ".join(runner._local_argv(grp))
+    assert "-fork=2" in joined
+    assert "-ignore_crashes" not in joined
+
+
+def test_fork_mode_raises_container_cpus(tmp_path):
+    cfg = _config(tmp_path, fork_jobs=4)
+    argv = DockerIsolationRunner(cfg).build_run_argv(_make_harness(cfg))
+    assert argv[argv.index("--cpus") + 1] == "4.0"
+    # 지정 cpus 가 더 크면 그대로 유지
+    cfg = _config(tmp_path, fork_jobs=2, cpus="6")
+    argv = DockerIsolationRunner(cfg).build_run_argv(_make_harness(cfg))
+    assert argv[argv.index("--cpus") + 1] == "6"
+
+
+def test_smoke_never_uses_fork(tmp_path):
+    cfg = _config(tmp_path, fork_jobs=4)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    for argv in (runner.build_run_argv(grp, smoke_runs=200),
+                 runner._local_argv(grp, smoke_runs=200)):
+        joined = " ".join(argv)
+        assert "-runs=200" in joined
+        assert "-fork=" not in joined
+
+
+def test_replay_argv_runs_single_crash_input(tmp_path):
+    cfg = _config(tmp_path, fork_jobs=2)
+    runner = DockerIsolationRunner(cfg)
+    grp = _make_harness(cfg)
+    crash = cfg.crashes_dir / grp.name / "crash-abc"
+    crash.parent.mkdir(parents=True)
+    crash.write_bytes(b"x")
+
+    docker_argv = runner.replay_argv(grp, crash)
+    inner = docker_argv[-1]
+    assert "--cap-drop" in docker_argv and "none" in docker_argv
+    assert f"logosfuzz-{grp.name}-replay" in docker_argv
+    assert "/out/crashes/grp1/crash-abc" in inner
+    assert "-fork=" not in inner and "-max_total_time" not in inner
+
+    cfg.use_docker = False
+    local = runner.replay_argv(grp, crash)
+    assert local[0] == "env"
+    assert any(a.startswith("ASAN_OPTIONS=") for a in local)
+    assert local[-1] == str(crash)
+
+
+def _corpus_group(cfg, tmp_path, n=3):
+    grp = _make_harness(cfg)
+    corpus = tmp_path / "corpus" / grp.name
+    corpus.mkdir(parents=True)
+    for i in range(n):
+        (corpus / f"in{i}").write_bytes(bytes([i]))
+    return LogicGroup(name=grp.name, harness_path=grp.harness_path, corpus_dir=corpus)
+
+
+def test_merge_argv_in_both_paths(tmp_path):
+    cfg = _config(tmp_path)
+    runner = DockerIsolationRunner(cfg)
+    grp = _corpus_group(cfg, tmp_path)
+    docker_argv = runner.merge_argv(grp)
+    inner = docker_argv[-1]
+    assert f"logosfuzz-{grp.name}-merge" in docker_argv
+    assert "--cap-drop" in docker_argv
+    assert "-merge=1" in inner and inner.endswith("/out/corpus_merge/grp1 /corpus")
+    assert "-max_total_time" not in inner
+
+    cfg.use_docker = False
+    local = runner.merge_argv(grp)
+    assert "-merge=1" in local
+    assert local[-2:] == [str(runner.merge_dir(grp)), str(grp.corpus_dir)]
+
+
+def test_minimize_corpus_replaces_corpus_with_merged_inputs(tmp_path):
+    cfg = _config(tmp_path, use_docker=False)
+
+    def fake_executor(argv, timeout, on_line):
+        merged = Path(argv[-2])
+        (merged / "kept").write_bytes(b"k")
+        return ProcResult(exit_code=0, timed_out=False)
+
+    runner = DockerIsolationRunner(cfg, executor=fake_executor)
+    grp = _corpus_group(cfg, tmp_path)
+    assert runner.minimize_corpus(grp) == (3, 1)
+    assert sorted(p.name for p in grp.corpus_dir.iterdir()) == ["kept"]
+    assert not runner.merge_dir(grp).exists()
+    assert (cfg.logs_dir / grp.name / "merge.stderr.log").exists()
+
+
+def test_minimize_corpus_keeps_corpus_on_failure(tmp_path):
+    cfg = _config(tmp_path, use_docker=False)
+    runner = DockerIsolationRunner(
+        cfg, executor=lambda argv, timeout, on_line: ProcResult(exit_code=1, timed_out=False))
+    grp = _corpus_group(cfg, tmp_path)
+    assert runner.minimize_corpus(grp) is None
+    assert len(list(grp.corpus_dir.iterdir())) == 3
+
+
+def test_minimize_corpus_skips_empty_corpus(tmp_path):
+    cfg = _config(tmp_path, use_docker=False)
+    calls = []
+    runner = DockerIsolationRunner(
+        cfg, executor=lambda *a: calls.append(a) or ProcResult(exit_code=0, timed_out=False))
+    grp = _corpus_group(cfg, tmp_path, n=0)
+    assert runner.minimize_corpus(grp) is None
+    assert calls == []

@@ -1,23 +1,15 @@
 #!/usr/bin/env bash
-# 유닛테스트 vs 퍼징 커버리지 비교 측정기 (C 파트 4주차 작성, 5주차 실측 반영)
+# 유닛테스트 vs 퍼징 커버리지 비교 측정기
 # ======================================================
 #
-# 같은 대상에 대해 세 가지 커버리지를 재서 나란히 놓는다.
+#   A. 유닛테스트 커버리지 — 대상 저장소 *_test.cpp 의 bazel coverage 결과
+#   S. 시드 커버리지      — 퍼징 전 초기 코퍼스만 재생한 기준선
+#   B. 퍼징 커버리지      — N초 퍼징 후 코퍼스 재생 결과
 #
-#   A. 유닛테스트 커버리지 — 대상 저장소가 원래 가지고 있는 *_test.cpp 를
-#      bazel coverage 로 돌려서 얻는다.
-#   S. 시드 커버리지      — 퍼징 전 초기 코퍼스(유닛테스트에서 뽑은 시드 포함)만
-#      재생했을 때. 퍼징이 시드 위에 무엇을 더했는지 가르는 기준선이다.
-#   B. 퍼징 커버리지      — LogosFuzz 하네스를 N초 퍼징한 뒤의 코퍼스를 재생.
+# 총합과 함께 차집합(퍼징만 밟은 라인) 산출
 #
-# 이 비교가 답하려는 질문은 하나다. **퍼징이 유닛테스트가 못 닿는 곳에
-# 닿는가.** 단순 총합 비교(퍼징 62% vs 유닛테스트 71%)는 의미가 약하다.
-# 유닛테스트는 API 표면을 넓게 훑고 퍼징은 파싱 경로를 깊게 파므로, 총합만
-# 보면 퍼징이 져 보이면서도 실제로는 유닛테스트가 전혀 안 밟은 분기를
-# 퍼징이 밟고 있을 수 있다. 그래서 **차집합**(퍼징만 밟은 라인)을 같이 낸다.
-#
-# 리눅스 전용이다(Bazel + llvm 도구). WSL 이나 docker/Dockerfile 컨테이너에서
-# 돌린다. baselibs 에 퍼징 오버레이(apply_overlay)가 적용돼 있어야 한다.
+# 리눅스 전용 (Bazel + llvm 도구, WSL 또는 docker/Dockerfile 컨테이너)
+# baselibs 퍼징 오버레이(apply_overlay) 적용 필요
 #
 #   bash scripts/compare_coverage.sh \
 #       --workspace ~/baselibs \
@@ -28,19 +20,12 @@
 #       --out ~/coverage-compare
 #
 # ---------------------------------------------------------------------------
-# 5주차 실측으로 바뀐 것 (baselibs 09be72c, Bazel 8.6.0, WSL Ubuntu 24.04)
+# 참고
 # ---------------------------------------------------------------------------
-#   * --config=llvm_cov 는 coverage: 전용이다. bazel build 에 붙이면
-#     "Config value 'llvm_cov' is not defined" 로 죽는다. 그래서 퍼징 쪽은
-#     llvm_cov 를 쓰지 않고, --config=fuzz 위에 계측 플래그를 직접 얹은 별도
-#     빌드(platform_suffix=fuzz_cov)로 잰다. 퍼징 본 빌드는 계측 없이 돌려
-#     속도를 지키고, 커버리지 빌드는 코퍼스 재생(-runs=0)에만 쓴다.
-#   * 유닛테스트 쪽은 --config=llvm_cov 단독이다. bl-x86_64-linux 를 같이 주면
-#     GCC 가 이겨 covmap 이 안 나온다(baselibs coverage.bazelrc 의 경고).
-#   * bazel coverage 결과(_coverage_report.dat)는 baselibs 리포터가 만든 zip
-#     이다. lcov 는 그 안의 lcov_report/lcov.dat.
-#   * 시스템 llvm-profdata(18)는 clang 22 profraw(포맷 v10)를 못 읽는다.
-#     Bazel 이 받아 둔 툴체인 쪽 llvm-profdata / llvm-cov 를 쓴다.
+#   * 퍼징 커버리지: --config=fuzz 위에 계측 플래그를 얹은 별도 빌드(platform_suffix=fuzz_cov)
+#   * 유닛테스트 커버리지: --config=llvm_cov 단독 사용 (bl-x86_64-linux 동시 지정 불가)
+#   * bazel coverage 결과는 zip 형식 (lcov 는 lcov_report/lcov.dat)
+#   * llvm-profdata / llvm-cov 는 Bazel 툴체인 쪽 도구 사용
 
 set -uo pipefail
 
@@ -63,7 +48,7 @@ FUZZ_COV_FLAGS=(--platform_suffix=fuzz_cov
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 usage() {
-    sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -110,8 +95,7 @@ run_logged() {
 }
 
 bin_path() {
-    # bazel-bin 심링크는 직전 빌드 설정을 가리켜 config 가 섞이면 틀린다.
-    # cquery 로 해당 설정의 실제 산출물 경로를 묻는다.
+    # bazel-bin 심링크 대신 cquery 로 해당 설정의 실제 산출물 경로 조회
     local rel
     rel="$(${BAZEL} cquery "$@" --output=files "${FUZZ_BIN_TARGET}" 2>/dev/null | head -1)"
     [[ -n "${rel}" ]] && printf '%s/%s' "${WORKSPACE}" "${rel}"
@@ -196,11 +180,11 @@ for s in seeds:
 print(f"  유닛테스트 {len(tests)}개 파일에서 시드 {len(seeds)}개 추출")
 PY
 fi
-# 빈 코퍼스로 시작하면 libFuzzer 가 빈 입력 하나로 시작한다. 그것도 기준선이다.
+# 빈 코퍼스도 기준선으로 사용 (libFuzzer 빈 입력 1개로 시작)
 find "${SEED_DIR}" -type f -exec cp {} "${WORK_CORPUS}/" \;
 echo "  초기 코퍼스: $(find "${WORK_CORPUS}" -type f | wc -l)개"
 
-# 코퍼스 디렉터리를 커버리지 바이너리에 재생해 lcov 를 만든다.
+# 코퍼스 디렉터리를 커버리지 바이너리에 재생해 lcov 생성
 replay_lcov() {  # replay_lcov <이름> <코퍼스 디렉터리>
     local name="$1" dir="$2" raw="${OUT_DIR}/profraw-$1"
     rm -rf "${raw}" && mkdir -p "${raw}"
@@ -226,7 +210,7 @@ log "STEP 4 · 퍼징  (${FUZZ_SECONDS}초)"
 "${FUZZ_BIN}" -max_total_time="${FUZZ_SECONDS}" -print_final_stats=1 \
     -artifact_prefix="${OUT_DIR}/" "${WORK_CORPUS}" > "${OUT_DIR}/fuzz-run.log" 2>&1
 FUZZ_RC=$?
-# 퍼저는 크래시를 찾으면 0 이 아닌 코드로 끝난다. 그건 실패가 아니라 성과다.
+# 크래시 발견 시 non-zero 종료 (실패 아님)
 echo "  퍼징 종료코드: ${FUZZ_RC} (0이 아니면 크래시를 찾았다는 뜻일 수 있다)"
 grep -E '^stat::number_of_executed_units|^stat::peak_rss|cov: [0-9]+' "${OUT_DIR}/fuzz-run.log" | tail -3 | sed 's/^/  /'
 echo "  퍼징 후 코퍼스: $(find "${WORK_CORPUS}" -type f | wc -l)개"

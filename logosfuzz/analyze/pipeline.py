@@ -7,25 +7,25 @@ ANA-05-01이 오탐(FALSE_POSITIVE)으로 확정한 크래시(`FalsePositiveCras
   1. 근본 원인 분석 (`rootcause.analyze_false_positive`)
   2. KB 변경 제안(diff) 생성 (`kb_feedback.propose_kb_update`) - 아직 KB 미반영
   3. HITL 승인 게이트에 큐잉 (`Checkpoint.KB_FEEDBACK`)
-       - 정책상 자동 결정이거나 interactive 모드면 즉시 Decision을 받는다
+       - 정책상 자동 결정이거나 interactive 모드면 즉시 Decision 수신
        - 아니면 PENDING으로 저장되고 사람이 나중에 `logosfuzz review`로 결정
   4. 결정 처리:
        - APPROVE/EDIT -> KB 오버라이드 커밋 + 인덱스 재구성 + 재생성 트리거
        - REJECT        -> 폐기(승인 전에는 아무것도 반영되지 않았으므로 "롤백"은
-                          곧 무동작이다)
-       - SKIP/DEFER    -> 이번 호출에서는 더 진행하지 않는다(PENDING 유지)
+                          곧 무동작)
+       - SKIP/DEFER    -> 이번 호출에서는 더 진행하지 않음(PENDING 유지)
   5. 각 단계 산출물을 `AuditTrailStore`에 기록(crash_id/api_id/harness_id 추적성)
 
-역피드백 단위는 Bazel 타깃이다(4주차). 크래시 API를 소유한 타깃을 찾아
-제안·HITL 대상·재생성 범위를 모두 그 타깃으로 맞춘다 - 같은 타깃의 다른 API
-하네스도 같은 노트를 보고 재생성돼야 같은 오탐을 반복하지 않는다. 타깃을 모르는
-구 KB에서는 예전처럼 API 단위로 동작한다(`kb_feedback` 모듈 docstring 참조).
+역피드백 단위는 Bazel 타깃(4주차). 크래시 API를 소유한 타깃을 찾아
+제안·HITL 대상·재생성 범위를 모두 그 타깃으로 통일 - 같은 타깃의 다른 API
+하네스도 같은 노트를 보고 재생성돼야 같은 오탐 반복 방지. 타깃을 모르는
+구 KB에서는 예전처럼 API 단위로 동작(`kb_feedback` 모듈 docstring 참조)
 
 트리거 정책은 reactive(즉시)다: ANA-05-01이 오탐 판정을 내리는 즉시 이
-파이프라인을 호출한다고 전제한다. 크래시 발생 빈도 자체가 이미 "이벤트당
+파이프라인을 호출한다고 전제. 크래시 발생 빈도 자체가 이미 "이벤트당
 1회 LLM 호출"의 자연스러운 상한이고, 실제 KB/재생성 반영은 어차피 HITL
 승인 없이는 일어나지 않으므로 배치로 모아 처리해도 얻는 이득이 크지
-않다는 것이 설계 검토 시 결론이었다.
+않다는 것이 설계 검토 시 결론
 """
 from __future__ import annotations
 
@@ -62,9 +62,9 @@ class FeedbackOutcome:
 
 
 def _latest_item_id(hitl: HITLManager, project: str, target: str) -> Optional[str]:
-    """방금 request()가 큐에 쌓은(또는 즉시 처리한) 항목의 id를 찾는다.
+    """방금 request()가 큐에 쌓은(또는 즉시 처리한) 항목의 id 조회
 
-    `logosfuzz.generate.selfheal.SelfHealLoop._escalate`와 동일한 패턴.
+    `logosfuzz.generate.selfheal.SelfHealLoop._escalate`와 동일한 패턴
     """
     items = [
         it for it in hitl.store.list(checkpoint=Checkpoint.KB_FEEDBACK, project=project)
@@ -87,8 +87,8 @@ def run_ana_05_03(
     max_round: int = 3,
     project: str = "",
 ) -> FeedbackOutcome:
-    """ANA-05-03 5단계 오케스트레이션. `crash.verdict`는 항상 FALSE_POSITIVE다
-    (`FalsePositiveCrash.__post_init__`이 강제)."""
+    """ANA-05-03 5단계 오케스트레이션. `crash.verdict`는 항상 FALSE_POSITIVE
+    (`FalsePositiveCrash.__post_init__`이 강제)"""
     analysis = analyze_false_positive(crash, kb, llm)
 
     proposal = propose_kb_update(
@@ -96,8 +96,8 @@ def run_ana_05_03(
     )
     audit.record_proposal(proposal)
 
-    # 타깃 단위 제안이면 검토 대상도 타깃이다 - 같은 타깃의 다른 API까지 바뀐다는
-    # 사실을 검토자가 승인 전에 봐야 한다.
+    # 타깃 단위 제안이면 검토 대상도 타깃 - 같은 타깃의 다른 API까지 바뀐다는
+    # 사실을 검토자가 승인 전에 확인 필요
     review_target = proposal.build_target or str(crash.api_id)
     unit_apis = apis_in_target(kb, proposal.build_target)
     decision = hitl.request(
@@ -131,7 +131,7 @@ def run_ana_05_03(
         result_kb = rebuild_with_overrides(kb, overrides)
 
         if compiler is not None:
-            # Logic Group 경계가 Bazel 타깃이므로(3주차) 재생성 범위도 타깃 전체다.
+            # Logic Group 경계가 Bazel 타깃이므로(3주차) 재생성 범위도 타깃 전체
             record, _report = regenerate.trigger_regeneration(
                 proposal, result_kb, overrides, compiler, llm,
                 logic_group=logic_group or proposal.build_target or crash.harness_id,
@@ -145,7 +145,7 @@ def run_ana_05_03(
                                  decided_by=decision.reviewer)
         audit.record_proposal(proposal)
     # SKIP/DEFER: 상태 변경 없이 PENDING 유지 - 호출자가 나중에 다시 조회해서
-    # decide() 이후 재진입해야 한다(무한 대기 방지는 HITL 자체 책임 범위).
+    # decide() 이후 재진입 필요(무한 대기 방지는 HITL 자체 책임 범위)
 
     return FeedbackOutcome(
         crash_id=crash.crash_id, api_id=crash.api_id, analysis=analysis,

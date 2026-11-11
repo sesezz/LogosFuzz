@@ -3,7 +3,7 @@ GEN-03 하네스 생성 - 데이터 모델 & 컴파일 로그 파서
 ===================================================
 
 GEN-03-01(초안 생성), GEN-03-02(자가 치유 루프), GEN-03-03(Mocking 삽입)이 공유하는
-데이터 타입을 정의한다. 표준 라이브러리만 사용한다.
+데이터 타입을 정의한다. 표준 라이브러리만 사용
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def now_iso() -> str:
 # --------------------------------------------------------------------------- #
 @dataclass
 class HarnessDraft:
-    """GEN-03-01이 생성한 하네스 초안(자가 치유 루프의 입력)."""
+    """GEN-03-01이 생성한 하네스 초안(자가 치유 루프의 입력)"""
     logic_group: str                      # 대상 로직 그룹명
     source: str                           # 하네스 C/C++ 소스
     project: str = ""
@@ -37,7 +37,7 @@ class HarnessDraft:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class Diagnostic:
-    """컴파일러가 뱉은 개별 진단(에러/경고)."""
+    """컴파일러가 뱉은 개별 진단(에러/경고)"""
     file: str
     line: int
     col: int
@@ -57,7 +57,7 @@ _DIAG_RE = re.compile(
 
 
 def parse_diagnostics(log: str) -> List[Diagnostic]:
-    """컴파일 로그에서 진단을 추출한다."""
+    """컴파일 로그에서 진단을 추출"""
     out: List[Diagnostic] = []
     for m in _DIAG_RE.finditer(log or ""):
         sev = m.group("sev")
@@ -77,7 +77,7 @@ def parse_diagnostics(log: str) -> List[Diagnostic]:
 
 @dataclass
 class CompileResult:
-    """컴파일 시도 결과."""
+    """컴파일 시도 결과"""
     ok: bool
     returncode: int = 0
     stdout: str = ""
@@ -100,12 +100,12 @@ class CompileResult:
     def signature(self) -> Tuple[Tuple[int, str], ...]:
         """
         에러 시그니처. (line, message) 집합으로 표현하여
-        라운드 간 '같은 에러가 반복되는지(정체)'를 판별하는 데 쓴다.
+        라운드 간 '같은 에러가 반복되는지(정체)' 판별에 사용
         """
         return tuple(sorted((d.line, d.message) for d in self.errors))
 
     def error_digest(self, limit: int = 10) -> str:
-        """LLM 프롬프트/로그용 간결한 에러 요약."""
+        """LLM 프롬프트/로그용 간결한 에러 요약"""
         errs = self.errors
         if not errs:
             # 진단 파싱이 안 되면 원본 로그 꼬리를 사용
@@ -130,17 +130,20 @@ class HealOutcome(str, Enum):
 
 @dataclass
 class HealRound:
-    """자가 치유 루프의 한 라운드 기록."""
+    """자가 치유 루프의 한 라운드 기록"""
     index: int                       # 0 = 초안 컴파일, 1.. = LLM 수정 후
     source: str
     compile_result: CompileResult
     repaired_by_llm: bool = False
     llm_note: str = ""               # LLM 응답에서 추출한 설명(있으면)
     timestamp: str = field(default_factory=now_iso)
-    # GEN-03-02 에러 분류 결과(logosfuzz.generate.errors.BazelErrorReport).
-    # 순환 import 를 피하려고 타입을 느슨하게 둔다 - bazel_errors 는 models 를
-    # 쓰지 않지만, 여기서 errors 를 import 하면 방향이 뒤엉킨다.
+    # GEN-03-02 에러 분류 결과(logosfuzz.generate.errors.BazelErrorReport)
+    # 순환 import 방지를 위해 타입을 느슨하게 지정 - bazel_errors 는 models 를
+    # 쓰지 않지만, 여기서 errors 를 import 하면 의존 방향이 꼬임
     classification: Optional[Any] = None
+    # GENERIC-C: 이 라운드 직전에 링크 실패 해결용으로 자동 생성한 weak 스텁 심볼
+    # LLM 수정이 아닌 결정적 처리라 repaired_by_llm 은 False 유지
+    stubbed_symbols: List[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -148,7 +151,7 @@ class HealRound:
 
     @property
     def diagnosis(self) -> str:
-        """분류 결과를 한 줄로. 분류가 없거나 못 했으면 빈 문자열."""
+        """분류 결과 한 줄 요약. 분류가 없거나 실패했으면 빈 문자열"""
         report = self.classification
         primary = getattr(report, "primary", None)
         if primary is None:
@@ -158,7 +161,7 @@ class HealRound:
 
 @dataclass
 class GenerateReport:
-    """한 로직 그룹에 대한 GEN-03-02 실행 결과."""
+    """한 로직 그룹에 대한 GEN-03-02 실행 결과"""
     logic_group: str
     project: str
     outcome: HealOutcome
@@ -174,14 +177,33 @@ class GenerateReport:
 
     @property
     def rounds_used(self) -> int:
-        """LLM 수정 라운드 수(초안 컴파일 제외)."""
+        """LLM 수정 라운드 수(초안 컴파일 제외)"""
         return sum(1 for r in self.rounds if r.repaired_by_llm)
 
     @property
     def last_compile(self) -> Optional[CompileResult]:
         return self.rounds[-1].compile_result if self.rounds else None
 
+    @property
+    def stubbed_symbols(self) -> List[str]:
+        """자가치유 중 자동 생성한 스텁 심볼(라운드 순서, 중복 없음)"""
+        seen: List[str] = []
+        for r in self.rounds:
+            seen.extend(s for s in r.stubbed_symbols if s not in seen)
+        return seen
+
     def to_dict(self) -> Dict[str, Any]:
+        data = self._to_dict()
+        # 스텁을 만든 경우에만 키 추가(기존 Bazel/자동차 출력은 그대로)
+        stubbed = self.stubbed_symbols
+        if stubbed:
+            data["stubbed_symbols"] = stubbed
+            for entry, r in zip(data["rounds"], self.rounds):
+                if r.stubbed_symbols:
+                    entry["stubbed_symbols"] = list(r.stubbed_symbols)
+        return data
+
+    def _to_dict(self) -> Dict[str, Any]:
         return {
             "logic_group": self.logic_group,
             "project": self.project,

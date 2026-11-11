@@ -1,8 +1,8 @@
-"""4주차 D 완료 기준: 크래시 승인 게이트를 거친 **검증된 고유 크래시 목록** 산출.
+"""4주차 D 완료 기준: 크래시 승인 게이트를 거친 **검증된 고유 크래시 목록** 산출
 
 실측 크래시 원문(EXE sanitizer 파서) → ``logosfuzz analyze``(dedup → triage →
 CRASH_TRIAGE 게이트) → ``logosfuzz review`` 로 사람 결정 → 재실행 반영까지
-사용자가 실제로 치는 명령 그대로 확인한다.
+사용자가 실제로 치는 명령 그대로 확인
 """
 from __future__ import annotations
 
@@ -47,9 +47,9 @@ def test_verified_unique_crash_list_through_approval_gate(tmp_path, capsys):
     first = _analyze(tmp_path, store)
     by_type = {f["error_contract"]["violation"] or f["bug_type"]: f for f in first["findings"]}
 
-    # 고유 크래시 3개(두 계약 위반이 abort 프레임으로 합쳐지지 않는다)
+    # 고유 크래시 3개(두 계약 위반이 abort 프레임으로 합쳐지지 않음)
     assert first["dedup"]["stats"]["unique_clusters"] == 3
-    # 에러계약 근거로 판정이 갈린다
+    # 에러계약 근거로 판정이 갈리는 구성
     assert by_type["harness"]["triage_result"]["verdict"] == "false_positive"
     assert by_type["target"]["triage_result"]["verdict"] == "true_positive"
     # 게이트: 확실한 둘은 자동 결정, 데이터 레이스(conf 0.70)는 사람 대기
@@ -61,7 +61,7 @@ def test_verified_unique_crash_list_through_approval_gate(tmp_path, capsys):
     # summary 는 자동 판정 집계 그대로(ANA-05-02 / validation summary 계약)
     assert set(first["summary"]) == {"true_positive", "false_positive", "needs_review"}
 
-    # 사람이 대기 항목을 확인하고 승인한다
+    # 사람이 대기 항목을 확인하고 승인
     item_id = by_type["race-condition"]["approval"]["item_id"]
     assert main(["review", "--store", str(store), "--reviewer", "minju",
                  "approve", item_id, "-m", "락 없이 공유 큐 접근 확인"]) == 0
@@ -72,14 +72,14 @@ def test_verified_unique_crash_list_through_approval_gate(tmp_path, capsys):
     assert verified[by_type["race-condition"]["cluster_id"]]["by_human"] is True
     assert second["approval_summary"]["pending"] == 0
 
-    # 재실행해도 리뷰 항목이 늘지 않는다(크래시당 1건)
+    # 재실행해도 리뷰 항목 증가 없음(크래시당 1건)
     items = json.loads(store.read_text(encoding="utf-8"))
     assert len(items) == 3
     assert "검증된 고유 크래시 2개" in capsys.readouterr().out
 
 
 def test_reviewer_can_flip_false_positive_with_edit(tmp_path):
-    """하네스 프레임뿐인 오버플로(conf 0.65 오탐)를 사람이 정탐으로 뒤집는다."""
+    """하네스 프레임뿐인 오버플로(conf 0.65 오탐)를 사람이 정탐으로 변경"""
     store = tmp_path / "reviews.json"
     write_findings(tmp_path / "sanitizer.jsonl", [
         SanitizerFinding("ASAN", "heap-buffer-overflow", "heap-buffer-overflow",

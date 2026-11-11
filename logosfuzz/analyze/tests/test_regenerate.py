@@ -1,4 +1,4 @@
-"""ANA-05-03 STEP 4(재생성 트리거: GEN-03-01 어댑터 -> GEN-03-02 자가치유) 테스트."""
+"""ANA-05-03 STEP 4(재생성 트리거: GEN-03-01 어댑터 -> GEN-03-02 자가치유) 테스트"""
 from __future__ import annotations
 
 import unittest
@@ -45,8 +45,8 @@ class TestDraftViaLLM(unittest.TestCase):
         self.assertIn("self-correction notes", llm.calls[0])
 
     def test_falls_back_to_stub_when_llm_returns_empty(self):
-        # extract_code()는 코드펜스가 없으면 응답 전체를 소스로 간주한다(GEN-03-02와
-        # 동일 컨벤션) - 폴백은 응답 자체가 비어 있을 때만 쓰인다.
+        # extract_code()는 코드펜스가 없으면 응답 전체를 소스로 간주(GEN-03-02와
+        # 동일 컨벤션) - 폴백은 응답 자체가 비어 있을 때만 사용
         kb = _kb()
         overrides = InMemoryKBOverrideStore()
         llm = ScriptedLLMClient([""])

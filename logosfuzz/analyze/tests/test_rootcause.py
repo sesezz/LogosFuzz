@@ -1,4 +1,4 @@
-"""ANA-05-03 STEP 1(오탐 원인 분석) 단위 테스트."""
+"""ANA-05-03 STEP 1(오탐 원인 분석) 단위 테스트"""
 from __future__ import annotations
 
 import unittest

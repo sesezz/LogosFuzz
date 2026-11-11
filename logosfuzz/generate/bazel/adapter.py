@@ -51,6 +51,9 @@ _COMPILER_DIAGNOSTIC_RE = _DIAGNOSTIC_RE
 class BazelAdapter:
     """S-CORE(baselibs) 같은 Bazel 워크스페이스용 어댑터."""
 
+    #: BuildAdapter Protocol 의 build_system (컨트롤러가 build_summary.json 에 기록)
+    build_system = "bazel"
+
     def __init__(
         self,
         workspace_root: Path | str,
@@ -65,6 +68,17 @@ class BazelAdapter:
         self.bazel = bazel
         self.extra_args = tuple(extra_args)
         self.timeout_s = timeout_s
+
+    def classify_build_error(self, log: str, bin_label: str):
+        """빌드 로그의 Bazel 에러 처방 분류 (``bazel_errors.classify``, 실패 시 None)"""
+        try:
+            from logosfuzz.generate.bazel_errors import classify
+        except ImportError:
+            return None
+        try:
+            return classify(log or "", requested_target=bin_label)
+        except (ValueError, TypeError, AttributeError, IndexError, KeyError):  # 로그 분류 실패
+            return None
 
     # ------------------------------------------------------------------ #
     # 생성
@@ -97,8 +111,8 @@ class BazelAdapter:
         src_path = safe_join(pkg, spec.srcs[0], what="하네스 소스 이름")
         build_path = pkg / "BUILD.bazel"
 
-        # 사용자가 원래 가지고 있던 BUILD 를 덮어쓰지 않는다. 이 어댑터가 만든 파일이거나
-        # (manifest 에 있음) 퍼징 타깃 전용 BUILD 일 때만 다시 쓴다.
+        # 사용자가 원래 가지고 있던 BUILD 는 덮어쓰지 않음. 이 어댑터가 만든 파일
+        # (manifest 에 있음)이거나 퍼징 타깃 전용 BUILD 일 때만 재작성
         if build_path.is_file() and "BUILD.bazel" not in self._manifest(pkg):
             if "cc_fuzz_test(" not in build_path.read_text(encoding="utf-8", errors="replace"):
                 raise FileExistsError(
@@ -121,19 +135,17 @@ class BazelAdapter:
         있으면 디렉터리를 정리한다.
         """
         pkg = self.package_dir(spec)
-        if not pkg.is_dir():
-            return
-        for name in self._manifest(pkg):
+        for name in self._manifest(pkg):    # 디렉터리 사전 확인 없이 진행(없으면 빈 목록)
             try:
                 safe_join(pkg, name).unlink()
             except (FileNotFoundError, UnsafePathError):
                 pass
         try:
             (pkg / MANIFEST_NAME).unlink()
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):  # pkg 부재·비디렉터리 시 무시
             pass
         try:
-            pkg.rmdir()                     # 비어 있을 때만 지워진다
+            pkg.rmdir()                     # 비어 있을 때만 삭제
         except OSError:
             pass
 

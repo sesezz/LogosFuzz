@@ -10,7 +10,7 @@ ANA-05-02: 취약점(CVE) 리포팅 포맷 스키마
     입력 소스로 하고, HARNESS/API_METADATA 테이블과 조인 가능한 참조 필드를 포함
 
 이 스키마는 "실제 CVE 번호 발급"이 아니라 CNA(CVE Numbering Authority) 제보 전
-단계의 "취약점 리포트 초안(draft)"을 표준화하는 것이 목적이다.
+단계의 "취약점 리포트 초안(draft)"을 표준화하는 것이 목적
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class ReportStatus(str, Enum):
 
 @dataclass
 class TriageInfo:
-    """ANA-05-01(LLM 기반 정탐/오탐 자동 판별) 출력을 그대로 담는 서브 구조."""
+    """ANA-05-01(LLM 기반 정탐/오탐 자동 판별) 출력을 그대로 담는 서브 구조"""
     verdict: Verdict
     confidence: float  # 0.0 ~ 1.0
     rationale: str  # LLM이 정탐/오탐으로 판단한 근거 요약
@@ -91,7 +91,7 @@ class CrashDetails:
 
 @dataclass
 class CVEReport:
-    """ANA-05-02 최종 산출물: 취약점(CVE) 리포트 초안."""
+    """ANA-05-02 최종 산출물: 취약점(CVE) 리포트 초안"""
 
     report_id: str  # 임시 ID, 예: "LOGOSFUZZ-2026-000123"
     crash_id: str  # CRASH_REPORT.crash_id (원본 레코드 추적용)

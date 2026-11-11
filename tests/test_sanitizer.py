@@ -28,7 +28,7 @@ def test_classifies_asan_and_tsan_defects():
 
 
 def test_vehicle_specific_watchdog_classification_is_gone():
-    """차량 RT 대상이 빠지면서 잡히지 않게 된 분류를 제거했다."""
+    """더 이상 검출되지 않는 차량 RT 분류 제거 확인"""
     assert classify_sanitizer_error("TSAN", "watchdog timeout") == "unknown"
 
 
@@ -71,10 +71,8 @@ def test_leak_sanitizer_is_labelled_lsan_not_asan():
     assert findings[0].sanitizer == "LSAN"
 
 
-# --- UBSan 파서 (EXE-04-02, 3주차) -----------------------------------------
-#
-# 입력은 GEN 파트가 실제 Bazel 빌드를 깨뜨려 수집한 출력 원문이다
-# (tests/fixtures/sanitizer_logs, clang 18.1.3). 포맷을 추측하지 않는다.
+# --- UBSan 파서 (EXE-04-02) ------------------------------------------------
+# 입력: 실제 Bazel 빌드 출력 원문 (tests/fixtures/sanitizer_logs, clang 18.1.3)
 
 @pytest.mark.parametrize("fixture,category,line_no", [
     ("ubsan_signed_overflow.txt", "integer-overflow", 38),
@@ -95,19 +93,15 @@ def test_parses_each_ubsan_category_from_real_output(fixture, category, line_no)
 
 
 def test_ubsan_is_detected_even_though_process_exits_zero():
-    """복구 가능 UBSan 은 진단만 찍고 종료코드 0 으로 끝난다.
-
-    종료코드만 보면 '정상 종료'라 결함을 통째로 놓친다. 출력 파싱으로
-    잡히는지가 이 파서의 존재 이유다.
-    """
+    """종료코드 0 인 복구 가능 UBSan 결함의 출력 파싱 검출"""
     raw = (_FIXTURES / "ubsan_signed_overflow.txt").read_text(encoding="utf-8")
-    assert "[exit code] 0" in raw          # 프로세스는 성공으로 끝났는데
+    assert "[exit code] 0" in raw          # 프로세스는 정상 종료
     findings = _parse_fixture("ubsan_signed_overflow.txt")
-    assert any(f.sanitizer == "UBSAN" for f in findings)   # 결함은 있다
+    assert any(f.sanitizer == "UBSAN" for f in findings)   # 결함은 존재
 
 
 def test_ubsan_block_does_not_swallow_trailing_libfuzzer_output():
-    """SUMMARY 에서 블록을 끊지 않으면 libFuzzer 실행 요약까지 딸려 들어간다."""
+    """SUMMARY 에서 블록 종료 (libFuzzer 실행 요약 혼입 방지)"""
     findings = _parse_fixture("ubsan_signed_overflow.txt")
     ubsan = [f for f in findings if f.sanitizer == "UBSAN"][0]
     assert ubsan.raw_log[-1].startswith("SUMMARY: UndefinedBehaviorSanitizer")
@@ -115,7 +109,7 @@ def test_ubsan_block_does_not_swallow_trailing_libfuzzer_output():
 
 
 def test_recoverable_ub_then_real_crash_are_separate_findings():
-    """복구 가능 UB 로 계속 실행되다 ASan 이 실제 크래시를 잡는 경우."""
+    """복구 가능 UB 이후 ASan 실제 크래시 검출 케이스"""
     findings = _parse_fixture("ubsan_array_bounds.txt")
     assert [(f.sanitizer, f.category) for f in findings] == [
         ("UBSAN", "array-out-of-bounds"),
@@ -124,7 +118,7 @@ def test_recoverable_ub_then_real_crash_are_separate_findings():
 
 
 def test_segv_after_null_deref_is_classified():
-    """null 역참조 UB 직후의 SEGV 가 unknown 으로 빠지지 않아야 한다."""
+    """null 역참조 UB 직후 SEGV 의 unknown 미분류 방지"""
     findings = _parse_fixture("ubsan_null_deref.txt")
     assert [(f.sanitizer, f.category) for f in findings] == [
         ("UBSAN", "null-dereference"),
@@ -137,7 +131,7 @@ def test_clean_run_produces_no_findings():
 
 
 def test_unknown_ub_kind_falls_back_to_undefined_behavior():
-    """표본에 없는 UB 가 '결함 아님'으로 오인되지 않게 한다."""
+    """표본에 없는 UB 의 '결함 아님' 오인 방지"""
     assert classify_ubsan_error("something nobody has seen yet") == "undefined-behavior"
 
 
@@ -147,13 +141,9 @@ def test_ubsan_signature_includes_category_and_location():
     assert ubsan.signature == "divide-by-zero_json_cc_61"
 
 
-# --- UBSan 파서 -> ANA 시그니처 연결 (4주차) --------------------------------
+# --- UBSan 파서 -> ANA 시그니처 연결 ----------------------------------------
 def test_ubsan_finding_produces_clean_multiframe_signature():
-    """실제 UBSan 출력이 ANA 시그니처까지 중복 없이 도달하는지 확인한다.
-
-    파서(EXE-04-02)와 시그니처(ANA-05-04)를 따로 고쳤으므로, 둘을 이어
-    붙였을 때 실제로 의도한 결과가 나오는지는 별도로 봐야 한다.
-    """
+    """실제 UBSan 출력의 ANA 시그니처 중복 없는 도달 확인 (EXE-04-02 + ANA-05-04 연결)"""
     from logosfuzz.analyze.models import CrashRecord
     from logosfuzz.analyze.signature import signature_key
 
@@ -161,5 +151,64 @@ def test_ubsan_finding_produces_clean_multiframe_signature():
     ubsan = [f for f in findings if f.sanitizer == "UBSAN"][0]
     key = signature_key(CrashRecord.from_finding(ubsan.to_dict()))
     assert key == "integer-overflow@json.cc:38|json_fuzzer.cc:10"
-    # 같은 지점이 두 번 들어가지 않는다
+    # 같은 지점 중복 없음
     assert key.count("json.cc:38") == 1
+
+
+# --- libFuzzer 자체 크래시 (sanitizer 가 침묵하는 경우) ----------------------
+#
+# 표본은 libsndfile 캠페인에서 실제로 나온 출력 원문이다
+# (tests/fixtures/sanitizer_logs/libfuzzer_deadly_signal.txt). 이 경로가 없으면
+# EXE 가 크래시 1건을 저장해도 ANA 는 0건을 받는다.
+
+def test_libfuzzer_deadly_signal_is_parsed_from_real_output():
+    findings = _parse_fixture("libfuzzer_deadly_signal.txt")
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.sanitizer == "LIBFUZZER"
+    assert finding.category == "deadly-signal"
+    assert finding.error_reason == "deadly signal"
+
+
+def test_libfuzzer_block_stops_at_its_own_summary():
+    """SUMMARY 뒤의 MS:/Base64:/stat:: 줄이 결함 로그에 딸려오면 안 된다."""
+    finding = _parse_fixture("libfuzzer_deadly_signal.txt")[0]
+    assert finding.raw_log[-1].startswith("SUMMARY: libFuzzer:")
+    assert not any(line.startswith("stat::") for line in finding.raw_log)
+    assert not any(line.startswith("Base64:") for line in finding.raw_log)
+
+
+def test_libfuzzer_crash_reaches_ana_as_a_record():
+    """파서 -> ANA 입력까지 실제로 이어지는지 본다(결함이 사라지던 지점)."""
+    from logosfuzz.analyze.models import CrashRecord
+
+    finding = _parse_fixture("libfuzzer_deadly_signal.txt")[0]
+    record = CrashRecord.from_finding(finding.to_dict(), group="sndfile_manual_fuzz")
+    assert record.category == "deadly-signal"
+    assert record.sanitizer == "LIBFUZZER"
+    assert record.group == "sndfile_manual_fuzz"
+    assert record.raw_log[0].endswith("ERROR: libFuzzer: deadly signal")
+
+
+def test_unsymbolized_stack_still_produces_a_finding():
+    """심볼라이저가 없으면 소스 위치가 안 나온다. 그래도 결함은 남아야 한다."""
+    finding = _parse_fixture("libfuzzer_deadly_signal.txt")[0]
+    assert finding.traceback == []
+    assert finding.signature == "deadly-signal_unknown"
+
+
+def test_libfuzzer_oom_and_timeout_are_classified_not_dropped():
+    assert classify_sanitizer_error("LIBFUZZER", "out-of-memory (malloc(1048576000))") == "oom"
+    assert classify_sanitizer_error("LIBFUZZER", "timeout after 60 seconds") == "timeout"
+    assert classify_sanitizer_error("LIBFUZZER", "fuzz target exited") == "unexpected-exit"
+    assert classify_sanitizer_error("LIBFUZZER", "something new") == "unknown"
+
+
+def test_sanitizer_report_wins_over_libfuzzer_summary_line():
+    """ASan 이 잡은 크래시는 ASan 결함 1건이어야 한다.
+
+    libFuzzer 는 이때 'SUMMARY: AddressSanitizer: ...' 를 찍지 'ERROR: libFuzzer:'
+    를 찍지 않는다. 새 규칙이 기존 ASan 블록을 쪼개지 않는지 확인한다.
+    """
+    findings = _parse_fixture("asan_heap_overflow.txt")
+    assert [f.sanitizer for f in findings] == ["ASAN"]

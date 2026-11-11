@@ -1,0 +1,8 @@
+ld.lld: error: undefined symbol: HAL_GetTick
+>>> referenced by proto_parser.c:49 (/home/user/LogosFuzz/examples/embedded/proto_parser.c:49)
+>>>               proto_parser.c.o:(proto_parse) in archive examples/embedded/build-fuzz/libproto.a
+
+ld.lld: error: undefined symbol: HAL_UART_Transmit
+>>> referenced by proto_parser.c:73 (/home/user/LogosFuzz/examples/embedded/proto_parser.c:73)
+>>>               proto_parser.c.o:(proto_parse) in archive examples/embedded/build-fuzz/libproto.a
+clang: error: linker command failed with exit code 1 (use -v to see invocation)

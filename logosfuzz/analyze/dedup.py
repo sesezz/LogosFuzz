@@ -1,18 +1,12 @@
-"""ANA-05-04: Crash Deduplication.
+"""ANA-05-04: Crash Deduplication
 
-EXE-04-02가 남긴 크래시 결함 스트림을 다중 프레임 시그니처 기준으로 묶어
-**고유 크래시 목록**을 만든다. 같은 버그를 가리키는 수백 개의 크래시 입력을
-하나의 대표로 접어(fold) 이후 단계(ANA-05-01 정/오탐 판별, ANA-05-02 CVE
-리포트)가 **버그 1개당 한 번만** 처리하도록 한다.
+EXE-04-02 크래시 결함 스트림의 다중 프레임 시그니처 기준 고유 크래시 목록 생성
 
-핵심 알고리즘
--------------
-1. 각 결함 레코드에서 다중 프레임 시그니처를 계산한다(``signature.py``).
-2. 시그니처가 같은 레코드를 한 클러스터로 병합한다.
-3. 처음 관측된 레코드를 대표로 삼고, 등장 순서를 보존한다(재현성).
+1. 결함 레코드별 다중 프레임 시그니처 계산 (``signature.py``)
+2. 같은 시그니처 레코드를 한 클러스터로 병합
+3. 처음 관측된 레코드를 대표로 지정, 등장 순서 보존
 
-무의존/결정성: 표준 라이브러리만 사용하며, 동일 입력이면 항상 동일한 클러스터
-집합과 순서를 낸다(정렬 키가 명확하므로 회귀 테스트가 안정적).
+동일 입력에 대해 항상 동일한 클러스터 집합과 순서 보장
 """
 
 from __future__ import annotations
@@ -25,7 +19,7 @@ from logosfuzz.analyze.signature import signature_digest, signature_key
 
 @dataclass
 class DedupStats:
-    """중복 제거 요약 통계."""
+    """중복 제거 요약 통계"""
 
     total_records: int
     unique_clusters: int
@@ -36,7 +30,7 @@ class DedupStats:
 
     @property
     def dedup_ratio(self) -> float:
-        """중복 제거율(0.0~1.0). 입력이 없으면 0.0."""
+        """중복 제거율 (0.0~1.0, 입력 없으면 0.0)"""
         if self.total_records == 0:
             return 0.0
         return self.duplicates_removed / self.total_records
@@ -51,20 +45,20 @@ class DedupStats:
 
 
 class CrashDeduplicator:
-    """시그니처 기반 크래시 중복 제거기.
+    """시그니처 기반 크래시 중복 제거기
 
     Args:
-        depth: 시그니처에 사용할 상위 애플리케이션 프레임 수(기본 3).
+        depth: 시그니처에 사용할 상위 애플리케이션 프레임 수 (기본 3)
     """
 
     def __init__(self, depth: int = 3) -> None:
         self.depth = depth
-        # 삽입 순서 보존(파이썬 dict는 3.7+에서 삽입 순서 유지)
+        # 삽입 순서 보존
         self._clusters: dict[str, CrashCluster] = {}
         self._count = 0
 
     def add(self, record: CrashRecord) -> CrashCluster:
-        """레코드 1건을 흡수하고, 소속 클러스터를 반환한다."""
+        """레코드 1건 흡수 및 소속 클러스터 반환"""
         key = signature_key(record, self.depth)
         cid = "CL-" + signature_digest(key)
         cluster = self._clusters.get(cid)
@@ -87,11 +81,11 @@ class CrashDeduplicator:
             self.add(r)
 
     def clusters(self) -> list[CrashCluster]:
-        """클러스터 목록.
+        """클러스터 목록
 
-        정렬 규칙(내림차순 우선순위):
-          1) count 큰 것 우선 — 자주 재현되는 버그가 대개 더 중요/실재적.
-          2) 처음 등장 순서(first_seen_index) — 동률일 때 결정성 보장.
+        정렬 규칙:
+          1) count 내림차순
+          2) 동률 시 처음 등장 순서(first_seen_index)
         """
         return sorted(
             self._clusters.values(),
@@ -110,7 +104,7 @@ class CrashDeduplicator:
 
 
 def deduplicate(records: list[CrashRecord], depth: int = 3) -> tuple[list[CrashCluster], DedupStats]:
-    """편의 함수: 레코드 목록 → (클러스터 목록, 통계)."""
+    """레코드 목록 → (클러스터 목록, 통계) 변환"""
     dedup = CrashDeduplicator(depth=depth)
     dedup.extend(records)
     return dedup.clusters(), dedup.stats()

@@ -32,7 +32,7 @@ def root(tmp_path):
 
 @pytest.fixture
 def db(root):
-    # fixture 의 @ROOT@ 를 실제 임시 경로로 바꿔 OS 에 맞는 절대경로를 만든다.
+    # fixture 의 @ROOT@ 를 실제 임시 경로로 치환 (OS 에 맞는 절대경로)
     text = FIXTURE.read_text(encoding="utf-8").replace("@ROOT@", root.as_posix())
     path = root / "build-fuzz" / "compile_commands.json"
     path.parent.mkdir(parents=True)
@@ -70,7 +70,7 @@ def test_duplicate_file_entries_are_merged(db, root):
     assert "EXTRA=1" in flags.defines
     # ../include 는 두 항목에 모두 있지만 한 번만
     assert flags.include_dirs.count(_n(str(root), "include")) == 1
-    # 첫 항목의 std 가 유지된다
+    # 첫 항목의 std 유지
     assert flags.std == "gnu99"
 
 

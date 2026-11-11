@@ -3,25 +3,25 @@
 # ==========================================================
 #
 # score::Result 의 오류 대안을 확인하지 않고 값을 꺼낼 때 어떤 크래시 로그가
-# 나오는지 **실제로 실행해서 원문 그대로** 모은다. triage.py 의 에러계약 위반
-# 판별(analyze/error_contract.py)이 이 코퍼스를 정답지로 쓴다.
+# 나오는지 **실제로 실행해서 원문 그대로** 수집. triage.py 의 에러계약 위반
+# 판별(analyze/error_contract.py)이 이 코퍼스를 정답지로 사용
 #
-# score::Result<T> 는 details::expected<T, Error> 이고 저장소가 std::variant 다.
+# score::Result<T> 는 details::expected<T, Error> 이고 저장소가 std::variant
 # 오류 상태에서 value() 를 부르면 std::get<0> 이 bad_variant_access 를 던지고,
-# operator* 는 noexcept 라 그 자리에서 std::terminate 로 죽는다. 어느 쪽이든
-# SIGABRT 이므로 ASan 이 스택을 찍게 handle_abort=1 을 켠다.
+# operator* 는 noexcept 라 즉시 std::terminate. 어느 쪽이든
+# SIGABRT 이므로 ASan 이 스택을 찍도록 handle_abort=1 설정
 #
 # 수집하는 두 경우 — 판별이 갈리는 지점이 바로 "누가 확인을 빠뜨렸나"다:
-#   harness_unchecked : 하네스가 ParseLength(...).value() 를 확인 없이 부른다
-#                       -> API 는 계약대로 오류를 돌려줬다. 하네스 결함(오탐)
+#   harness_unchecked : 하네스가 ParseLength(...).value() 를 확인 없이 호출
+#                       -> API 는 계약대로 오류 반환. 하네스 결함(오탐)
 #   library_unchecked : 공개 API PayloadEnd 가 내부에서 *ParseLength(...) 를
-#                       확인 없이 꺼낸다 -> 정상 호출로 재현되는 대상 결함(정탐)
+#                       확인 없이 사용 -> 정상 호출로 재현되는 대상 결함(정탐)
 #
-# baselibs 의 실제 score/result 소스로 빌드한다(형식을 추측하지 않는다):
+# baselibs 의 실제 score/result 소스로 빌드(형식을 추측하지 않음):
 #
 #   bash scripts/collect_error_contract_corpus.sh --baselibs <score-baselibs 체크아웃>
 #
-# baselibs 는 score/result 와 score/language/futurecpp 만 있으면 된다.
+# baselibs 는 score/result 와 score/language/futurecpp 만 필요
 
 set -euo pipefail
 
@@ -56,7 +56,7 @@ FLAGS=(-std=c++17 -g -O0 -fno-omit-frame-pointer -fsanitize=address,undefined
 printf '\x00\x07' > harness_unchecked.input   # 경로 0 + 1바이트(길이 필드 부족)
 printf '\x01\x07' > library_unchecked.input   # 경로 1 + 1바이트
 
-# 실행마다 바뀌는 값과 수집 환경 경로를 지운다(sanitizer_logs/_META.json 과 같은 규칙).
+# 실행마다 바뀌는 값과 수집 환경 경로 제거(sanitizer_logs/_META.json 과 같은 규칙)
 normalize() {
     sed -E \
         -e "s#${SCRATCH}#<SCRATCH>#g" \

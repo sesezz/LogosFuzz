@@ -129,7 +129,7 @@ def test_llm_triager_falls_back_on_bad_json():
     client = _ScriptedClient("판별 불가, JSON 없음")
     c = _cluster("use-after-free", [("/src/dlt/a.c", 1)], count=2)
     r = LLMTriager(client).triage(c)
-    # 폴백은 규칙 기반 결과 + 사유 신호
+    # 폴백: 규칙 기반 결과 + 사유 신호
     assert "llm-parse-failed" in r.signals
 
 

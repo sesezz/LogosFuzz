@@ -29,7 +29,7 @@ from typing import List
 
 OVERLAY_ROOT = Path(__file__).parent / "overlay"
 
-# append 대상 파일과 스니펫. 마커는 스니펫 첫 줄/끝 줄에 들어 있다.
+# append 대상 파일과 스니펫. 마커는 스니펫 첫 줄/끝 줄에 포함
 MODULE_MARKER = "logosfuzz overlay: rules_fuzzing"
 BAZELRC_MARKER = "logosfuzz overlay: fuzz config"
 
@@ -126,8 +126,11 @@ def revert(baselibs_root: Path) -> List[str]:
             removed.append(f"{filename} (마커 블록 제거)")
 
     fuzz_dir = baselibs_root / "score" / "json" / "fuzz"
-    if fuzz_dir.exists():
-        shutil.rmtree(fuzz_dir)
+    try:
+        shutil.rmtree(fuzz_dir)             # 존재 확인 없이 바로 삭제(검사-사용 경쟁조건 방지)
+    except FileNotFoundError:
+        pass                                # 이미 없으면 건너뜀
+    else:
         removed.append(str(fuzz_dir))
 
     return removed

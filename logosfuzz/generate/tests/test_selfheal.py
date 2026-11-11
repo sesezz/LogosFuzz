@@ -1,4 +1,4 @@
-"""GEN-03-02 자가 치유 루프 단위 테스트."""
+"""GEN-03-02 자가 치유 루프 단위 테스트"""
 from __future__ import annotations
 
 import unittest

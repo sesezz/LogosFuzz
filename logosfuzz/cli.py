@@ -1,20 +1,24 @@
-"""LogosFuzz CLI (EXE 파트).
+"""LogosFuzz CLI
 
 설계서 EXE-04-00 명세:
-  logosfuzz fuzz --engine <libfuzzer|afl++> --timeout <sec> --docker
+  logosfuzz fuzz --engine libfuzzer --timeout <sec> --docker [--profile targets/x.json]
+
+범용 대상 한 줄 E2E(EXT → SCH → GEN → BUILD → EXE → 커버리지 → ANA):
+  logosfuzz run --profile targets/libsndfile.json --budget 600 -o out/libsndfile
 
 로직 그룹 소스:
-  --groups <json> 로 명시하거나, 미지정 시 --harness-dir 안의 실행 파일들을
-  각각 하나의 그룹으로 자동 인식한다(SCH 산출물 연동 전까지의 편의 기능).
+  --groups <json> 로 명시, 미지정 시 --harness-dir 안의 실행 파일별 그룹 자동 인식
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
+from logosfuzz.common.logging import error_kind
 from logosfuzz.config import CoverageMode, Engine, FuzzConfig, LogicGroup
 from logosfuzz.execute.errors import ExecuteError
 from logosfuzz.execute.fuzz_session import FuzzSession
@@ -25,6 +29,37 @@ from logosfuzz.reporting.summary import (
     render_build_units_markdown,
     write_validation_summary,
 )
+
+logger = logging.getLogger(__name__)  # 예외 상세의 디버그 로그 기록용
+
+
+# 빌드 시스템별 기본 격리 이미지 태그
+#   bazel -> logosfuzz-exec:latest  (docker/Dockerfile, Bazel 구동 환경)
+#   그 외 -> logosfuzz-exec:generic (docker/Dockerfile.generic, clang/cmake/ninja)
+_EXEC_IMAGES = {"bazel": "logosfuzz-exec:latest"}
+_GENERIC_EXEC_IMAGE = "logosfuzz-exec:generic"
+_GENERIC_DOCKERFILE = Path("docker/Dockerfile.generic")
+_BAZEL_DOCKERFILE = Path("docker/Dockerfile")
+
+# CMakeAdapter / PrebuiltAdapter 기본 출력 위치 (프로필만 주면 여기서 하네스 바이너리 탐색)
+GENERIC_WORK_ROOT = Path("out") / "generic"
+
+
+def default_exec_image(build_system: str | None) -> str:
+    """``--image`` 미지정 시 build_system 별 기본 격리 이미지 태그 선택"""
+    return _EXEC_IMAGES.get((build_system or "bazel").lower(), _GENERIC_EXEC_IMAGE)
+
+
+def default_exec_dockerfile(build_system: str | None) -> Path:
+    """이미지 자동 빌드용 Dockerfile 선택 (범용 태그의 Bazel 판 빌드 방지)"""
+    if (build_system or "bazel").lower() == "bazel":
+        return _BAZEL_DOCKERFILE
+    return _GENERIC_DOCKERFILE
+
+
+def profile_harness_dir(profile) -> Path:
+    """프로필 대상 하네스 바이너리 기본 위치 (빌드 어댑터의 ``bin/``)"""
+    return GENERIC_WORK_ROOT / profile.name / "bin"
 
 
 def discover_groups(harness_dir: Path, groups_spec: Path | None) -> list:
@@ -38,7 +73,7 @@ def discover_groups(harness_dir: Path, groups_spec: Path | None) -> list:
                 corpus_dir=Path(g["corpus"]) if g.get("corpus") else None,
             ))
         return out
-    # 자동 탐색: harness_dir 안의 파일 각각을 그룹으로.
+    # 자동 탐색: harness_dir 안의 파일별 그룹 생성
     groups = []
     if harness_dir.exists():
         for f in sorted(harness_dir.iterdir()):
@@ -52,25 +87,42 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     f = sub.add_parser("fuzz", help="Docker 격리 환경에서 퍼징 실행 (EXE-04-01)")
+    f.add_argument("--profile", type=Path, default=None,
+                   help="대상 프로필 targets/*.json. 하네스 위치(out/generic/<name>/bin), "
+                        "빌드 시스템(이미지 선택), 시드(코퍼스 초기값)를 프로필에서 읽는다")
     f.add_argument("--engine", default="libfuzzer",
-                   help="퍼징 엔진: libfuzzer | afl++ (기본 libfuzzer)")
+                   help="퍼징 엔진: libfuzzer (AFL++ 는 실행 이미지에 없어 지원하지 않는다)")
     f.add_argument("--timeout", type=int, default=60,
                    help="그룹별 퍼징 시간(초, 기본 60)")
     f.add_argument("--docker", dest="docker", action="store_true", default=True,
                    help="Docker 격리 실행(기본값)")
     f.add_argument("--no-docker", dest="docker", action="store_false",
                    help="호스트에서 직접 실행(디버그용, 격리 없음)")
-    f.add_argument("--harness-dir", type=Path, default=Path("harnesses"),
-                   help="하네스(GEN 산출물) 디렉토리")
+    f.add_argument("--harness-dir", type=Path, default=None,
+                   help="하네스(GEN 산출물) 디렉토리 (기본: --profile 이면 "
+                        "out/generic/<name>/bin, 아니면 harnesses)")
     f.add_argument("--output", "-o", type=Path, default=Path("out"),
                    help="출력 디렉토리(crashes/, logs/, summary)")
     f.add_argument("--groups", type=Path, default=None,
                    help="로직 그룹 정의 JSON(미지정 시 harness-dir 자동 탐색)")
-    f.add_argument("--image", default="logosfuzz-exec:latest", help="격리 이미지 태그")
+    f.add_argument("--image", default=None,
+                   help="격리 이미지 태그. 미지정 시 --build-system 에 따라 자동 선택 "
+                        "(bazel -> logosfuzz-exec:latest, 그 외 -> logosfuzz-exec:generic)")
+    f.add_argument("--build-system", default=None,
+                   help="대상 빌드 시스템(이미지 자동 선택용). 기본: --profile 의 "
+                        "build.system, 프로필이 없으면 bazel")
     f.add_argument("--no-build", action="store_true", help="이미지 자동 빌드 생략")
+    f.add_argument("--minimize-corpus", action="store_true", default=False,
+                   help="퍼징 후 libFuzzer -merge=1 로 코퍼스 최소화")
+    f.add_argument("--no-symbolize", dest="symbolize", action="store_false", default=True,
+                   help="크래시 후처리 심볼라이즈(EXE-04-02) 생략. 기본은 실행 후 "
+                        "llvm-symbolizer로 스택의 파일:줄을 복원한다.")
     f.add_argument("--coverage", default="none",
                    help="커버리지 계측(EXE-04-04): none | llvm-cov | sancov (기본 none). "
                         "하네스가 해당 계측 플래그로 빌드돼 있어야 수집된다.")
+    f.add_argument("--fork", dest="fork_jobs", type=int, default=0,
+                   help="libFuzzer -fork=N -ignore_crashes=1 병렬 퍼징 (기본 0 = 단일 프로세스). "
+                        "Docker --cpus 는 N 이상으로 상향")
 
     # ANA 단계(Step 5/6): 크래시 중복 제거(ANA-05-04) → 정/오탐 판별(ANA-05-01)
     a = sub.add_parser("analyze",
@@ -81,11 +133,11 @@ def _build_parser() -> argparse.ArgumentParser:
     a.add_argument("--output", "-o", type=Path, default=None, help="통합 결과 JSON 저장 경로")
     a.add_argument("--source-root", help="대상 C/C++ 소스 트리(도달 가능성 증거 수집)")
     a.add_argument("--harness-dir", help="크래시를 낸 하네스 소스 디렉터리(선택)")
-    # 크래시 승인 게이트(CTR-06-02 CRASH_TRIAGE)·에러계약 KB 옵션은 ANA CLI와 공유한다.
+    # 크래시 승인 게이트(CTR-06-02 CRASH_TRIAGE)·에러계약 KB 옵션은 ANA CLI와 공유
     from logosfuzz.analyze.cli import add_gate_arguments
     add_gate_arguments(a)
 
-    # 승인 게이트에 쌓인 항목을 사람이 처리한다(logosfuzz review list/approve/...).
+    # 승인 게이트에 쌓인 항목을 사람이 처리(logosfuzz review list/approve/...)
     from logosfuzz.control.hitl.cli import register as register_review
     register_review(sub)
 
@@ -109,6 +161,9 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--environment", default="", help="실행 환경(local|ec2)")
     s.add_argument("--target", default="", help="검증 대상 이름")
     s.add_argument("--commit", dest="commit_sha", default="", help="검증한 커밋 SHA")
+
+    from logosfuzz.control.generic_run import add_run_parser
+    add_run_parser(sub)
 
     r = sub.add_parser(
         "regression",
@@ -155,7 +210,10 @@ def main(argv: list | None = None) -> int:
                 args.markdown.write_text(render_build_units_markdown(result),
                                          encoding="utf-8")
         except (OSError, ValidationSummaryError) as e:
-            print(f"[SUMMARY 오류] {e}", file=sys.stderr)
+            logger.debug("검증 요약 생성 실패 상세", exc_info=True)
+            # 예외 원문 대신 상황 설명과 오류 분류명만 출력
+            print(f"[SUMMARY 오류] 검증 요약 생성 실패: 입력 JSON 존재·형식 또는 "
+                  f"출력 경로 확인 필요 ({error_kind(e)})", file=sys.stderr)
             return 1
         print(
             f"[SUMMARY] 그룹 {result['metrics']['groups']}개 | "
@@ -180,9 +238,22 @@ def main(argv: list | None = None) -> int:
         return args.func(args)
 
     if args.command == "analyze":
-        # ANA 파트로 위임(설계서 기능 흐름도의 analyze 명령)
+        # ANA 파트 위임 (analyze 명령)
         from logosfuzz.analyze.cli import _run_analyze
-        return _run_analyze(args)
+        from logosfuzz.analyze.loader import AnalyzeInputError, input_error_reason
+        try:
+            return _run_analyze(args)
+        except AnalyzeInputError as e:
+            logger.debug("분석 입력 로드 실패 상세", exc_info=True)
+            # 예외 원문 대신 사용자 입력 경로와 사유 문구만 출력
+            inputs = ", ".join(str(i) for i in args.inputs)
+            print(f"[ANA 오류] 분석 입력 로드 실패: {inputs} — {input_error_reason(e)}",
+                  file=sys.stderr)
+            return 1
+
+    if args.command == "run":
+        from logosfuzz.control.generic_run import main_run
+        return main_run(args)
 
     if args.command == "regression":
         from logosfuzz.execute.regression import RegressionRunner
@@ -191,7 +262,10 @@ def main(argv: list | None = None) -> int:
                 args.manifest, failed_only=args.failed_only
             )
         except (OSError, ValueError) as e:
-            print(f"[REGRESSION 오류] {e}", file=sys.stderr)
+            logger.debug("회귀 매니페스트 처리 실패 상세", exc_info=True)
+            # 예외 원문 대신 매니페스트 경로와 오류 분류명만 출력
+            print(f"[REGRESSION 오류] 회귀 매니페스트 처리 실패: {args.manifest} "
+                  f"({error_kind(e)})", file=sys.stderr)
             return 1
         print(
             f"[REGRESSION] {summary['suite']} | 총 {summary['total']}건 | "
@@ -203,34 +277,79 @@ def main(argv: list | None = None) -> int:
     if args.command != "fuzz":
         return 2
 
+    profile = None
+    if args.profile:
+        from logosfuzz.common.target_profile import ProfileError, load_profile
+        try:
+            profile = load_profile(args.profile)
+        except ProfileError as e:
+            print(f"[프로필 오류] {e}", file=sys.stderr)
+            return 1
+    build_system = args.build_system or (profile.build.system if profile else "bazel")
+    harness_dir = args.harness_dir or (
+        profile_harness_dir(profile) if profile else Path("harnesses"))
+
     try:
         engine = Engine.parse(args.engine)
         config = FuzzConfig(
             engine=engine,
             timeout_sec=args.timeout,
             use_docker=args.docker,
-            harness_dir=args.harness_dir,
+            harness_dir=harness_dir,
             output_dir=args.output,
-            image=args.image,
+            image=args.image or default_exec_image(build_system),
+            dockerfile=default_exec_dockerfile(build_system),
             coverage=CoverageMode.parse(args.coverage),
+            symbolize_crashes=args.symbolize,
+            fork_jobs=max(0, args.fork_jobs),
+            minimize_corpus=args.minimize_corpus,
         )
-        groups = discover_groups(args.harness_dir, args.groups)
+        groups = discover_groups(harness_dir, args.groups)
         if not groups:
-            print(f"[오류] 실행할 로직 그룹이 없습니다. --harness-dir({args.harness_dir}) "
+            print(f"[오류] 실행할 로직 그룹이 없습니다. --harness-dir({harness_dir}) "
                   f"또는 --groups를 확인하세요.", file=sys.stderr)
             return 1
+        if profile is not None:
+            from logosfuzz.execute.seeds import profile_seed_paths, seed_group_corpora
+
+            seeds = profile_seed_paths(profile)
+            groups = seed_group_corpora(groups, seeds, args.output / "corpus")
+            print(f"[SEED] 프로필 시드 {len(seeds)}개 경로 -> {args.output / 'corpus'}/<group>/")
 
         session = FuzzSession(config)
         summary = session.run(groups, ensure_image=not args.no_build)
         if summary.total_crashes:
-            return 3  # 3: 크래시 발견(analyze 필요)
+            return 3  # 3: 크래시 발견 (analyze 필요)
         if summary.failed_groups:
-            return 4  # 4: 하네스가 실행되지 못한 그룹이 있음(퍼징이 실제로 안 돎)
+            return 4  # 4: 하네스 미실행 그룹 존재
         return 0
     except ExecuteError as e:
-        print(f"[EXE 오류] {e}", file=sys.stderr)
+        logger.debug("퍼징 실행 실패 상세", exc_info=True)
+        # 예외 원문 대신 예외 종류별 고정 안내와 사용자 입력값만 출력
+        print(f"[EXE 오류] {_execute_error_message(e, args, harness_dir)}", file=sys.stderr)
         return 1
 
+
+
+def _execute_error_message(exc: ExecuteError, args: argparse.Namespace,
+                           harness_dir: Path) -> str:
+    """EXE 오류 사용자 안내 (예외 원문 대신 예외 종류별 고정 문구와 사용자 입력값으로 구성)"""
+    from logosfuzz.execute.errors import (
+        DockerUnavailableError,
+        HarnessNotFoundError,
+        ImageBuildError,
+        InvalidEngineError,
+    )
+
+    if isinstance(exc, InvalidEngineError):
+        return f"지원하지 않는 퍼징 엔진: {args.engine} (libfuzzer 만 지원, AFL++ 미지원)"
+    if isinstance(exc, DockerUnavailableError):
+        return "Docker 사용 불가 — docker 설치·데몬 실행 상태 확인 필요"
+    if isinstance(exc, ImageBuildError):
+        return "격리 실행 이미지 빌드 실패 — Dockerfile·Docker 빌드 로그 확인 필요"
+    if isinstance(exc, HarnessNotFoundError):
+        return f"하네스 산출물 없음 — --harness-dir({harness_dir}) 확인 필요"
+    return f"퍼징 실행 실패 — --coverage({args.coverage}) 등 옵션 값 확인 필요 ({error_kind(exc)})"
 
 if __name__ == "__main__":
     raise SystemExit(main())

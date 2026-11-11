@@ -1,8 +1,8 @@
-"""ANA-05-03 역피드백의 Bazel 타깃 단위 동작(4주차).
+"""ANA-05-03 역피드백의 Bazel 타깃 단위 동작(4주차)
 
 같은 타깃의 API들은 같은 하네스·상태 객체를 공유하므로, 한 API에서 확정된 오탐
-원인은 그 타깃의 다음 하네스 전체가 알아야 한다. 빌드 정보가 없는 구 KB는
-예전처럼 API 단위로 남는다.
+원인은 그 타깃의 다음 하네스 전체가 알아야 함. 빌드 정보가 없는 구 KB는
+예전처럼 API 단위로 기록
 """
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def test_proposal_scope_is_the_owning_bazel_target():
     assert proposal.build_target == JSON
     assert proposal.scope == JSON
     assert proposal.affected_api_ids == [1, 2]  # 같은 타깃의 FromFile 까지
-    assert "(FromBuffer)" in proposal.after_text  # 한 노트에 여러 API가 섞이므로 이름을 남긴다
+    assert "(FromBuffer)" in proposal.after_text  # 한 노트에 여러 API가 섞이므로 이름 기록
 
 
 def test_second_false_positive_from_other_api_accumulates_in_target_note():
@@ -114,7 +114,7 @@ def test_commit_writes_target_note_and_rebuild_reaches_every_api_in_target():
     proposal = propose_kb_update(_analysis(), "h1", store, embed=False, kb=kb)
     commit.apply_kb_update(proposal, store)
 
-    assert store.get(1) is None  # API 노트가 아니라 타깃 노트로 들어간다
+    assert store.get(1) is None  # API 노트가 아닌 타깃 노트로 저장
     assert store.get_target(JSON)["api_ids"] == [1]
 
     rebuilt = rebuild_with_overrides(kb, store)
@@ -181,7 +181,7 @@ def test_approved_feedback_regenerates_whole_target():
 
     outcome = run_ana_05_03(_crash(), kb, llm, hitl, store, audit, compiler=FakeCompiler())
 
-    # 검토자는 타깃 단위 변경임을 승인 전에 본다
+    # 검토자는 타깃 단위 변경임을 승인 전에 확인
     item = seen[0]
     assert item.checkpoint is Checkpoint.KB_FEEDBACK
     assert item.target == JSON
@@ -193,7 +193,7 @@ def test_approved_feedback_regenerates_whole_target():
     assert regen.logic_group == JSON and regen.build_target == JSON
     draft_prompt = llm.calls[1]
     assert "FromFile" in draft_prompt  # 오탐이 안 난 같은 타깃 API에도
-    assert draft_prompt.count("Init 없이") >= 2  # 노트가 API마다 실린다
+    assert draft_prompt.count("Init 없이") >= 2  # 노트가 API마다 포함
 
     trail = audit.for_build_target(JSON)
     assert {e["type"] for e in trail} == {"proposal", "regeneration"}

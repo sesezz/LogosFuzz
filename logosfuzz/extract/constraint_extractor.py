@@ -1,8 +1,7 @@
-"""EXT-01-02: C/C++ 소스에서 API 제약조건(constraint)을 추출한다.
+"""EXT-01-02: C/C++ 소스의 API 제약조건(constraint) 추출
 
-`logosfuzz.extract.ast_analyzer`가 파일 단위의 거친 구조를 본다면, 이 모듈은 함수 단위로
-"이 API를 호출하려면 무엇이 참이어야 하는가"를 추출한다. 추출 결과는
-`logosfuzz.knowledge.rag_constraints`가 RAG 지식베이스로 색인한다.
+함수 단위로 "이 API 호출 전 참이어야 하는 조건" 추출
+(결과는 `logosfuzz.knowledge.rag_constraints`가 RAG 지식베이스로 색인)
 
 추출하는 제약조건 종류:
   - null_check   : 포인터 인자에 대한 NULL 검사 (호출 전 non-NULL 요구)
@@ -16,9 +15,8 @@
   - risky_call   : 길이 검증이 필요한 위험 API 사용
   - doc          : 주석에 서술된 제약조건
 
-score::Result 계약은 S-CORE(자동차) 전용 관용구다. ``profile.domain == "automotive"``
-이거나 호출자가 ``score_result=True`` 를 명시했을 때만 추출한다. 프로필이 없거나
-generic/embedded 프로필이면 끈다(범용 C 코드의 ``Result<`` 오탐 방지).
+score::Result 계약은 S-CORE(자동차) 전용 관용구로, ``profile.domain == "automotive"``
+또는 ``score_result=True`` 명시 시에만 추출 (범용 C 코드의 ``Result<`` 오탐 방지)
 
 사용법:
   python -m logosfuzz.extract.constraint_extractor examples --output build/constraints.json
@@ -101,9 +99,8 @@ INT_TYPE_RE = re.compile(
     r"\b(int|long|short|char|size_t|ssize_t|unsigned|signed|uint\w*|u?int\d+_t|"
     r"u?intptr_t|off_t|ptrdiff_t)\b"
 )
-# 분기 본문이 "입력을 거부하는 경로"인지 "정상 계산 경로"인지 가른다.
-# `if (x != 0) { return compute(x); }` 처럼 값을 돌려주는 분기를 거부 검사로
-# 오해하면 제약조건의 부등호가 뒤집혀 완전히 틀린 결론이 나온다.
+# 분기 본문의 "입력 거부 경로" / "정상 계산 경로" 구분
+# (값 반환 분기를 거부 검사로 오인하면 제약조건 부등호가 뒤집힘)
 ERROR_RETURN_RE = re.compile(r"\breturn\s*\(?\s*(?:-\s*\d+|NULL|nullptr|false)\s*\)?\s*;")
 ERROR_GOTO_RE = re.compile(
     r"\bgoto\s+\w*(?:err|fail|cleanup|bail|invalid|abort|done|end|exit)\w*", re.I
@@ -140,9 +137,9 @@ RESULT_UNEXPECT_RE = re.compile(
 def score_result_enabled(
     profile: Optional["TargetProfile"] = None, score_result: Optional[bool] = None
 ) -> bool:
-    """score::Result 계약 추출을 켤지 결정한다.
+    """score::Result 계약 추출 여부 결정
 
-    ``score_result`` 를 명시하면 그 값이 우선이고, 아니면 자동차 프로필일 때만 켠다.
+    ``score_result`` 명시값 우선, 미지정 시 자동차 프로필일 때만 활성화
     """
     if score_result is not None:
         return bool(score_result)
@@ -160,7 +157,7 @@ REJECT_PREFIX_TAIL = set("=,([?:!+/%<>&|^.~")
 
 @dataclass
 class Constraint:
-    """함수 하나에 대한 단일 제약조건."""
+    """함수 하나에 대한 단일 제약조건"""
 
     kind: str
     target: str
@@ -187,7 +184,7 @@ class Param:
 
 @dataclass
 class FunctionFacts:
-    """RAG 색인 단위가 되는 함수 하나의 사실 묶음."""
+    """RAG 색인 단위인 함수 하나의 사실 묶음"""
 
     name: str
     file: str
@@ -197,8 +194,7 @@ class FunctionFacts:
     params: List[Param] = field(default_factory=list)
     doc: str = ""
     calls: List[str] = field(default_factory=list)
-    # 본문에 나타난 순서 그대로의 호출 목록(중복 포함). SCH-02-02 의 call_seq
-    # ("소비자 코드에서 뽑은 실제 호출 순서")를 만들려면 순서가 필요하다.
+    # 본문 등장 순서 그대로의 호출 목록 (중복 포함, SCH-02-02 call_seq 생성용)
     call_sequence: List[str] = field(default_factory=list)
     constraints: List[Constraint] = field(default_factory=list)
 
@@ -223,10 +219,9 @@ class FunctionFacts:
 
 
 def mask_source(text: str) -> str:
-    """주석/문자열/전처리기 라인을 공백으로 치환한 텍스트를 만든다.
+    """주석/문자열/전처리기 라인을 공백으로 치환한 텍스트 생성
 
-    오프셋과 줄 번호가 원본과 1:1로 유지되므로, 구조 파싱은 마스킹된 텍스트로
-    하고 사람이 읽을 조각은 원본에서 잘라내면 된다.
+    오프셋·줄 번호가 원본과 1:1 유지 (구조 파싱은 마스킹본, 표시용 조각은 원본 사용)
     """
     out = list(text)
     n = len(text)
@@ -292,7 +287,7 @@ def mask_source(text: str) -> str:
 
 
 class LineIndex:
-    """문자 오프셋을 1-based 줄 번호로 바꾼다."""
+    """문자 오프셋의 1-based 줄 번호 변환"""
 
     def __init__(self, text: str) -> None:
         self._starts = [0]
@@ -305,7 +300,7 @@ class LineIndex:
 
 
 def match_delim(text: str, open_pos: int, open_ch: str = "(", close_ch: str = ")") -> Optional[int]:
-    """`open_pos`의 여는 기호와 짝이 되는 닫는 기호 위치를 찾는다."""
+    """`open_pos`의 여는 기호와 짝이 되는 닫는 기호 위치 탐색"""
     if open_pos >= len(text) or text[open_pos] != open_ch:
         return None
     depth = 0
@@ -321,7 +316,7 @@ def match_delim(text: str, open_pos: int, open_ch: str = "(", close_ch: str = ")
 
 
 def split_top_level(text: str, sep: str = ",") -> List[str]:
-    """괄호 깊이 0에서만 잘라 인자 목록을 나눈다 (함수 포인터 인자 대응)."""
+    """괄호 깊이 0에서만 인자 목록 분할 (함수 포인터 인자 대응)"""
     parts: List[str] = []
     depth = 0
     current: List[str] = []
@@ -378,7 +373,7 @@ def parse_params(param_text: str) -> List[Param]:
 
 
 def extract_doc_comment(text: str, decl_start: int) -> str:
-    """함수 선언 바로 위에 붙은 주석 블록을 원본에서 찾아온다."""
+    """함수 선언 바로 위 주석 블록을 원본에서 추출"""
     head = text[:decl_start]
     stripped = head.rstrip()
     if stripped.endswith("*/"):
@@ -457,31 +452,28 @@ def _return_type_from_prefix(prefix: str) -> str:
     return " ".join(without_scope.split())
 
 
-# 함수를 매크로로 감싸 선언·정의하는 라이브러리가 있다. libpng 이 대표적이다.
+# 매크로로 감싼 함수 선언·정의 대응 (예: libpng)
 #
 #   PNG_FUNCTION(png_structp, PNGAPI
 #   png_create_read_struct,(png_const_charp v, ...), PNG_ALLOCATED)
 #   { ... }
 #
-# 이걸 그대로 스캔하면 함수 이름이 `PNG_FUNCTION` 으로 잡히고, 진짜 API 는
-# 지식베이스에서 통째로 사라진다. 실제로 libpng 색인에서
-# `png_create_read_struct` 가 빠져 GEN 이 하네스를 만들 때 참조할 수 없었다.
+# 그대로 스캔 시 함수 이름이 `PNG_FUNCTION` 으로 잡혀 실제 API 누락
 _MACRO_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,}$")
 
 
 def destructure_macro_declaration(args: str, offset: int = 0):
-    """매크로 인자에서 (함수명, 이름 위치, 파라미터 범위, 반환형)을 분해한다.
+    """매크로 인자의 (함수명, 이름 위치, 파라미터 범위, 반환형) 분해
 
-    규칙은 하나다 — **마지막 최상위 괄호 그룹이 파라미터 목록**이고, 그 앞의
-    마지막 식별자가 함수 이름이다. 이 규칙 하나로 선언(PNG_EXPORT)과
-    정의(PNG_FUNCTION) 양쪽이 처리된다.
+    마지막 최상위 괄호 그룹 = 파라미터 목록, 그 앞 마지막 식별자 = 함수 이름
+    (선언 PNG_EXPORT, 정의 PNG_FUNCTION 공통 규칙)
 
         PNG_EXPORT(64, void, png_destroy_read_struct, (png_structpp a, ...))
                                 ^이름                  ^파라미터
         PNG_FUNCTION(png_structp, PNGAPI png_create_read_struct, (...), ATTR)
                                          ^이름                    ^파라미터
 
-    찾지 못하면 None.
+    찾지 못하면 None
     """
     depth = 0
     group = None            # (열린 위치, 닫힌 위치) — 마지막 최상위 괄호 그룹
@@ -504,10 +496,9 @@ def destructure_macro_declaration(args: str, offset: int = 0):
         return None
     name_match = identifiers[-1]
 
-    # 반환형 정리. 매크로마다 앞에 붙는 것이 다르다.
-    #   PNG_EXPORT(64, void, name, (...))       -> 색인 번호 64 를 버린다
-    #   PNG_FUNCTION(png_structp, PNGAPI name, ...) -> 호출 규약 PNGAPI 를 버린다
-    # 숫자만인 조각과 대문자 매크로(호출 규약/속성)를 걷어내고 남은 것을 쓴다.
+    # 반환형 정리: 숫자 조각과 대문자 매크로(호출 규약/속성) 제거
+    #   PNG_EXPORT(64, void, name, (...))       -> 색인 번호 64 제거
+    #   PNG_FUNCTION(png_structp, PNGAPI name, ...) -> 호출 규약 PNGAPI 제거
     segments = [s.strip() for s in head[: name_match.start()].split(",")]
     kept = [s for s in segments if s and not s.isdigit() and not _MACRO_NAME_RE.match(s)]
     if not kept:
@@ -522,7 +513,7 @@ def destructure_macro_declaration(args: str, offset: int = 0):
 
 
 def find_functions(masked: str) -> List[dict]:
-    """함수 정의의 위치 정보를 찾는다. (중첩된 정의는 건너뛴다)"""
+    """함수 정의의 위치 정보 탐색 (중첩 정의 제외)"""
     found: List[dict] = []
     scan_from = 0
 
@@ -562,11 +553,8 @@ def find_functions(masked: str) -> List[dict]:
         raw_prefix = _decl_prefix(masked, match.start())
         prefix = raw_prefix.strip()
 
-        # 매크로로 감싼 정의라면 진짜 함수 이름·파라미터로 바꿔 끼운다.
-        # 이 판정은 **prefix 검사보다 먼저** 해야 한다. 매크로 정의는 반환형이
-        # 매크로 인자 안에 있어서 앞에 아무 토큰도 없고, 그러면 아래 prefix
-        # 검사에 걸려 통째로 버려진다. libpng 의 png_create_read_struct 가
-        # 정확히 그렇게 사라졌다.
+        # 매크로로 감싼 정의는 실제 함수 이름·파라미터로 교체
+        # (반환형이 매크로 인자 안에 있어 prefix 가 비므로 prefix 검사보다 먼저 판정 필요)
         entry_name, entry_name_start = name, match.start()
         entry_params = (paren_open + 1, paren_close)
         entry_return = trailing_return or _return_type_from_prefix(prefix)
@@ -589,7 +577,7 @@ def find_functions(masked: str) -> List[dict]:
             if not prefix_tokens or prefix_tokens[-1] in CONTROL_KEYWORDS:
                 continue
         elif prefix and _has_rejected_prefix_tail(prefix):
-            continue  # 매크로라도 호출식 한가운데면 정의가 아니다
+            continue  # 매크로라도 호출식 한가운데면 정의 아님
 
         body_end = match_delim(masked, pos, "{", "}")
         if body_end is None:
@@ -598,8 +586,7 @@ def find_functions(masked: str) -> List[dict]:
         found.append(
             {
                 "name": entry_name,
-                # 반환형이 시작되는 위치. 마스킹된 주석은 공백이므로 lstrip 하면
-                # 실제 선언 첫 글자로 이동한다 (그 앞이 doc 주석 영역).
+                # 반환형 시작 위치 (마스킹된 주석은 공백이라 lstrip 시 선언 첫 글자, 그 앞이 doc 주석 영역)
                 "decl_start": match.start() - len(raw_prefix.lstrip()),
                 "name_start": entry_name_start,
                 "params_span": entry_params,
@@ -622,10 +609,9 @@ def _param_map(params: Sequence[Param]) -> Dict[str, Param]:
 
 
 def dedupe_constraints(constraints: Sequence[Constraint]) -> List[Constraint]:
-    """같은 제약조건의 반복을 하나로 합치고 등장 횟수를 센다.
+    """같은 제약조건 반복을 하나로 병합하고 등장 횟수 집계
 
-    생성된 코드는 같은 assert 를 수천 번 반복하기도 한다. 그대로 두면 문서
-    하나가 색인 전체의 단어 빈도를 왜곡한다.
+    생성 코드의 대량 반복 assert 로 인한 색인 단어 빈도 왜곡 방지
     """
     first: Dict[tuple, Constraint] = {}
     ordered: List[Constraint] = []
@@ -646,7 +632,7 @@ def _snippet(text: str, start: int, end: int) -> str:
 
 
 def _branch_segment(masked: str, close_pos: int, window: int = 200) -> str:
-    """`if (...)` 의 닫는 괄호 뒤에 오는 분기 본문만 정확히 잘라낸다."""
+    """`if (...)` 닫는 괄호 뒤 분기 본문만 추출"""
     start = _skip_ws(masked, close_pos + 1)
     if start >= len(masked):
         return ""
@@ -660,11 +646,10 @@ def _branch_segment(masked: str, close_pos: int, window: int = 200) -> str:
 
 
 def _classify_branch(masked: str, close_pos: int, score_result: bool = False) -> str:
-    """분기 본문을 error_exit / plain_exit / none 으로 분류한다.
+    """분기 본문의 error_exit / plain_exit / none 분류
 
-    error_exit 일 때만 "호출자가 만족시켜야 하는 조건"으로 부등호를 뒤집는다.
-    ``MakeUnexpected``/``Unexpected{`` 반환은 score::Result 관용구이므로
-    ``score_result`` 가 켜져 있을 때만 오류 탈출로 본다.
+    error_exit 일 때만 부등호를 뒤집어 호출자 조건으로 해석
+    ``MakeUnexpected``/``Unexpected{`` 반환은 ``score_result`` 활성 시에만 오류 탈출로 간주
     """
     segment = _branch_segment(masked, close_pos)
     if (
@@ -680,7 +665,7 @@ def _classify_branch(masked: str, close_pos: int, score_result: bool = False) ->
 
 
 def _conditions(masked: str, body_span) -> List[tuple]:
-    """본문 안의 모든 `if (...)` 조건에 대해 (조건 시작, 조건 끝, 닫는 괄호) 반환."""
+    """본문 안 모든 `if (...)` 조건의 (조건 시작, 조건 끝, 닫는 괄호) 반환"""
     start, end = body_span
     conditions = []
     for match in IF_RE.finditer(masked, start, end):
@@ -703,7 +688,7 @@ def _null_constraints(cond_masked: str, cond_original: str, params: Dict[str, Pa
             return
         seen.add(target)
 
-        # `if (p == NULL) { p = fallback; }` 는 NULL을 금지하는 게 아니라 허용한다.
+        # `if (p == NULL) { p = fallback; }` 는 NULL 금지가 아닌 허용
         if negated and branch == BRANCH_NO_EXIT:
             constraints.append(
                 Constraint(
@@ -767,8 +752,7 @@ def _range_constraints(cond_masked: str, cond_original: str, params: Dict[str, P
             description = f"'{target}' is validated on entry; callers must satisfy {required}"
             confidence = 0.8
         else:
-            # 거부 경로가 아니면 부등호를 뒤집으면 안 된다. 다만 비교에 쓰인 값은
-            # 퍼징에서 시도해 볼 만한 경계값이다.
+            # 거부 경로가 아니면 부등호 유지, 비교값은 퍼징 경계값 후보
             left, operator, right = comparison
             description = (
                 f"'{target}' is compared as `{left} {operator} {right}` on a non-rejecting "
@@ -1043,10 +1027,9 @@ def _doc_constraints(doc: str, line: int) -> List[Constraint]:
 
 
 def doc_constraints(doc: str, line: int) -> List[Constraint]:
-    """주석 텍스트만으로 제약조건을 뽑는다.
+    """주석 텍스트만으로 제약조건 추출
 
-    EXT-01-04 가 헤더 선언부의 문서를 구현 함수에 결합할 때 쓴다. C 프로젝트는
-    보통 `.h` 의 선언에 문서를 달고 `.c` 의 정의에는 달지 않는다.
+    EXT-01-04 의 헤더 선언부 문서 → 구현 함수 결합용 (C 는 보통 `.h` 선언에만 문서 존재)
     """
     return _doc_constraints(doc, line)
 
@@ -1058,10 +1041,10 @@ def extract_from_text(
     profile: Optional["TargetProfile"] = None,
     score_result: Optional[bool] = None,
 ) -> List[FunctionFacts]:
-    """소스 텍스트에서 함수별 제약조건을 뽑는다.
+    """소스 텍스트의 함수별 제약조건 추출
 
-    ``profile``/``score_result`` 는 :func:`score_result_enabled` 로 score::Result
-    계약 추출 여부만 정한다. 나머지 추출은 프로필과 무관하게 같다.
+    ``profile``/``score_result`` 는 :func:`score_result_enabled` 를 통한 score::Result
+    계약 추출 여부에만 영향 (나머지 추출은 프로필 무관)
     """
     use_score = score_result_enabled(profile, score_result)
     masked = mask_source(text)

@@ -1,5 +1,4 @@
-/* 소비자 코드. SCH-02-02 의 call_seq("실제 API 호출 순서")는 이런 코드에서
- * 관찰된 호출 순서로 만들어진다. */
+/* 소비자 코드: SCH-02-02 call_seq("실제 API 호출 순서")의 관찰 대상 */
 #include "uds.h"
 
 #include <stdio.h>
